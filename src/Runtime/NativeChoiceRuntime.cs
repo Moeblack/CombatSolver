@@ -155,6 +155,8 @@ internal sealed class NativeChoiceSession : IDisposable
         new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
     private readonly TaskCompletionSource<NativeChoiceRequest> _firstVisibleRequest = new(
         TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _allPlansConsumed = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly object _firstSurfaceSync = new();
     private readonly HashSet<long> _visibleTraceSequences = [];
     private Task<NativeChoiceSurfaceLock>? _firstSurfaceTask;
@@ -239,8 +241,23 @@ internal sealed class NativeChoiceSession : IDisposable
         if (_plans != null)
             throw new InvalidOperationException($"原生选牌会话 {Owner} 已经安装计划。");
         _plans = plans;
+        if (plans.Count == 0)
+            _allPlansConsumed.TrySetResult();
         _driverCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
         _driver = DriveAsync(host, _driverCancellation.Token);
+    }
+
+    public async Task WaitForAllPlansConsumedAsync(CancellationToken token)
+    {
+        Task driver = _driver
+            ?? throw new InvalidOperationException($"原生选牌会话 {Owner} 尚未启动驱动器。");
+        Task winner = await Task.WhenAny(_allPlansConsumed.Task, driver).WaitAsync(token);
+        if (ReferenceEquals(winner, driver))
+        {
+            await driver;
+            throw new InvalidOperationException($"原生选牌会话 {Owner} 在消费全部计划前结束。");
+        }
+        await _allPlansConsumed.Task.WaitAsync(token);
     }
 
     public async Task AwaitProducerAndCompleteAsync(Task producerTask)
@@ -329,6 +346,8 @@ internal sealed class NativeChoiceSession : IDisposable
                 $"selected={string.Join(',', selected.Select(CardChoiceSupport.ChoiceCardKey))}");
             NativeChoiceRuntime.RecordTrace(this, request, "Selected");
             planIndex++;
+            if (planIndex == plans.Count)
+                _allPlansConsumed.TrySetResult();
         }
 
         while (planIndex < plans.Count && plans[planIndex].Cards.Count == 0)
