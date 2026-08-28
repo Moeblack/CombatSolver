@@ -1,0 +1,1510 @@
+using System.Diagnostics;
+using System.IO.Compression;
+using System.Text;
+using System.Text.Json;
+using Godot;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Combat.History.Entries;
+using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Entities.Orbs;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
+using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Hooks;
+using MegaCrit.Sts2.Core.Map;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Orbs;
+using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.Rooms;
+using MegaCrit.Sts2.Core.Rooms;
+using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Saves;
+using MegaCrit.Sts2.Core.Settings;
+using MegaCrit.Sts2.Core.ValueProps;
+using CombatSolver.Engine.Common;
+using CombatSolver.Engine.InCombat.Simulation;
+
+namespace CombatSolver;
+
+internal sealed partial class UnattendedTestRunner
+{
+    private static readonly ProtocolHost Host = new();
+
+    public static bool IsActive => Host.IsActive;
+    public static bool AutomaticTurnSearchEnabled => Host.AutomaticTurnSearchEnabled;
+    public static bool VerifyIncrementalSearch => Host.VerifyIncrementalSearch;
+    public static bool ForceShortSearchOnly => Host.ForceShortSearchOnly;
+    public static bool MeasureSearchPhases => Host.MeasureSearchPhases;
+    public static int? ShortSearchBudgetOverrideMilliseconds => Host.ShortSearchBudgetOverrideMilliseconds;
+    public static int? DeepSearchBudgetOverrideMilliseconds => Host.DeepSearchBudgetOverrideMilliseconds;
+
+    private readonly NGame _host;
+    private readonly UnattendedTestRequest _request;
+    private readonly ProtocolHost _protocolHost;
+    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+    private readonly List<string> _completedChecks = [];
+    private readonly Writer _writer;
+    private readonly ScenarioBuilder _scenarioBuilder;
+    private readonly Assertions _assertions;
+    private readonly Executor _executor;
+    private string _stage = "created";
+
+    private UnattendedTestRunner(NGame host, UnattendedTestRequest request, ProtocolHost protocolHost)
+    {
+        _host = host;
+        _request = request;
+        _protocolHost = protocolHost;
+        _writer = new Writer(request, _stopwatch, _completedChecks);
+        _scenarioBuilder = new ScenarioBuilder(this);
+        _assertions = new Assertions(this);
+        _executor = new Executor(this);
+    }
+
+    public static void TryStart(NGame? host) => Host.TryStart(host);
+
+    internal static Task ApplyScheduledStateDriftAsync(CombatState state, int turn)
+        => Host.ApplyScheduledStateDriftAsync(state, turn);
+
+    internal static Task ApplyScheduledPreEndTurnDriftAsync(CombatState state, int turn)
+        => Host.ApplyScheduledPreEndTurnDriftAsync(state, turn);
+
+    private async Task RunAsync()
+    {
+        CombatState? combatState = null;
+        int startedTurn = 0;
+        try
+        {
+            ScenarioContext scenario = await _scenarioBuilder.BuildAsync();
+            combatState = scenario.CombatState;
+            startedTurn = scenario.StartedTurn;
+
+            await _assertions.RunBeforeExecutionAsync(scenario);
+
+            ExecutionOutcome outcome = await _executor.ExecuteAsync(scenario);
+            if (outcome.InitialSearchHeld)
+            {
+                SetStage("initial_search_held");
+                RuntimeMemorySnapshot heldMemory = _writer.Write(
+                    "Passed",
+                    _stage,
+                    scenario.Character.Id.ToString(),
+                    scenario.Encounter.Id.ToString(),
+                    combatEnded: false,
+                    startedTurn,
+                    finishedTurn: startedTurn);
+                Entry.Logger.Info(
+                    $"[CombatSolver/Unattended] PASSED run_id={_request.RunId} scenario={_request.ScenarioId} " +
+                    $"stage=initial_search_held elapsed_ms={_stopwatch.Elapsed.TotalMilliseconds:F1} " +
+                    $"managed_heap_bytes={heldMemory.ManagedHeapBytes} fragmented_bytes={heldMemory.ManagedFragmentedBytes} " +
+                    $"working_set_bytes={heldMemory.WorkingSetBytes} private_bytes={heldMemory.PrivateMemoryBytes}");
+                return;
+            }
+            _assertions.AssertAfterExecution(scenario, outcome);
+
+            SetStage("cleanup");
+            await _host.ReturnToMainMenu();
+            EnsureWithinDeadline();
+            if (_request.ExportBugReportAfterCombat)
+            {
+                SetStage("export_bug_report_after_combat");
+                string directory = ProjectSettings.GlobalizePath("user://combat-solver-test-bug-reports");
+                string archivePath = await CombatBugReportExporter.ExportCurrentAsync(directory);
+                using ZipArchive archive = ZipFile.OpenRead(archivePath);
+                AssertBugReportArchive(archive, "recent", _request.ExpectedBugReportControlMode);
+                using Stream combatStateStream = archive.GetEntry("combat-solver/combat-state.json")!.Open();
+                using JsonDocument combatStateDocument = JsonDocument.Parse(combatStateStream);
+                if (combatStateDocument.RootElement.GetProperty("combatActive").GetBoolean())
+                    throw new InvalidDataException("战后问题包错误标记为活动战斗。");
+                _completedChecks.Add($"BugReportAfterCombat:{Path.GetFileName(archivePath)}");
+            }
+
+            SetStage("passed");
+            _writer.Write(
+                "Passed",
+                _stage,
+                scenario.Character.Id.ToString(),
+                scenario.Encounter.Id.ToString(),
+                outcome.CombatEnded,
+                startedTurn,
+                outcome.FinishedTurn);
+            Entry.Logger.Info($"[CombatSolver/Unattended] PASSED run_id={_request.RunId} scenario={_request.ScenarioId} elapsed_ms={_stopwatch.Elapsed.TotalMilliseconds:F1}");
+            await ExitIfRequestedAsync(0);
+        }
+        catch (Exception ex)
+        {
+            _protocolHost.EnableAutomaticTurnSearch();
+            combatState ??= _scenarioBuilder.CombatState;
+            if (startedTurn == 0)
+                startedTurn = _scenarioBuilder.StartedTurn;
+            _writer.Write(
+                "Failed",
+                _stage,
+                _request.CharacterId,
+                _request.EncounterId,
+                combatState != null && !CombatManager.Instance.IsInProgress,
+                startedTurn,
+                combatState == null
+                    ? startedTurn
+                    : LocalContext.GetMe(combatState)?.PlayerCombatState?.TurnNumber ?? startedTurn,
+                ex.ToString());
+            Entry.Logger.Error($"[CombatSolver/Unattended] FAILED run_id={_request.RunId} scenario={_request.ScenarioId} stage={_stage} exception={ex}");
+            if (RunManager.Instance.IsInProgress)
+                await _host.ReturnToMainMenu();
+        }
+        finally
+        {
+            _executor.RestoreSettings();
+        }
+    }
+
+    private static void AssertBugReportArchive(
+        ZipArchive archive,
+        string forensicSlot,
+        string? expectedControlMode)
+    {
+        string[] requiredEntries =
+        [
+            "combat-solver/combat-state.json",
+            "combat-solver/current-route.txt",
+            "combat-solver/replan-audit.txt",
+            "combat-solver/settings.json",
+            "combat-solver/export-context.json",
+            "combat-solver/environment.json",
+            "combat-solver/forensics/manifest.json",
+            $"combat-solver/forensics/{forensicSlot}/session.json",
+            $"combat-solver/forensics/{forensicSlot}/pre-combat/in-memory-current_run.save",
+            $"combat-solver/forensics/{forensicSlot}/last-route.txt",
+            $"combat-solver/forensics/{forensicSlot}/replan-audit.txt",
+            "combat-solver/README.txt",
+        ];
+        foreach (string entry in requiredEntries)
+        {
+            if (archive.GetEntry(entry) == null)
+                throw new InvalidDataException($"问题包缺少 {entry}。");
+        }
+
+        string checkpointPrefix = $"combat-solver/forensics/{forensicSlot}/checkpoints/";
+        ZipArchiveEntry checkpoint = archive.Entries.FirstOrDefault(entry =>
+                entry.FullName.StartsWith(checkpointPrefix, StringComparison.Ordinal)
+                && entry.FullName.EndsWith(".json", StringComparison.Ordinal))
+            ?? throw new InvalidDataException($"问题包缺少 {forensicSlot} 战斗检查点。");
+        using Stream checkpointStream = checkpoint.Open();
+        using JsonDocument checkpointDocument = JsonDocument.Parse(checkpointStream);
+        JsonElement root = checkpointDocument.RootElement;
+        if (!root.TryGetProperty("settings", out _))
+            throw new InvalidDataException("问题包检查点没有当时生效的求解设置。");
+        if (!root.TryGetProperty("controlMode", out _)
+            || !root.TryGetProperty("lastSolverDeployedTurn", out _))
+        {
+            throw new InvalidDataException("问题包检查点没有记录求解器/手操接管状态。");
+        }
+        if (!root.TryGetProperty("runRng", out JsonElement runRng)
+            || !runRng.TryGetProperty("rngs", out JsonElement rngs)
+            || rngs.EnumerateObject().Count() < 9)
+        {
+            throw new InvalidDataException("问题包检查点没有完整 Run RNG 流。");
+        }
+        if (!root.TryGetProperty("players", out JsonElement players)
+            || players.GetArrayLength() == 0
+            || !players[0].TryGetProperty("rng", out _)
+            || !players[0].TryGetProperty("odds", out _))
+        {
+            throw new InvalidDataException("问题包检查点没有玩家 RNG/odds。");
+        }
+
+        string checkpointName = Path.GetFileName(checkpoint.FullName);
+        string checkpointStem = Path.GetFileNameWithoutExtension(checkpointName);
+        string rootPrefix = $"combat-solver/forensics/{forensicSlot}";
+        ZipArchiveEntry replayState = archive.GetEntry($"{rootPrefix}/replay-state/{checkpointName}")
+            ?? throw new InvalidDataException("问题包检查点缺少结构化中途战斗状态。");
+        ZipArchiveEntry nativeState = archive.GetEntry($"{rootPrefix}/native-state/{checkpointStem}.bin")
+            ?? throw new InvalidDataException("问题包检查点缺少游戏原生战斗状态包。");
+        ZipArchiveEntry runState = archive.GetEntry($"{rootPrefix}/run-state/{checkpointStem}.save")
+            ?? throw new InvalidDataException("问题包检查点缺少即时跑局存档。");
+        if (nativeState.Length == 0)
+            throw new InvalidDataException("问题包中的游戏原生战斗状态包为空。");
+
+        using Stream replayStateStream = replayState.Open();
+        using JsonDocument replayStateDocument = JsonDocument.Parse(replayStateStream);
+        JsonElement replayRoot = replayStateDocument.RootElement;
+        if (!replayRoot.TryGetProperty("settings", out _)
+            || !replayRoot.TryGetProperty("history", out JsonElement history)
+            || history.ValueKind != JsonValueKind.Array
+            || !replayRoot.TryGetProperty("creatures", out JsonElement creatures)
+            || creatures.GetArrayLength() == 0
+            || !replayRoot.TryGetProperty("players", out JsonElement replayPlayers)
+            || replayPlayers.GetArrayLength() == 0
+            || !replayPlayers[0].TryGetProperty("piles", out JsonElement piles)
+            || piles.GetArrayLength() < 5)
+        {
+            throw new InvalidDataException("问题包的结构化中途战斗状态不完整。");
+        }
+        if (!replayRoot.TryGetProperty("runRng", out JsonElement replayRunRng)
+            || !replayRunRng.TryGetProperty("rngs", out JsonElement replayRngs)
+            || replayRngs.EnumerateObject().Count() < 9)
+        {
+            throw new InvalidDataException("问题包的结构化中途战斗状态没有完整 Run RNG 流。");
+        }
+
+        using Stream runStateStream = runState.Open();
+        using JsonDocument runStateDocument = JsonDocument.Parse(runStateStream);
+        if (!runStateDocument.RootElement.TryGetProperty("rng", out JsonElement savedRunRng)
+            || !savedRunRng.TryGetProperty("rngs", out JsonElement savedRngs)
+            || savedRngs.EnumerateObject().Count() < 9)
+        {
+            throw new InvalidDataException("问题包的即时跑局存档没有完整 Run RNG 流。");
+        }
+
+        using Stream sessionStream = archive.GetEntry($"{rootPrefix}/session.json")!.Open();
+        using JsonDocument sessionDocument = JsonDocument.Parse(sessionStream);
+        JsonElement sessionRoot = sessionDocument.RootElement;
+        if (!sessionRoot.TryGetProperty("controlMode", out JsonElement sessionControlMode)
+            || !sessionRoot.TryGetProperty("lastSolverDeployedTurn", out _))
+        {
+            throw new InvalidDataException("问题包战斗会话没有记录求解器/手操接管状态。");
+        }
+
+        using Stream exportContextStream = archive.GetEntry("combat-solver/export-context.json")!.Open();
+        using JsonDocument exportContextDocument = JsonDocument.Parse(exportContextStream);
+        string controlModeProperty = forensicSlot == "current"
+            ? "currentControlMode"
+            : "recentControlMode";
+        if (!exportContextDocument.RootElement.TryGetProperty(controlModeProperty, out JsonElement contextControlMode))
+            throw new InvalidDataException("问题包导出上下文没有记录求解器/手操接管状态。");
+        if (expectedControlMode != null
+            && (!string.Equals(sessionControlMode.GetString(), expectedControlMode, StringComparison.Ordinal)
+                || !string.Equals(contextControlMode.GetString(), expectedControlMode, StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException(
+                $"问题包玩法标记不符：预期 {expectedControlMode}，" +
+                $"会话为 {sessionControlMode.GetString()}，上下文为 {contextControlMode.GetString()}。");
+        }
+    }
+
+    private bool WasExpectedCardPlayed()
+        => _request.ExpectedPlayedCardId is { } expectedPlayedCardId
+            && (SolverController.WasCardDeployedForTesting(expectedPlayedCardId)
+                || CombatManager.Instance.History.CardPlaysFinished.Any(entry =>
+                    entry.CardPlay.Card.Id.Entry.Equals(expectedPlayedCardId, StringComparison.OrdinalIgnoreCase)));
+
+    private bool WasExpectedPotionUsed()
+        => _request.ExpectedUsedPotionId is { } expectedPotionId
+            && (SolverController.WasPotionDeployedForTesting(expectedPotionId)
+                || CombatManager.Instance.History.Entries.OfType<PotionUsedEntry>().Any(entry =>
+                    entry.Potion.Id.Entry.Equals(expectedPotionId, StringComparison.OrdinalIgnoreCase)
+                    || entry.Potion.GetType().Name.Equals(expectedPotionId, StringComparison.OrdinalIgnoreCase)));
+
+    private bool HasExpectedPlayerPower(Player player)
+        => _request.ExpectedObservedPlayerPowerId is { } expectedPowerId
+            && player.Creature.Powers.Any(power =>
+                power.Id.Entry.Equals(expectedPowerId, StringComparison.OrdinalIgnoreCase)
+                || power.GetType().Name.Equals(expectedPowerId, StringComparison.OrdinalIgnoreCase));
+
+    private async Task<CombatState> WaitForPlayableCombatAsync()
+    {
+        while (true)
+        {
+            EnsureWithinDeadline();
+            CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+            Player? player = state == null ? null : LocalContext.GetMe(state);
+            if (state != null
+                && CombatManager.Instance.IsInProgress
+                && state.CurrentSide == CombatSide.Player
+                && player?.PlayerCombatState?.Phase == PlayerTurnPhase.Play)
+            {
+                return state;
+            }
+            await NextFrameAsync();
+        }
+    }
+
+    private IReadOnlyList<UnattendedMonsterMoveCheck> GetMonsterMoveChecks()
+    {
+        if (_request.MonsterMoveChecks.Length > 0)
+            return _request.MonsterMoveChecks;
+        return _request.MonsterMoveCheck == null ? [] : [_request.MonsterMoveCheck];
+    }
+
+    private IReadOnlyList<UnattendedPotionCheck> GetPotionChecks()
+    {
+        if (_request.PotionChecks.Length > 0)
+            return _request.PotionChecks;
+        return _request.PotionCheck == null ? [] : [_request.PotionCheck];
+    }
+
+    private async Task RunMonsterMoveSearchBoundaryAsync(
+        CombatState combatState,
+        UnattendedMonsterMoveCheck check,
+        SearchBoundaryReason expectedBoundary)
+    {
+        Creature enemy = ResolveMonsterMoveTarget(combatState, check);
+        MonsterModel monster = ConfigureMonsterMove(enemy, check);
+        Player boundaryPlayer = LocalContext.GetMe(combatState)
+            ?? throw new InvalidOperationException("搜索边界测试找不到本地玩家。");
+        await PrepareSearchBoundaryStateAsync(combatState, boundaryPlayer, enemy, check);
+        SolverDisplayNames displayNames = SolverDisplayNames.Capture(combatState);
+        BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combatState);
+        SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
+            SolverSettings.Capture(),
+            includeTurnSetup: false,
+            theftPolicy: SolverController.ResolveTheftPolicy(combatState));
+        CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(combatState);
+
+        bool solverRanOnWorkerThread = false;
+        SolverResult result = await Task.Run(() =>
+        {
+            solverRanOnWorkerThread = !NGame.IsMainThread();
+            return new CombatBeamSolver(
+                rootSnapshot,
+                displayNames,
+                battleDamage,
+                searchPolicy).Solve();
+        });
+        if (!solverRanOnWorkerThread)
+            throw new InvalidOperationException("动态边界测试的正式搜索没有在工作线程运行。");
+        if (result.BoundaryReason != expectedBoundary)
+        {
+            throw new InvalidOperationException(
+                $"怪物 {monster.Id.Entry} 行动 {monster.NextMove.Id} 的搜索边界为 {result.BoundaryReason}，预期 {expectedBoundary}。");
+        }
+        Entry.Logger.Info(
+            $"[CombatSolver/Unattended] SEARCH_BOUNDARY monster={monster.Id.Entry} move={monster.NextMove.Id} boundary={result.BoundaryReason} searched_turns={result.SearchedTurns} expanded={result.ExpandedNodes} worker_thread={solverRanOnWorkerThread}");
+    }
+
+    private static Creature ResolveMonsterMoveTarget(
+        CombatState combatState,
+        UnattendedMonsterMoveCheck check)
+        => string.IsNullOrWhiteSpace(check.MonsterId)
+            ? ResolveEnemyByIndex(combatState, check.EnemyIndex)
+            : combatState.Enemies
+                .Where(candidate => candidate.IsAlive
+                    && candidate.Monster != null
+                    && ModelMatches(candidate.Monster, check.MonsterId))
+                .Skip(check.MonsterOccurrence)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException(
+                    $"找不到怪物 {check.MonsterId} 的第 {check.MonsterOccurrence + 1} 个存活实例。");
+
+    private static MonsterModel ConfigureMonsterMove(
+        Creature enemy,
+        UnattendedMonsterMoveCheck check)
+    {
+        MonsterModel monster = enemy.Monster
+            ?? throw new InvalidOperationException("怪物行动测试目标没有 MonsterModel。");
+        MonsterMoveStateMachine machine = monster.MoveStateMachine
+            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
+        if (check.UseCurrentMove)
+        {
+            if (!string.IsNullOrWhiteSpace(check.MoveId)
+                && !monster.NextMove.Id.Equals(check.MoveId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"怪物 {monster.Id.Entry} 当前行动为 {monster.NextMove.Id}，预期 {check.MoveId}。");
+            }
+            return monster;
+        }
+
+        if (!machine.States.TryGetValue(check.MoveId, out MonsterState? state) || state is not MoveState move)
+            throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动 {check.MoveId}。");
+        monster.SetMoveImmediate(move, true);
+        return monster;
+    }
+
+    private async Task RunMonsterMoveDifferentialAsync(
+        CombatState combatState,
+        Player player,
+        UnattendedMonsterMoveCheck check)
+    {
+        Creature enemy = ResolveMonsterMoveTarget(combatState, check);
+        MonsterModel monster = ConfigureMonsterMove(enemy, check);
+        MoveState move = monster.NextMove;
+        if (check.MonsterStateLogBefore.Length > 0)
+        {
+            MonsterMoveStateMachine machine = monster.MoveStateMachine
+                ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
+            machine.StateLog.Clear();
+            foreach (string stateId in check.MonsterStateLogBefore)
+            {
+                if (!machine.States.TryGetValue(stateId, out MonsterState? loggedState))
+                    throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有历史状态 {stateId}。");
+                machine.StateLog.Add(loggedState);
+            }
+        }
+
+        if (check.PlayerHpBefore is { } playerHpBefore)
+        {
+            if (playerHpBefore < 1 || playerHpBefore > player.Creature.MaxHp)
+            {
+                throw new InvalidOperationException(
+                    $"玩家测试生命必须在 1..{player.Creature.MaxHp}，实际为 {playerHpBefore}。");
+            }
+            await CreatureCmd.SetCurrentHp(player.Creature, playerHpBefore);
+        }
+        if (check.PlayerBlockBefore is { } playerBlockBefore)
+            await SetBlockAsync(player.Creature, playerBlockBefore);
+        if (check.PlayerEnergyBefore is { } playerEnergyBefore)
+            SetEnergy(player, playerEnergyBefore);
+        if (check.PlayerStarsBefore is { } playerStarsBefore)
+            SetStars(player, playerStarsBefore);
+        if (check.PlayerGoldBefore is { } playerGoldBefore)
+        {
+            if (playerGoldBefore < 0)
+                throw new InvalidOperationException($"测试金币不能为负数：{playerGoldBefore}。");
+            player.Gold = playerGoldBefore;
+        }
+        if (check.EnemyHpBefore is { } enemyHpBefore)
+            await CreatureCmd.SetCurrentHp(enemy, Math.Clamp(enemyHpBefore, 1, enemy.MaxHp));
+        if (check.EnemyBlockBefore is { } enemyBlockBefore)
+            await SetBlockAsync(enemy, enemyBlockBefore);
+        if (check.ClearAllRelicsBeforeMove)
+        {
+            foreach (RelicModel relic in player.Relics.ToArray())
+                await RelicCmd.Remove(relic);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.ClearAllPowersBeforeMove)
+        {
+            foreach (PowerModel power in combatState.Creatures.SelectMany(creature => creature.Powers).ToArray())
+                await PowerCmd.Remove(power);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.OstyHpBefore is { } ostyHpBefore)
+        {
+            if (ostyHpBefore < 1)
+                throw new InvalidOperationException($"奥斯蒂测试生命必须大于 0，实际为 {ostyHpBefore}。");
+            await OstyCmd.Summon(
+                new BlockingPlayerChoiceContext(),
+                player,
+                ostyHpBefore,
+                null);
+            Creature osty = player.Osty
+                ?? throw new InvalidOperationException("召唤后仍找不到奥斯蒂。");
+            await CreatureCmd.SetMaxHp(osty, ostyHpBefore);
+            await CreatureCmd.SetCurrentHp(osty, ostyHpBefore);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.RoundNumberBefore is { } roundNumberBefore)
+            combatState.RoundNumber = roundNumberBefore;
+        if (check.PlayerTurnNumberBefore is { } playerTurnNumberBefore)
+        {
+            PlayerCombatState playerState = player.PlayerCombatState
+                ?? throw new InvalidOperationException("测试玩家没有战斗状态。");
+            if (playerTurnNumberBefore < playerState.TurnNumber)
+            {
+                throw new InvalidOperationException(
+                    $"玩家测试回合号不能从 {playerState.TurnNumber} 回退到 {playerTurnNumberBefore}。");
+            }
+            while (playerState.TurnNumber < playerTurnNumberBefore)
+                playerState.IncrementTurnNumber();
+        }
+        if (check.ClearPlayerOrbsBeforeMove)
+        {
+            OrbQueue queue = player.PlayerCombatState!.OrbQueue;
+            foreach (OrbModel orb in queue.Orbs.ToArray())
+                orb.RemoveInternal();
+            queue.Clear();
+        }
+        if (check.ClearPlayerPilesBeforeMove)
+        {
+            await ClearPlayerPilesAsync(player);
+        }
+        else if (check.ClearPlayerHandBeforeMove)
+        {
+            await CardCmd.Discard(
+                new BlockingPlayerChoiceContext(),
+                player.PlayerCombatState!.Hand.Cards.ToArray());
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedRelicInjection relicBeforeMove in check.RelicsBeforeMove)
+        {
+            await InjectRelicAsync(player, relicBeforeMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedOrbInjection orbBeforeMove in check.OrbsBeforeMove)
+        {
+            await InjectOrbAsync(player, orbBeforeMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.PowerBeforeMove is { } powerBeforeMove)
+        {
+            await InjectPowerAsync(combatState, player, powerBeforeMove, enemy);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedPowerInjection injectedPowerBeforeMove in check.PowersBeforeMove)
+        {
+            await InjectPowerAsync(combatState, player, injectedPowerBeforeMove, enemy);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.CardBeforeMove is { } cardBeforeMove)
+        {
+            await InjectCardAsync(combatState, player, cardBeforeMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedCardInjection injectedBeforeMove in check.CardsBeforeMove)
+        {
+            await InjectCardAsync(combatState, player, injectedBeforeMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        SimulatedCombatState simulatedCombat = new(combatState);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        int simulatedRoundHistoryEntryStart = simulator.History.Entries.Count;
+        AssertDerivedPowerHooks(combatState, simulatedCombat, player, enemy, check);
+        MoveStateSnapshot before = CaptureActual(combatState, player, enemy);
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksBeforeMove)
+        {
+            PredictedCard card = FindSimulatedHandCard(simulator, player, playCheck.CardId, playCheck.Occurrence);
+            bool playable = simulatedCombat.CanPlayCard(simulator, card);
+            if (playable != playCheck.ExpectedPlayable)
+            {
+                throw new InvalidOperationException(
+                    $"模拟中怪物行动前卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            }
+            if (playable)
+            {
+                PlaySimulatedCard(
+                    simulator,
+                    simulatedCombat,
+                    card,
+                    ResolvePlayTarget(playCheck.Target, enemy),
+                    combatState.Enemies,
+                    playCheck.UseChoice ? playCheck.ChoiceCardIds : null,
+                    playCheck.ExpectedExcludedChoiceCardIds);
+            }
+        }
+        if (check.TriggerPlayerSideTurnEndBeforeMove)
+            CorePowerSupport.TriggerPlayerSideTurnEndEffects(simulator, simulatedCombat, [player.Creature]);
+        if (check.TriggerEnemySideTurnEndBeforeMove)
+        {
+            CorePowerSupport.TriggerEnemySideTurnEndEffects(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies);
+        }
+        ForecastMove simulatedMove = simulatedCombat.CurrentMonsterMoves()
+            .Single(candidate => ReferenceEquals(candidate.Owner, enemy));
+        _ = MonsterMoveSemantics.ApplyForecastMove(simulator, simulatedCombat, simulatedMove, player.Creature);
+        foreach (UnattendedPowerInjection injectedPowerAfterMove in check.PowersAfterMove)
+            ApplySimulatedPowerInjection(simulator, simulatedCombat, combatState, player, injectedPowerAfterMove, enemy);
+        if (check.CardAfterMove is { } simulatedCardAfterMove)
+            InjectSimulatedCard(simulator, simulatedCombat, player, simulatedCardAfterMove);
+        foreach (UnattendedCardInjection injectedAfterMove in check.CardsAfterMove)
+            InjectSimulatedCard(simulator, simulatedCombat, player, injectedAfterMove);
+        if (check.PlayCardAfterMove is { } simulatedPlay)
+        {
+            PredictedCard card = InjectSimulatedCard(simulator, simulatedCombat, player, simulatedPlay);
+            if (!simulatedCombat.CanPlayCard(simulator, card))
+                throw new InvalidOperationException($"模拟中无法在怪物行动后打出测试卡牌 {simulatedPlay.CardId}。");
+            PlaySimulatedCard(simulator, simulatedCombat, card, enemy, combatState.Enemies);
+        }
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterMove)
+        {
+            PredictedCard card = FindSimulatedHandCard(simulator, player, playCheck.CardId, playCheck.Occurrence);
+            bool playable = simulatedCombat.CanPlayCard(simulator, card);
+            if (playable != playCheck.ExpectedPlayable)
+            {
+                SimPlayerCombatState cardOwner = simulator.State.GetPlayerCombatState(card.Preview.Owner);
+                throw new InvalidOperationException(
+                    $"模拟中卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}；" +
+                    $"energy={cardOwner.Energy} cost={card.GetEnergyCostWithModifiers(simulator, cardOwner)} " +
+                    $"stars={cardOwner.Stars} star_cost={card.GetStarCostWithModifiers(simulator, cardOwner)} " +
+                    $"is_clone={card.Preview.IsClone} played={simulatedCombat.GetCardsPlayedThisTurn(card.Preview.Owner.Creature)} " +
+                    $"attacks={simulatedCombat.GetAttacksPlayedThisTurn(card.Preview.Owner.Creature)} " +
+                    $"skills={simulatedCombat.GetSkillCardsPlayedThisTurn(card.Preview.Owner.Creature)}。");
+            }
+            if (playable)
+                PlaySimulatedCard(
+                    simulator,
+                    simulatedCombat,
+                    card,
+                    ResolvePlayTarget(playCheck.Target, enemy),
+                    combatState.Enemies,
+                    playCheck.UseChoice ? playCheck.ChoiceCardIds : null,
+                    playCheck.ExpectedExcludedChoiceCardIds);
+        }
+        if (check.TriggerPlayerSideTurnEndAfterMove)
+            CorePowerSupport.TriggerPlayerSideTurnEndEffects(simulator, simulatedCombat, [player.Creature]);
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterPlayerSideTurnEnd)
+        {
+            PredictedCard card = FindSimulatedHandCard(simulator, player, playCheck.CardId, playCheck.Occurrence);
+            bool playable = simulatedCombat.CanPlayCard(simulator, card);
+            if (playable != playCheck.ExpectedPlayable)
+            {
+                throw new InvalidOperationException(
+                    $"模拟中玩家回合结束钩子后卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            }
+            if (playable)
+            {
+                PlaySimulatedCard(
+                    simulator,
+                    simulatedCombat,
+                    card,
+                    ResolvePlayTarget(playCheck.Target, enemy),
+                    combatState.Enemies,
+                    playCheck.UseChoice ? playCheck.ChoiceCardIds : null);
+            }
+        }
+        int enemySideTurnEndCount = Math.Max(
+            check.TriggerEnemySideTurnEndAfterMove ? 1 : 0,
+            check.EnemySideTurnEndTriggerCount);
+        for (int trigger = 0; trigger < enemySideTurnEndCount; trigger++)
+        {
+            simulatedCombat.CurrentSide = CombatSide.Enemy;
+            CorePowerSupport.TriggerEnemySideTurnEndEffects(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies);
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies,
+                new HashSet<uint>());
+        }
+        if (check.TriggerPlayerSideTurnStartAfterMove)
+        {
+            TurnStartRelicSupport.TriggerBeforeSideTurnStart(simulator, simulatedCombat, [player.Creature]);
+            TurnStartPowerSupport.TriggerBeforeSideTurnStart(
+                simulator,
+                simulatedCombat,
+                [player.Creature]);
+            SimCreatureState simulatedPlayer = simulator.State.GetCreature(player.Creature);
+            if (simulatedPlayer.Block > 0)
+            {
+                if (simulatedCombat.ShouldClearBlock(player.Creature, out AbstractModel? preventer))
+                    simulatedPlayer.DamageBlock(simulatedPlayer.Block, ValueProp.Move);
+                else
+                    PersistentRelicSupport.TriggerAfterPreventingBlockClear(
+                        simulator,
+                        preventer,
+                        player.Creature);
+            }
+            CorePowerSupport.TriggerAfterBlockCleared(simulator, simulatedCombat, player.Creature);
+            CorePowerSupport.TriggerPoison(simulator, simulatedCombat, [player.Creature]);
+            simulatedCombat.TriggerPlayerTurnStart(simulator, player.Creature, turnStartChoices: null);
+            EnchantmentLifecycleSupport.TriggerAfterTurnStartOrbs(simulator, player);
+        }
+        if (check.TriggerEnemySideTurnStartAfterMove)
+        {
+            simulatedCombat.SnapshotPowerAmountsAtTurnStart([enemy]);
+            TurnStartRelicSupport.TriggerBeforeSideTurnStart(simulator, simulatedCombat, [enemy]);
+            TurnStartPowerSupport.TriggerBeforeSideTurnStart(
+                simulator,
+                simulatedCombat,
+                [enemy]);
+            SimCreatureState simulatedEnemy = simulator.State.GetCreature(enemy);
+            if (simulatedEnemy.Block > 0)
+            {
+                if (simulatedCombat.ShouldClearBlock(enemy, out AbstractModel? preventer))
+                    simulatedEnemy.DamageBlock(simulatedEnemy.Block, ValueProp.Move);
+                else
+                    PersistentRelicSupport.TriggerAfterPreventingBlockClear(simulator, preventer, enemy);
+            }
+            CorePowerSupport.TriggerAfterBlockCleared(simulator, simulatedCombat, enemy);
+            simulatedCombat.TriggerSideTurnStart(
+                simulator,
+                CombatSide.Enemy,
+                [enemy],
+                combatState.RoundNumber > 1);
+            CorePowerSupport.TriggerPoison(simulator, simulatedCombat, [enemy]);
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies,
+                new HashSet<uint>());
+            simulatedCombat.RecordRelicRoundDamage(
+                simulator,
+                player,
+                simulatedRoundHistoryEntryStart);
+        }
+        if (check.TriggerPlayerTurnEndAfterMove)
+        {
+            int etherealExhaustCount = simulatedCombat.CountEtherealCardsInHand(simulator, player);
+            PlayerTurnEndLifecycle.RunPhaseOne(
+                simulator,
+                simulatedCombat,
+                player,
+                [player.Creature]);
+            simulatedCombat.NormalizeAeonglassWithers(simulator);
+            simulatedCombat.NormalizeCardAfflictions(simulator);
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies,
+                new HashSet<uint>());
+            CorePowerSupport.FlushPlayerHandAtTurnEnd(simulator, simulatedCombat, player);
+            TurnStartRelicSupport.TriggerAfterSideTurnEnd(
+                simulator,
+                simulatedCombat,
+                [player.Creature],
+                etherealExhaustCount);
+            CorePowerSupport.TriggerPlayerSideTurnEndEffects(
+                simulator,
+                simulatedCombat,
+                [player.Creature],
+                etherealExhaustCount);
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies,
+                new HashSet<uint>());
+        }
+        if (check.TriggerPlayerSetupAfterMove)
+            TriggerSimulatedPlayerSetup(simulator, simulatedCombat, player);
+        if (check.TriggerAutoPrePlayAfterPlayerSetup)
+        {
+            IReadOnlyList<PlanCardChoice> plannedChoices = BuildAutoPrePlayChoices(
+                simulator,
+                player,
+                check.AutoPrePlayChoiceCardIds);
+            bool pendingChoice = simulatedCombat.TriggerAutoPrePlayEarly(
+                simulator,
+                player,
+                player.PlayerCombatState?.TurnNumber ?? 1,
+                new TurnStartChoiceCursor(plannedChoices),
+                new HashSet<uint>());
+            if (pendingChoice)
+                throw new InvalidOperationException("助能自动出牌仍产生未计划选择。");
+        }
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterPlayerSetup)
+        {
+            PredictedCard card = FindSimulatedHandCard(simulator, player, playCheck.CardId, playCheck.Occurrence);
+            bool playable = simulatedCombat.CanPlayCard(simulator, card);
+            if (playable != playCheck.ExpectedPlayable)
+                throw new InvalidOperationException(
+                    $"模拟中玩家回合准备后卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            if (playable)
+            {
+                PlaySimulatedCard(
+                    simulator,
+                    simulatedCombat,
+                    card,
+                    ResolvePlayTarget(playCheck.Target, enemy),
+                    combatState.Enemies,
+                    playCheck.UseChoice ? playCheck.ChoiceCardIds : null);
+            }
+        }
+        if (check.KillMonsterAfterMove)
+        {
+            simulator.Kill(enemy, force: true);
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies,
+                new HashSet<uint>());
+        }
+        if (check.KillEnemyIndexAfterMove is { } simulatedKillIndex)
+        {
+            Creature killTarget = ResolveEnemyByIndex(combatState, simulatedKillIndex);
+            simulator.Kill(killTarget, force: true);
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                simulatedCombat,
+                combatState.Enemies,
+                new HashSet<uint>());
+        }
+        if (check.ExpectedSimulatedDynamicResolution is { } expectedDynamic
+            && simulatedCombat.HasPendingChoice != expectedDynamic)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 模拟待选分支={simulatedCombat.HasPendingChoice}，预期 {expectedDynamic}。");
+        }
+        if (check.RollNextMoveAfterActual)
+            simulatedCombat.PrepareMonsterMoveForNextRound(simulator, enemy, simulatedMove.Move);
+        MoveStateSnapshot predicted = CaptureSimulated(simulator, simulatedCombat, player, enemy);
+        if (check.ExpectedSimulatedSkipNextMove is { } expectedSkip
+            && simulatedCombat.WillSkipNextMove(enemy) != expectedSkip)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 模拟待跳过行动={simulatedCombat.WillSkipNextMove(enemy)}，预期 {expectedSkip}。");
+        }
+
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksBeforeMove)
+        {
+            CardModel card = FindActualHandCard(player, playCheck.CardId, playCheck.Occurrence);
+            using IDisposable? selector = playCheck.UseChoice
+                ? CardSelectCmd.PushSelector(new UnattendedCardSelector(
+                    playCheck.ChoiceCardIds,
+                    playCheck.ExpectedExcludedChoiceCardIds))
+                : null;
+            bool playable = card.TryManualPlay(ResolvePlayTarget(playCheck.Target, enemy));
+            if (playable != playCheck.ExpectedPlayable)
+            {
+                throw new InvalidOperationException(
+                    $"实机中怪物行动前卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            }
+            if (playable)
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.TriggerPlayerSideTurnEndBeforeMove)
+            await TriggerActualSideTurnEndAsync(combatState, CombatSide.Player, [player.Creature]);
+        if (check.TriggerEnemySideTurnEndBeforeMove)
+            await TriggerActualSideTurnEndAsync(combatState, CombatSide.Enemy, combatState.Enemies);
+        await monster.PerformMove();
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        foreach (UnattendedPowerInjection injectedPowerAfterMove in check.PowersAfterMove)
+        {
+            await InjectPowerAsync(combatState, player, injectedPowerAfterMove, enemy);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.CardAfterMove is { } actualCardAfterMove)
+        {
+            await InjectCardAsync(combatState, player, actualCardAfterMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedCardInjection injectedAfterMove in check.CardsAfterMove)
+        {
+            await InjectCardAsync(combatState, player, injectedAfterMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.PlayCardAfterMove is { } actualPlay)
+        {
+            IReadOnlyList<CardModel> cards = await InjectCardAsync(combatState, player, actualPlay);
+            if (cards.Count != 1 || !cards[0].TryManualPlay(enemy))
+                throw new InvalidOperationException($"无法在怪物行动后打出测试卡牌 {actualPlay.CardId}。");
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterMove)
+        {
+            CardModel card = FindActualHandCard(player, playCheck.CardId, playCheck.Occurrence);
+            using IDisposable? selector = playCheck.UseChoice
+                ? CardSelectCmd.PushSelector(new UnattendedCardSelector(
+                    playCheck.ChoiceCardIds,
+                    playCheck.ExpectedExcludedChoiceCardIds))
+                : null;
+            bool playable = card.TryManualPlay(ResolvePlayTarget(playCheck.Target, enemy));
+            if (playable != playCheck.ExpectedPlayable)
+            {
+                throw new InvalidOperationException(
+                    $"实机中卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            }
+            if (playable)
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.TriggerPlayerSideTurnEndAfterMove)
+            await TriggerActualSideTurnEndAsync(combatState, CombatSide.Player, [player.Creature]);
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterPlayerSideTurnEnd)
+        {
+            CardModel card = FindActualHandCard(player, playCheck.CardId, playCheck.Occurrence);
+            using IDisposable? selector = playCheck.UseChoice
+                ? CardSelectCmd.PushSelector(new UnattendedCardSelector(
+                    playCheck.ChoiceCardIds,
+                    playCheck.ExpectedExcludedChoiceCardIds))
+                : null;
+            bool playable = card.TryManualPlay(ResolvePlayTarget(playCheck.Target, enemy));
+            if (playable != playCheck.ExpectedPlayable)
+            {
+                throw new InvalidOperationException(
+                    $"实机中玩家回合结束钩子后卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            }
+            if (playable)
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        for (int trigger = 0; trigger < enemySideTurnEndCount; trigger++)
+            await TriggerActualSideTurnEndAsync(combatState, CombatSide.Enemy, combatState.Enemies);
+        if (check.TriggerPlayerSideTurnStartAfterMove)
+            await TriggerActualSideTurnStartAsync(combatState, CombatSide.Player, player.Creature);
+        if (check.TriggerEnemySideTurnStartAfterMove)
+            await TriggerActualSideTurnStartAsync(combatState, CombatSide.Enemy, enemy);
+        if (check.KillMonsterAfterMove)
+        {
+            await CreatureCmd.Kill(enemy, force: true);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.KillEnemyIndexAfterMove is { } actualKillIndex)
+        {
+            await CreatureCmd.Kill(ResolveEnemyByIndex(combatState, actualKillIndex), force: true);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.TriggerPlayerTurnEndAfterMove)
+        {
+            await CombatManager.Instance.EndPlayerTurnPhaseOneInternal();
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+            await CombatManager.Instance.EndPlayerTurnPhaseTwoInternal();
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        if (check.TriggerPlayerSetupAfterMove)
+            await TriggerActualPlayerSetupAsync(combatState, player);
+        if (check.TriggerAutoPrePlayAfterPlayerSetup)
+        {
+            HookPlayerChoiceContext context = new(player, player.NetId, GameActionType.Combat);
+            using IDisposable? selector = check.AutoPrePlayChoiceCardIds.Length == 0
+                ? null
+                : CardSelectCmd.PushSelector(new UnattendedCardSelector(check.AutoPrePlayChoiceCardIds));
+            await Hook.AfterAutoPrePlayPhaseEntered(context, combatState, player);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterPlayerSetup)
+        {
+            CardModel card = FindActualHandCard(player, playCheck.CardId, playCheck.Occurrence);
+            using IDisposable? selector = playCheck.UseChoice
+                ? CardSelectCmd.PushSelector(new UnattendedCardSelector(
+                    playCheck.ChoiceCardIds,
+                    playCheck.ExpectedExcludedChoiceCardIds))
+                : null;
+            bool playable = card.TryManualPlay(ResolvePlayTarget(playCheck.Target, enemy));
+            if (playable != playCheck.ExpectedPlayable)
+                throw new InvalidOperationException(
+                    $"实机中玩家回合准备后卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
+            if (playable)
+                await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        AssertDerivedHooksAfterPlayerSetup(combatState, simulatedCombat, player, check);
+        if (check.ExpectedMirrorRelicState is { } expectedMirrorRelics)
+        {
+            StringBuilder liveRelics = new();
+            RelicPredictionStateSupport.AppendLiveContinuation(liveRelics, player);
+            StringBuilder predictedRelics = new();
+            RelicPredictionStateSupport.AppendPredictedContinuation(
+                predictedRelics,
+                simulator,
+                simulatedCombat.RelicsOf(player));
+            AssertDerivedHookValue(
+                "MirrorRelicState",
+                liveRelics.ToString(),
+                predictedRelics.ToString(),
+                expectedMirrorRelics);
+        }
+        if (check.RollNextMoveAfterActual)
+            monster.RollMove(combatState.PlayerCreatures);
+        MoveStateSnapshot actual = CaptureActual(combatState, player, enemy);
+        if (check.ExpectedNextMoveId is { } expectedNextMoveId
+            && !monster.NextMove.Id.Equals(expectedNextMoveId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 后续行动为 {monster.NextMove.Id}，预期 {expectedNextMoveId}。");
+        }
+        if (check.ExpectedNextMoveId is { } expectedSimulatedNextMoveId
+            && !simulatedCombat.GetPredictedMoveId(enemy).Equals(
+                expectedSimulatedNextMoveId,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 模拟后续行动为 {simulatedCombat.GetPredictedMoveId(enemy)}，" +
+                $"预期 {expectedSimulatedNextMoveId}。");
+        }
+        AssertSnapshotEqual(predicted, actual, monster.Id.Entry, move.Id);
+        Entry.Logger.Info(
+            $"[CombatSolver/Unattended] MOVE_DIFF_OK run_id={_request.RunId} " +
+            $"monster={monster.Id.Entry} move={move.Id} next_move={monster.NextMove.Id}");
+        if (check.ExpectedPlayerHp is { } expectedPlayerHp && actual.PlayerHp != expectedPlayerHp)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家生命 {actual.PlayerHp}，预期 {expectedPlayerHp}。");
+        }
+        if (check.ExpectedPlayerHpLoss is { } expectedHpLoss
+            && before.PlayerHp - actual.PlayerHp != expectedHpLoss)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家掉血 {before.PlayerHp - actual.PlayerHp}，预期 {expectedHpLoss}。");
+        }
+        if (check.ExpectedOstyHp is { } expectedOstyHp && actual.OstyHp != expectedOstyHp)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 后奥斯蒂生命 {actual.OstyHp}，预期 {expectedOstyHp}。");
+        }
+        if (check.ExpectedOstyMaxHp is { } expectedOstyMaxHp && actual.OstyMaxHp != expectedOstyMaxHp)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 后奥斯蒂最大生命 {actual.OstyMaxHp}，预期 {expectedOstyMaxHp}。");
+        }
+        AssertExpectedPowers(
+            actual.OstyPowers,
+            check.ExpectedOstyPowers,
+            "奥斯蒂",
+            monster.Id.Entry,
+            move.Id);
+        if (check.ExpectedPlayerBlock is { } expectedPlayerBlock
+            && actual.PlayerBlock != expectedPlayerBlock)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家格挡 {actual.PlayerBlock}，预期 {expectedPlayerBlock}。");
+        }
+        if (check.ExpectedPlayerBlockGain is { } expectedPlayerBlockGain
+            && actual.PlayerBlock - before.PlayerBlock != expectedPlayerBlockGain)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家格挡变化 {actual.PlayerBlock - before.PlayerBlock}，预期 {expectedPlayerBlockGain}。");
+        }
+        if (check.ExpectedPlayerEnergy is { } expectedPlayerEnergy
+            && actual.PlayerEnergy != expectedPlayerEnergy)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家能量 {actual.PlayerEnergy}，预期 {expectedPlayerEnergy}。");
+        }
+        if (check.ExpectedPlayerStars is { } expectedPlayerStars
+            && actual.PlayerStars != expectedPlayerStars)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家星能 {actual.PlayerStars}，预期 {expectedPlayerStars}。");
+        }
+        if (check.ExpectedPlayerGold is { } expectedPlayerGold
+            && actual.PlayerGold != expectedPlayerGold)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家金币 {actual.PlayerGold}，预期 {expectedPlayerGold}。");
+        }
+        if (check.ExpectedPlayerOrbCapacity is { } expectedPlayerOrbCapacity
+            && actual.PlayerOrbCapacity != expectedPlayerOrbCapacity)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 玩家充能球槽位 {actual.PlayerOrbCapacity}，预期 {expectedPlayerOrbCapacity}。");
+        }
+        if (check.ExpectedPlayerHandCount is { } expectedPlayerHandCount)
+        {
+            int handCount = actual.PlayerPileCards
+                .Where(entry => entry.Key.StartsWith("Hand:", StringComparison.Ordinal))
+                .Sum(static entry => entry.Value);
+            if (handCount != expectedPlayerHandCount)
+            {
+                throw new InvalidOperationException(
+                    $"{monster.Id.Entry}.{move.Id} 玩家手牌数 {handCount}，预期 {expectedPlayerHandCount}。");
+            }
+        }
+        if (check.ExpectedEnemyBlockGain is { } expectedBlockGain
+            && actual.EnemyBlock - before.EnemyBlock != expectedBlockGain)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 怪物格挡变化 {actual.EnemyBlock - before.EnemyBlock}，预期 {expectedBlockGain}。");
+        }
+        if (check.ExpectedEnemyHpGain is { } expectedHpGain
+            && actual.EnemyHp - before.EnemyHp != expectedHpGain)
+        {
+            throw new InvalidOperationException(
+                $"{monster.Id.Entry}.{move.Id} 怪物生命变化 {actual.EnemyHp - before.EnemyHp}，预期 {expectedHpGain}。");
+        }
+        AssertExpectedPowers(actual.PlayerPowers, check.ExpectedPlayerPowers, "玩家", monster.Id.Entry, move.Id);
+        AssertAbsentPowers(
+            actual.PlayerPowers,
+            check.ExpectedAbsentPlayerPowers,
+            "玩家",
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedPowers(actual.EnemyPowers, check.ExpectedEnemyPowers, "怪物", monster.Id.Entry, move.Id);
+        AssertAbsentPowers(
+            actual.EnemyPowers,
+            check.ExpectedAbsentEnemyPowers,
+            "怪物",
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedPowers(
+            actual.PlayerPowerStates,
+            check.ExpectedPlayerPowerStates,
+            "玩家 Power 状态",
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedPowers(
+            actual.EnemyPowerStates,
+            check.ExpectedEnemyPowerStates,
+            "怪物 Power 状态",
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedPiles(actual.PlayerPileCards, check.ExpectedPlayerPileCards, monster.Id.Entry, move.Id);
+        AssertExpectedPileDamageTotals(
+            actual.PlayerPileCardDamageTotals,
+            check.ExpectedPlayerPileCardDamageTotals,
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedCardStates(
+            actual.PlayerCardStates,
+            check.ExpectedPlayerCardStates,
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedCardStates(
+            actual.PlayerCardCosts,
+            check.ExpectedPlayerCardCosts,
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedCardStates(
+            actual.PlayerCardEnchantments,
+            check.ExpectedPlayerCardEnchantments,
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedCardStates(
+            actual.PlayerCardUpgrades,
+            check.ExpectedPlayerCardUpgrades,
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedPowers(
+            actual.EnemyHpsByModel,
+            check.ExpectedEnemyHpsByModel,
+            "怪物生命合计",
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedEnemyBlocks(
+            actual.EnemyBlocksByModel,
+            check.ExpectedEnemyBlocksByModel,
+            monster.Id.Entry,
+            move.Id);
+        AssertExpectedPowers(
+            actual.PlayerOrbs,
+            check.ExpectedPlayerOrbs,
+            "玩家充能球",
+            monster.Id.Entry,
+            move.Id);
+    }
+
+    private static void AssertDerivedPowerHooks(
+        CombatState actualCombat,
+        SimulatedCombatState simulatedCombat,
+        Player player,
+        Creature enemy,
+        UnattendedMonsterMoveCheck check)
+    {
+        if (check.ExpectedModifiedHandDraw is { } expectedDraw)
+        {
+            int actual = (int)Hook.ModifyHandDraw(
+                actualCombat,
+                player,
+                CombatManager.baseHandDrawCount,
+                out _);
+            int simulated = (int)Hook.ModifyHandDraw(
+                simulatedCombat,
+                player,
+                CombatManager.baseHandDrawCount,
+                out _);
+            AssertDerivedHookValue("ModifyHandDraw", actual, simulated, expectedDraw);
+        }
+        if (check.ExpectedModifiedMaxEnergy is { } expectedEnergy)
+        {
+            int actual = (int)Hook.ModifyMaxEnergy(actualCombat, player, player.MaxEnergy);
+            int simulated = PersistentPowerSupport.GetModifiedMaxEnergy(simulatedCombat, player);
+            AssertDerivedHookValue("ModifyMaxEnergy", actual, simulated, expectedEnergy);
+        }
+        if (check.ExpectedShouldFlush is { } expectedFlush)
+        {
+            bool actual = Hook.ShouldFlush(actualCombat, player);
+            bool simulated = PersistentRelicSupport.ShouldFlush(simulatedCombat, player);
+            AssertDerivedHookValue("ShouldFlush", actual, simulated, expectedFlush);
+        }
+        if (check.ExpectedShouldPlayerResetEnergy is { } expectedReset)
+        {
+            bool actual = Hook.ShouldPlayerResetEnergy(actualCombat, player);
+            bool simulated = PersistentRelicSupport.ShouldPlayerResetEnergy(simulatedCombat, player);
+            AssertDerivedHookValue("ShouldPlayerResetEnergy", actual, simulated, expectedReset);
+        }
+        if (check.ExpectedModifiedXValue is { } expectedX)
+        {
+            CardModel card = FindActualHandCard(player, check.DerivedHookCardId, 0);
+            int actual = Hook.ModifyXValue(actualCombat, card, check.DerivedHookBaseValue);
+            int simulated = Hook.ModifyXValue(simulatedCombat, card, check.DerivedHookBaseValue);
+            AssertDerivedHookValue("ModifyXValue", actual, simulated, expectedX);
+        }
+        if (check.ExpectedModifiedOrbValue is { } expectedOrbValue)
+        {
+            OrbModel orb = player.PlayerCombatState!.OrbQueue.Orbs
+                .First(candidate => candidate.Id.Entry.Equals(
+                    check.DerivedHookOrbId,
+                    StringComparison.OrdinalIgnoreCase));
+            int actual = (int)Hook.ModifyOrbValue(actualCombat, orb, check.DerivedHookBaseValue);
+            int simulated = (int)Hook.ModifyOrbValue(simulatedCombat, orb, check.DerivedHookBaseValue);
+            AssertDerivedHookValue("ModifyOrbValue", actual, simulated, expectedOrbValue);
+        }
+        if (check.ExpectedShouldClearBlock is { } expectedClear)
+        {
+            Creature target = check.DerivedHookTarget.Equals("Enemy", StringComparison.OrdinalIgnoreCase)
+                ? enemy
+                : player.Creature;
+            bool actual = Hook.ShouldClearBlock(actualCombat, target, out _);
+            bool simulated = simulatedCombat.ShouldClearBlock(target);
+            AssertDerivedHookValue("ShouldClearBlock", actual, simulated, expectedClear);
+        }
+    }
+
+    private static void AssertDerivedHookValue<T>(
+        string hook,
+        T actual,
+        T simulated,
+        T expected)
+        where T : IEquatable<T>
+    {
+        if (!actual.Equals(expected) || !simulated.Equals(expected))
+        {
+            throw new InvalidOperationException(
+                $"派生 Hook {hook} 不一致：actual={actual} simulated={simulated} expected={expected}。");
+        }
+        Entry.Logger.Info(
+            $"[CombatSolver/Unattended] DERIVED_HOOK hook={hook} actual={actual} simulated={simulated} expected={expected}");
+    }
+
+    private static void AssertDerivedHooksAfterPlayerSetup(
+        CombatState actualCombat,
+        SimulatedCombatState simulatedCombat,
+        Player player,
+        UnattendedMonsterMoveCheck check)
+    {
+        if (check.ExpectedModifiedHandDrawAfterPlayerSetup is { } expectedDraw)
+        {
+            int actual = (int)Hook.ModifyHandDraw(
+                actualCombat,
+                player,
+                CombatManager.baseHandDrawCount,
+                out IEnumerable<AbstractModel> actualModifiers);
+            int rawSimulated = (int)Hook.ModifyHandDraw(
+                simulatedCombat,
+                player,
+                CombatManager.baseHandDrawCount,
+                out IEnumerable<AbstractModel> simulatedModifiers);
+            int simulated = PersistentPowerSupport.GetModifiedHandDraw(
+                simulatedCombat,
+                player,
+                CombatManager.baseHandDrawCount);
+            Entry.Logger.Info(
+                $"[CombatSolver/Unattended] DERIVED_HOOK_TRACE hook=ModifyHandDrawAfterPlayerSetup " +
+                $"actual_modifiers={string.Join(',', actualModifiers.Select(static model => model.Id.Entry))} " +
+                $"simulated_raw={rawSimulated} simulated_modifiers={string.Join(',', simulatedModifiers.Select(static model => model.Id.Entry))}");
+            AssertDerivedHookValue("ModifyHandDrawAfterPlayerSetup", actual, simulated, expectedDraw);
+        }
+        if (check.ExpectedModifiedMaxEnergyAfterPlayerSetup is { } expectedEnergy)
+        {
+            int actual = (int)Hook.ModifyMaxEnergy(actualCombat, player, player.MaxEnergy);
+            int simulated = PersistentPowerSupport.GetModifiedMaxEnergy(simulatedCombat, player);
+            AssertDerivedHookValue("ModifyMaxEnergyAfterPlayerSetup", actual, simulated, expectedEnergy);
+        }
+        if (check.ExpectedShouldFlushAfterPlayerSetup is { } expectedFlush)
+        {
+            bool actual = Hook.ShouldFlush(actualCombat, player);
+            bool simulated = PersistentRelicSupport.ShouldFlush(simulatedCombat, player);
+            AssertDerivedHookValue("ShouldFlushAfterPlayerSetup", actual, simulated, expectedFlush);
+        }
+        if (check.ExpectedShouldPlayerResetEnergyAfterPlayerSetup is { } expectedReset)
+        {
+            bool actual = Hook.ShouldPlayerResetEnergy(actualCombat, player);
+            bool simulated = PersistentRelicSupport.ShouldPlayerResetEnergy(simulatedCombat, player);
+            AssertDerivedHookValue("ShouldPlayerResetEnergyAfterPlayerSetup", actual, simulated, expectedReset);
+        }
+        if (check.ExpectedStatefulRelicStateAfterPlayerSetup is { } expectedRelics)
+        {
+            StringBuilder actual = new();
+            SimulatedCombatState.AppendLiveStatefulRelics(actual, player);
+            StringBuilder simulated = new();
+            simulatedCombat.AppendPredictedStatefulRelics(simulated, player);
+            AssertDerivedHookValue(
+                "StatefulRelicStateAfterPlayerSetup",
+                actual.ToString(),
+                simulated.ToString(),
+                expectedRelics);
+        }
+    }
+
+    private static PredictedCard InjectSimulatedCard(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        Player player,
+        UnattendedCardInjection injection)
+    {
+        if (!Enum.TryParse(injection.Pile, true, out PileType pileType)
+            || pileType is not (PileType.Hand or PileType.Draw or PileType.Discard or PileType.Exhaust))
+        {
+            throw new InvalidOperationException($"无人差分不支持模拟注入牌堆 {injection.Pile}。");
+        }
+        if (injection.Count != 1)
+            throw new InvalidOperationException($"一步差分的模拟注入卡牌数量必须为 1，实际为 {injection.Count}。");
+
+        CardModel canonical = ResolveUnique(ModelDb.AllCards, injection.CardId, "卡牌");
+        PredictedCard card = PredictedCard.Create(canonical, player);
+        for (int level = 0; level < injection.UpgradeLevels && card.Preview.IsUpgradable; level++)
+            card.Upgrade();
+        ApplyCardEnumMembers(card.MutablePreview, injection.EnumMembers);
+        if (!string.IsNullOrWhiteSpace(injection.EnchantmentId))
+        {
+            EnchantmentModel enchantment = ResolveUnique(
+                ModelDb.DebugEnchantments,
+                injection.EnchantmentId,
+                "附魔").ToMutable();
+            if (!enchantment.CanEnchant(card.Preview))
+            {
+                throw new InvalidOperationException(
+                    $"附魔 {enchantment.Id} 不能用于模拟测试卡牌 {card.Preview.Id}。");
+            }
+            card.Enchant(enchantment, injection.EnchantmentAmount);
+        }
+        if (!string.IsNullOrWhiteSpace(injection.AfflictionId))
+        {
+            AfflictionModel affliction = ResolveUnique(
+                ModelDb.DebugAfflictions,
+                injection.AfflictionId,
+                "苦难").ToMutable();
+            card.Afflict(affliction, injection.AfflictionAmount);
+        }
+        simulator.AddGeneratedCardToCombat(card, pileType, player);
+        combat.NormalizeCardAfflictions(simulator);
+        return card;
+    }
+
+    private static void ApplySimulatedPowerInjection(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        CombatState combatState,
+        Player player,
+        UnattendedPowerInjection injection,
+        Creature checkedEnemy)
+    {
+        if (injection.DynamicVars.Count > 0 || injection.InternalIntegerMembers.Count > 0)
+            throw new InvalidOperationException("行动后模拟 Power 注入不支持动态变量或预置内部状态。");
+        Creature owner = ResolvePowerInjectionCreature(
+            combatState,
+            player,
+            checkedEnemy,
+            injection.Target,
+            injection.TargetIndex,
+            "所有者");
+        if (!string.IsNullOrWhiteSpace(injection.PowerTarget)
+            && !ReferenceEquals(owner, ResolvePowerInjectionCreature(
+                combatState,
+                player,
+                checkedEnemy,
+                injection.PowerTarget,
+                injection.PowerTargetIndex,
+                "效果目标")))
+        {
+            throw new InvalidOperationException("行动后模拟 Power 注入暂不支持独立效果目标。");
+        }
+        Creature applier = string.IsNullOrWhiteSpace(injection.Applier)
+            ? player.Creature
+            : ResolvePowerInjectionCreature(
+                combatState,
+                player,
+                checkedEnemy,
+                injection.Applier,
+                injection.ApplierIndex,
+                "施加者");
+        PowerModel canonical = ResolveUnique(ModelDb.AllPowers, injection.PowerId, "Power");
+        if (canonical is VoidFormPower)
+            TurnStartPowerSupport.PrepareVoidFormApplication(simulator, combat, owner);
+        combat.ApplyPower(canonical.GetType(), owner, injection.Amount, applier);
+    }
+
+    private static PredictedCard FindSimulatedHandCard(
+        CombatPredictionSimulator simulator,
+        Player player,
+        string cardId,
+        int occurrence)
+        => simulator.State.GetPlayerCombatState(player).Hand.Cards
+            .Where(card => card.Preview.Id.Entry.Equals(cardId, StringComparison.Ordinal))
+            .Skip(occurrence)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException($"模拟手牌中找不到 {cardId}#{occurrence}。");
+
+    private static IReadOnlyList<PlanCardChoice> BuildAutoPrePlayChoices(
+        CombatPredictionSimulator simulator,
+        Player player,
+        IReadOnlyList<string> choiceCardIds)
+    {
+        if (choiceCardIds.Count == 0)
+            return [];
+
+        PredictedCard imbuedCard = simulator.State.GetPlayerCombatState(player).AllCards
+            .FirstOrDefault(card => string.Equals(
+                card.Preview.Enchantment?.Id.Entry,
+                "IMBUED",
+                StringComparison.Ordinal))
+            ?? throw new InvalidOperationException("测试请求了助能选牌，但当前战斗没有助能卡牌。");
+        CardChoiceSpec spec = CardChoiceSupport.GetSpec(simulator, imbuedCard)
+            ?? throw new InvalidOperationException(
+                $"助能卡牌 {imbuedCard.Preview.Id.Entry} 没有可搜索的选牌定义。");
+        PlanCardChoice choice = CardChoiceSupport.BuildRequestedChoice(spec, choiceCardIds) with
+        {
+            SourceId = "IMBUED",
+            ContextId = $"{imbuedCard.Preview.Id.Entry}+{imbuedCard.Preview.CurrentUpgradeLevel}#0",
+        };
+        return [choice];
+    }
+
+    private static CardModel FindActualHandCard(Player player, string cardId, int occurrence)
+        => player.PlayerCombatState!.Hand.Cards
+            .Where(card => card.Id.Entry.Equals(cardId, StringComparison.Ordinal))
+            .Skip(occurrence)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException($"实机手牌中找不到 {cardId}#{occurrence}。");
+
+    private static void PlaySimulatedCard(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        PredictedCard card,
+        Creature? target,
+        IReadOnlyList<Creature> enemies,
+        IReadOnlyList<string>? choiceCardIds = null,
+        IReadOnlyList<string>? expectedExcludedChoiceCardIds = null)
+    {
+        CardPlayPowerSuppression suppression = combat.SuppressHistorySensitiveCardModifiers(card);
+        HashSet<uint> processedEnemyDeaths = [];
+        IReadOnlyList<string> requestedChoiceCardIds = choiceCardIds ?? [];
+        TurnStartChoiceCursor choices = choiceCardIds == null
+            ? new TurnStartChoiceCursor(null)
+            : TurnStartChoiceCursor.ForAutomaticPolicy(request =>
+            {
+                CardChoiceSpec spec = request.Spec
+                    ?? throw new InvalidOperationException(
+                        $"测试动作选牌 {request.SourceId}/{request.Effect} 缺少候选定义。");
+                foreach (string excludedCardId in expectedExcludedChoiceCardIds ?? [])
+                {
+                    if (spec.Options.Any(option => option.Preview.Id.Entry.Equals(
+                            excludedCardId,
+                            StringComparison.Ordinal)))
+                    {
+                        throw new InvalidOperationException(
+                            $"模拟测试选牌候选不应包含 {excludedCardId}。");
+                    }
+                }
+                return CardChoiceSupport.BuildRequestedChoice(spec, requestedChoiceCardIds);
+            });
+        combat.BeginActionChoices(choices);
+        using IDisposable cardExecutionScope = combat.BeginCardExecutionScope(processedEnemyDeaths);
+        try
+        {
+            simulator.ManualPlay(card, target, out _);
+        }
+        finally
+        {
+            combat.RestoreHistorySensitiveCardModifiers(suppression);
+            combat.EndActionChoices();
+        }
+        combat.NormalizeAeonglassWithers(simulator);
+        combat.NormalizeCardAfflictions(simulator);
+        CorePowerSupport.ApplyEnemyDeathPowers(simulator, combat, enemies, processedEnemyDeaths);
+    }
+
+    private static Creature? ResolvePlayTarget(string target, Creature enemy)
+        => target switch
+        {
+            "Enemy" => enemy,
+            "Player" => LocalContext.GetMe(enemy.CombatState
+                ?? throw new InvalidOperationException("测试敌人没有战斗状态。"))?.Creature
+                ?? throw new InvalidOperationException("测试战斗找不到本地玩家。"),
+            "None" => null,
+            _ => throw new InvalidOperationException($"不支持的测试出牌目标 {target}。"),
+        };
+
+    private async Task NextFrameAsync()
+    {
+        await _host.ToSignal(_host.GetTree(), SceneTree.SignalName.ProcessFrame);
+    }
+
+    private void EnsureWithinDeadline()
+    {
+        if (_stopwatch.Elapsed.TotalSeconds > _request.TimeoutSeconds)
+            throw new TimeoutException($"无人测试在阶段 {_stage} 超过 {_request.TimeoutSeconds:F0} 秒。");
+    }
+
+    private void SetStage(string stage)
+    {
+        _stage = stage;
+        Entry.Logger.Info($"[CombatSolver/Unattended] STAGE run_id={_request.RunId} stage={stage}");
+    }
+
+    private async Task ExitIfRequestedAsync(int exitCode)
+    {
+        if (!_request.ExitOnComplete)
+            return;
+        await NextFrameAsync();
+        _host.GetTree().Quit(exitCode);
+    }
+}

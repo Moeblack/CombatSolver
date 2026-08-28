@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <Sts2Dir>D:\Path\To\Slay the Spire 2</Sts2Dir>
+    <Sts2DataDir>$(Sts2Dir)\data_sts2_windows_x86_64</Sts2DataDir>
+    <RitsuLibDir>D:\Path\To\RitsuLib\lib\0.111.0</RitsuLibDir>
+    <RandomForeseerSourceDir>D:\Path\To\StS2.RandomForeseer</RandomForeseerSourceDir>
+  </PropertyGroup>
+</Project>

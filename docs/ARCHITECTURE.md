@@ -1,0 +1,140 @@
+# CombatSolver 架构与职责地图
+
+本文描述当前源码的所有权边界。它面向维护者和 coding agent；玩家功能说明见根目录 `README.md`，历史重构证据见 `docs/refactoring/`。
+
+职责迁移时优先更新本文和 `tools/verify-refactor-boundaries.ps1`。历史审计记录保留当时结论，不承担当前导航职责。
+
+## 1. 运行链
+
+```text
+Entry / turn hooks
+  -> SolverController（主线程会话与请求）
+  -> CombatRootSnapshot.Capture（主线程稳定根）
+  -> CombatSearchCoordinator（后台主搜索与反事实审计）
+  -> CombatBeamSolver（分支搜索）
+  -> SolverResult
+  -> SolverOverlaySnapshot.Capture（主线程 UI 投影）
+  -> Overlay renderer / 原版部署入口
+```
+
+搜索 worker 接收 `CombatRootSnapshot`、`SearchPolicySnapshot`、诊断 sink、帧压力信号和取消令牌。它不读取全局设置、控制器、UI 或无人测试状态。
+
+## 2. Runtime
+
+| 文件 | 职责 | 不负责 |
+|---|---|---|
+| `src/Runtime/Entry.cs` | Mod 初始化、补丁安装、战斗与回合生命周期入口、无人请求循环启动 | 搜索策略和战斗语义 |
+| `src/Runtime/SolverController.cs` | 主线程搜索/续用/部署/全自动编排，结果过期与重算审计 | Beam 内部算法和 UI 布局 |
+| `src/Runtime/SolverControllerSessions.cs` | combat/search/deployment 三类会话的状态与取消所有权 | 跨会话全局静态字段堆积 |
+| `src/Runtime/CombatRootSnapshot.cs` | 主线程捕获完整预测根，比较捕获前后 live 状态，并向 worker 提供 Fork 根 | worker 惰性读取 live 战斗 |
+| `src/Runtime/ContinuationStamp.cs` | 跨回合 live/predicted 状态文本、首个差异与完整差异 | Beam 状态去重 |
+| `src/Runtime/SearchGcPolicy.cs` | 战斗级 No-GC、搜索内后台全代回收续搜、战斗结束后台回收及新搜索入口协调 | Beam 剪枝、候选评分与模拟语义 |
+| `src/Runtime/SearchMemoryPressureSignal.cs` | 将 Runtime 的进程分配边界和回收入口注入搜索；不让 Search 直接操作 GC 模式 | 设置读取与搜索评分 |
+| `src/Runtime/PlayerTurnSetupPatches.cs` | 首回合原生页面出现后的 Start 根搜索；后续回合观察上一轮 `EndTurn.TurnStartChoices` 的原生页面，全自动直接可见重放，单步默认交还玩家并允许执行/全自动入口接管既有选择；进入 Play 后交给 continuation 核对 | 普通 Play 阶段搜索与动作部署 |
+| `src/Runtime/NativeChoiceRuntime.cs` | 观测原版战斗选择请求，按卡牌语义状态匹配计划实例，并锁定、驱动真实页面控件 | 选择分支枚举和战斗结算 |
+| `src/Runtime/CombatBugReportExporter.cs` | 当前/最近战斗取证包导出 | 通用 replay/native-state 导入 |
+
+`SolverCombatSession` 持有本场路线、续用和重算状态；`SolverSearchSession` 持有 generation、取消、进度和帧观测；`SolverDeploymentSession` 持有部署取消。旧回调只能写回创建它的 search session。
+
+## 3. Search
+
+### 3.1 请求级编排
+
+- `SearchPolicySnapshot.cs`：主线程捕获的不可变搜索设置。
+- `SearchDiagnosticsSink.cs`：搜索日志出口。
+- `SearchFramePressureSignal.cs`：Runtime 向 worker 提供的帧压力信号。
+- `CombatSearchCoordinator.cs`：一次请求的主搜索，以及 Disabled/Smart/RequireAtLeastOne 所需的无药或限药反事实审计；合并多次搜索的总指标。
+- `CombatPlan.cs`：Runtime 消费的计划、结果和续用数据。结果不得保留历史 Simulator 对象图。
+
+### 3.2 CombatBeamSolver 分片
+
+| 文件 | 权威职责 |
+|---|---|
+| `CombatBeamSolver.cs` | 构造参数、不可变根配置、`SearchRunContext` 与两个策略对象接线 |
+| `CombatBeamSolver.Models.cs` | `SearchNode`、`SimulationSnapshot`、转置标签、`SearchFeatures`、单次运行 `SearchRunContext` |
+| `CombatBeamSolver.Phases.cs` | `Solve`、阶段循环、预算边界与进度检查点 |
+| `CombatBeamSolver.Expansion.cs` | 可执行卡牌/药水/结束回合候选展开和动作回放入口 |
+| `CombatBeamSolver.Retention.cs` | prune/retention 调用边界与相关小型辅助 |
+| `CombatBeamSolver.BeamRetentionPolicy.cs` | 状态去重、中间分数排序、多样性通道、动作/回合开始选牌保路、药水配额和小型 Pareto |
+| `CombatBeamSolver.FinalPlanOrdering.cs` | 终局胜负、偷窃、战损、药水、卖血和搜索边界排序 |
+| `CombatBeamSolver.StateEvaluation.cs` | 搜索快照、评分、威胁、stand-pat 和状态特征 |
+| `CombatBeamSolver.Terminal.cs` | 终局精确回放、逐回合结果、击杀与遗物标注 |
+
+`SearchRunContext` 只活于一次 solver：计数器、性能指标、节流器、转置表和 stand-pat/威胁/coverage/路由缓存均在这里。根配置留在 solver，不把可变运行状态退回入口文件。
+
+`BeamRetentionPolicy` 决定哪些中间候选继续活着；动作选牌、嵌套选牌和 `EndTurn.TurnStartChoices` 都以来源、效果、卡牌语义状态和上下文形成保路签名。`FinalPlanOrdering` 决定完整候选中最终采用哪条。两者不能合并成单一“总分排序”。`SearchFeatures` 是终局排序读取节点状态的只读投影。
+
+### 3.3 分支战斗状态
+
+`SimulatedCombatState*.cs` 把内嵌引擎状态适配为搜索所需的战斗领域视图：
+
+- `Fork.cs`：统一稳定边界和对象图复制；
+- `MonsterAi.cs` / `MonsterState.cs`：分支行动、私有 AI、已知怪物静态值；
+- `DeathLifecycle.cs`：死亡、复活与阵容事务；
+- `ActionChoices.cs` / `TurnStartChoices.cs` / `AutoPlay.cs`：嵌套选择与自动出牌；
+- `CardLifecycle.cs` / `CardPowerHistory.cs` / `PowerLifecycle.cs`：卡牌和 Power 跨事件状态；
+- `Relics.cs`、`PowerRelics.cs`、`ReactiveRelics.cs` 等：遗物与组合事务；
+- `Potions.cs`：药水槽和使用状态。
+
+活动 roster 只决定当前可行动、可选目标和 listener。已经捕获的怪物 AI/静态参数属于已知怪物和分支生命周期，不能在移出活动 roster 时提前删除。
+
+## 4. 内嵌模拟引擎
+
+### 4.1 基础层
+
+`src/Engine/InCombat/Simulation/` 负责通用战斗命令时序、伤害、牌堆、历史、RNG、球和 Fork。它不包含单张卡、单个 Power 或具体怪物的搜索策略。
+
+`src/Engine/Common/` 提供 `PredictedCard`、`PredictionForkContext`、`PredictionStateStore` 和通用模型克隆。一次 Fork 内的所有结构必须共享同一个 context；分支可变对象必须显式重映射。
+
+### 4.2 Mirror
+
+`src/Engine/InCombat/Mirrors/` 精确实现原版 Hook、卡牌、药水、附魔和球方法。Facade 保持原版调用时序，registry 按运行时类型与方法分派。
+
+`MethodMirrorRegistry` 同时实现 `IMethodMirrorRegistryDescriptorProvider`。`MethodMirrorRegistryDescriptor` 描述基础方法、receiver、显式 Handled/Ignored 注册和当前 inferrer；CoverageCatalog 只消费该描述符，不读取 registry 私有字段或 `MirrorMethodSpec` 内部布局。
+
+## 5. Prediction 领域补偿
+
+`src/Prediction/` 处理基础命令和单个 mirror 不能独立表达的领域语义：
+
+- 卡牌/Power/遗物/药水/球的跨 Hook 生命周期；
+- 怪物行动图、随机分支、私有 AI 与召唤；
+- 死亡、复活、自动出牌和嵌套选牌；
+- 第三方 ModHook subscriber 的主线程捕获与分支重建；
+- 覆盖分类和动态状态字段政策。
+
+这里可以保存具体领域规则，但不能决定 Beam 配额、最终路线或 UI 显示。新增补偿前检查 mirror、spec、support 和 `SimulatedCombatState` 的完整调用链，确保只有一个权威结算点。
+
+## 6. UI
+
+`src/UI/SolverOverlaySnapshot.cs` 是结果到显示数据的唯一转换边界。它在主线程复制状态、概览、详情、回合、动作标题、选牌文本、遗物标注、击杀、tooltip 和视觉类别。
+
+以下 renderer 只接受不可变 snapshot：
+
+- `SolverOverlay.ShowResult(Node, SolverOverlaySnapshot)`；
+- `SolverRouteRow.Populate(SolverOverlayTurnSnapshot)`；
+- `SolverActionPill.Create(SolverOverlayActionSnapshot)`。
+
+renderer 不得重新读取 `SolverResult`、`PlanAction`、`PlanCardChoice` 或 `ModelDb`。部署需要的标量由 Runtime 单独持有，不从控件反向读取。
+
+## 7. Unattended 测试
+
+`UnattendedTestRunner` 保留请求级编排和现有 fixture helper。新增流程应落到明确所有者：
+
+| 组件 | 职责 |
+|---|---|
+| `ProtocolHost` | 请求文件循环、协议校验、进程复用、每请求测试开关、漂移注入与 reset |
+| `ScenarioBuilder` | 建立跑局/遭遇、加载快照、注入牌/Power/遗物/药水/球/RNG，返回 `ScenarioContext` |
+| `Executor` | 分派严格差分、应用临时设置、启动搜索/全自动、等待复用/暂停/结束并恢复设置 |
+| `Assertions` | 执行前边界检查和执行后的回合、生命、出牌、药水、Power 断言 |
+| `Writer` | Passed/Held/Failed 公共协议字段、内存采集和结果文件原子替换 |
+
+不要从深层 fixture 直接写结果，不要在 entry 中重新建立战斗，也不要让断言负责执行动作。
+
+## 8. 工具与结构门禁
+
+- `tools/run-unattended-test.ps1`：隔离 headless 进程、请求协议和结果读取。
+- `tools/run-visible-steam-benchmark.ps1`：正常可见 Steam 会话的搜索、GC 与帧口径。
+- `tools/CoverageCatalog/Program.cs`：当前程序集和 registry descriptor 的覆盖目录生成/验证。
+- `tools/verify-refactor-boundaries.ps1`：阻止 Search 全局依赖、旧 controller 字段、worker live 回读、Beam 职责回流、unattended 编排回流、UI mutable 类型回流和 registry 私有反射。
+
+纯职责移动至少运行 Release 编译与结构门禁。改变语义、搜索或显示行为时，再按影响面选择严格差分、完整 headless、CoverageCatalog 或可见 Steam。

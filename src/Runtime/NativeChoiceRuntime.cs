@@ -1,0 +1,781 @@
+using System.Reflection;
+using System.Threading.Channels;
+using Godot;
+using HarmonyLib;
+using MegaCrit.Sts2.Core.CardSelection;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.CardRewardAlternatives;
+using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Cards;
+using MegaCrit.Sts2.Core.Nodes.Cards.Holders;
+using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.CommonUi;
+using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
+using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
+using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
+using STS2RitsuLib.Patching.Models;
+
+namespace CombatSolver;
+
+internal enum NativeChoiceSurfaceKind
+{
+    ChooseCard,
+    SimpleGrid,
+    CombatPile,
+    Hand,
+    HandUpgrade,
+}
+
+internal sealed record NativeChoiceRequest(
+    long Sequence,
+    NativeChoiceSurfaceKind Surface,
+    Player Player,
+    IReadOnlyList<CardModel> Options,
+    int MinSelect,
+    int MaxSelect,
+    bool RequiresSurface,
+    bool CanSkip,
+    bool RequireManualConfirmation,
+    string SourceId);
+
+internal sealed record NativeChoiceTrace(
+    long Order,
+    long Sequence,
+    string Owner,
+    NativeChoiceSurfaceKind Surface,
+    string Stage,
+    int Turn,
+    long OccurredAtMilliseconds);
+
+internal static class NativeChoiceRuntime
+{
+    private static readonly Stack<NativeChoiceSession> Sessions = [];
+    private static readonly List<NativeChoiceTrace> Traces = [];
+    private static readonly object TraceSync = new();
+    private static long _nextSequence;
+    private static long _nextTraceOrder;
+
+    internal static IReadOnlyList<NativeChoiceTrace> TraceSnapshotForTesting
+    {
+        get
+        {
+            lock (TraceSync)
+                return Traces.ToArray();
+        }
+    }
+
+    internal static void ResetTraceForTesting()
+    {
+        lock (TraceSync)
+        {
+            Traces.Clear();
+            _nextTraceOrder = 0;
+        }
+    }
+
+    public static NativeChoiceSession Begin(
+        CombatState combat,
+        Player player,
+        string owner)
+    {
+        NativeChoiceSession session = new(combat, player, owner);
+        Sessions.Push(session);
+        return session;
+    }
+
+    public static void Observe(
+        NativeChoiceSurfaceKind surface,
+        Player player,
+        IReadOnlyList<CardModel> options,
+        int minSelect,
+        int maxSelect,
+        bool requiresSurface,
+        bool canSkip = false,
+        bool requireManualConfirmation = false,
+        string sourceId = "")
+    {
+        if (CardSelectCmd.Selector != null || Sessions.Count == 0)
+            return;
+        NativeChoiceSession session = Sessions.Peek();
+        if (!ReferenceEquals(session.Player, player)
+            || !ReferenceEquals(session.Combat, CombatManager.Instance.DebugOnlyGetState()))
+        {
+            return;
+        }
+
+        int optionCount = options.Count;
+        session.Enqueue(new NativeChoiceRequest(
+            Interlocked.Increment(ref _nextSequence),
+            surface,
+            player,
+            options.ToArray(),
+            Math.Min(minSelect, optionCount),
+            Math.Min(maxSelect, optionCount),
+            requiresSurface,
+            canSkip,
+            requireManualConfirmation,
+            sourceId));
+    }
+
+    internal static void End(NativeChoiceSession session)
+    {
+        if (Sessions.Count == 0 || !ReferenceEquals(Sessions.Peek(), session))
+            throw new InvalidOperationException($"原生选牌会话 {session.Owner} 没有位于活动栈顶。");
+        Sessions.Pop();
+    }
+
+    internal static void RecordTrace(
+        NativeChoiceSession session,
+        NativeChoiceRequest request,
+        string stage)
+    {
+        int turn = session.Player.PlayerCombatState?.TurnNumber ?? -1;
+        lock (TraceSync)
+        {
+            Traces.Add(new NativeChoiceTrace(
+                ++_nextTraceOrder,
+                request.Sequence,
+                session.Owner,
+                request.Surface,
+                stage,
+                turn,
+                System.Environment.TickCount64));
+        }
+    }
+}
+
+internal sealed class NativeChoiceSession : IDisposable
+{
+    private readonly Channel<NativeChoiceRequest> _requests = Channel.CreateUnbounded<NativeChoiceRequest>(
+        new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+    private readonly TaskCompletionSource<NativeChoiceRequest> _firstVisibleRequest = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _firstSurfaceSync = new();
+    private readonly HashSet<long> _visibleTraceSequences = [];
+    private Task<NativeChoiceSurfaceLock>? _firstSurfaceTask;
+    private NativeChoiceSurfaceLock? _firstSurfaceLock;
+    private CancellationTokenSource? _driverCancellation;
+    private IReadOnlyList<PlanCardChoice>? _plans;
+    private Task? _driver;
+    private bool _producerCompleted;
+    private bool _disposed;
+
+    public NativeChoiceSession(CombatState combat, Player player, string owner)
+    {
+        Combat = combat;
+        Player = player;
+        Owner = owner;
+    }
+
+    public CombatState Combat { get; }
+    public Player Player { get; }
+    public string Owner { get; }
+    public bool HasVisibleRequest => _firstVisibleRequest.Task.IsCompletedSuccessfully;
+    public bool IsVisibleSurfaceOpen
+        => _firstVisibleRequest.Task.IsCompletedSuccessfully
+           && NativeChoiceSurface.IsVisible(_firstVisibleRequest.Task.Result.Surface);
+
+    public void Enqueue(NativeChoiceRequest request)
+    {
+        if (_producerCompleted)
+            throw new InvalidOperationException($"原生选牌会话 {Owner} 完成后又收到选择请求。");
+        if (!_requests.Writer.TryWrite(request))
+            throw new InvalidOperationException($"原生选牌会话 {Owner} 无法记录选择请求。");
+        if (request.RequiresSurface)
+            _firstVisibleRequest.TrySetResult(request);
+        NativeChoiceRuntime.RecordTrace(this, request, "Requested");
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] NATIVE_CHOICE_REQUEST owner={Owner} sequence={request.Sequence} " +
+            $"surface={request.Surface} visible={request.RequiresSurface} source={request.SourceId} " +
+            $"options={request.Options.Count} select={request.MinSelect}..{request.MaxSelect}");
+    }
+
+    public async Task<bool> WaitForFirstVisibleSurfaceAsync(
+        NGame host,
+        Task phaseTask,
+        CancellationToken token)
+    {
+        Task winner = await Task.WhenAny(_firstVisibleRequest.Task, phaseTask);
+        if (ReferenceEquals(winner, phaseTask))
+        {
+            await phaseTask;
+            return false;
+        }
+
+        NativeChoiceRequest request = await _firstVisibleRequest.Task.WaitAsync(token);
+        Task<NativeChoiceSurfaceLock> surfaceTask;
+        lock (_firstSurfaceSync)
+        {
+            _firstSurfaceTask ??= NativeChoiceSurface.WaitAndLockAsync(host, request, token);
+            surfaceTask = _firstSurfaceTask;
+        }
+        _firstSurfaceLock = await surfaceTask;
+        RecordVisibleOnce(request);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] NATIVE_CHOICE_VISIBLE owner={Owner} sequence={request.Sequence} " +
+            $"surface={request.Surface}");
+        return true;
+    }
+
+    public void RecordSearchStarted()
+    {
+        NativeChoiceRequest request = _firstVisibleRequest.Task.IsCompletedSuccessfully
+            ? _firstVisibleRequest.Task.Result
+            : throw new InvalidOperationException($"原生选牌会话 {Owner} 尚未显示页面。");
+        NativeChoiceRuntime.RecordTrace(this, request, "SearchStarted");
+    }
+
+    public void SetPlanAndStartDriving(
+        NGame host,
+        IReadOnlyList<PlanCardChoice> plans,
+        CancellationToken token)
+    {
+        if (_plans != null)
+            throw new InvalidOperationException($"原生选牌会话 {Owner} 已经安装计划。");
+        _plans = plans;
+        _driverCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+        _driver = DriveAsync(host, _driverCancellation.Token);
+    }
+
+    public async Task AwaitProducerAndCompleteAsync(Task producerTask)
+    {
+        Task driver = _driver
+            ?? throw new InvalidOperationException($"原生选牌会话 {Owner} 尚未启动驱动器。");
+        Task winner = await Task.WhenAny(producerTask, driver);
+        if (ReferenceEquals(winner, driver) && !producerTask.IsCompleted)
+            await driver;
+        await producerTask;
+        await CompleteAsync();
+    }
+
+    public async Task AwaitPhaseAsync(Task phaseTask)
+    {
+        if (_driver == null)
+        {
+            await phaseTask;
+            return;
+        }
+        Task winner = await Task.WhenAny(phaseTask, _driver);
+        if (ReferenceEquals(winner, _driver) && !phaseTask.IsCompleted)
+            await _driver;
+        await phaseTask;
+    }
+
+    public async Task CompleteAsync()
+    {
+        if (_producerCompleted)
+            throw new InvalidOperationException($"原生选牌会话 {Owner} 被重复完成。");
+        _producerCompleted = true;
+        _requests.Writer.Complete();
+        if (_driver != null)
+            await _driver;
+    }
+
+    public void ReleaseVisibleSurface()
+    {
+        _firstSurfaceLock?.Dispose();
+        _firstSurfaceLock = null;
+    }
+
+    private async Task DriveAsync(NGame host, CancellationToken token)
+    {
+        IReadOnlyList<PlanCardChoice> plans = _plans
+            ?? throw new InvalidOperationException($"原生选牌会话 {Owner} 缺少计划。");
+        int planIndex = 0;
+        await foreach (NativeChoiceRequest request in _requests.Reader.ReadAllAsync(token))
+        {
+            if (planIndex >= plans.Count)
+            {
+                throw new InvalidOperationException(
+                    $"原生选牌会话 {Owner} 收到计划外选择：{request.SourceId}/{request.Surface}。");
+            }
+
+            PlanCardChoice plan = plans[planIndex];
+            IReadOnlyList<CardModel> selected = ResolvePlannedCards(plan, request);
+            if (request.RequiresSurface)
+            {
+                NativeChoiceSurfaceLock surfaceLock;
+                if (_firstSurfaceLock is { } first && first.Request.Sequence == request.Sequence)
+                {
+                    surfaceLock = first;
+                    _firstSurfaceLock = null;
+                }
+                else
+                {
+                    surfaceLock = await NativeChoiceSurface.WaitAndLockAsync(host, request, token);
+                }
+                RecordVisibleOnce(request);
+                using (surfaceLock)
+                    await NativeChoiceSurface.SelectAsync(host, surfaceLock, request, selected, token);
+            }
+            else
+            {
+                ValidateImplicitSelection(request, selected);
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] NATIVE_CHOICE_IMPLICIT owner={Owner} sequence={request.Sequence} " +
+                    $"source={plan.SourceId} cards={string.Join(',', plan.Cards.Select(card => card.CardId))}");
+            }
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] NATIVE_CHOICE_SELECTED owner={Owner} sequence={request.Sequence} " +
+                $"surface={request.Surface} source={plan.SourceId} " +
+                $"planned={string.Join(',', plan.Cards.Select(card =>
+                    $"{card.CardId}+{card.UpgradeLevel}#src{card.SourceOccurrence}/opt{card.OptionOccurrence}"))} " +
+                $"selected={string.Join(',', selected.Select(CardChoiceSupport.ChoiceCardKey))}");
+            NativeChoiceRuntime.RecordTrace(this, request, "Selected");
+            planIndex++;
+        }
+
+        while (planIndex < plans.Count && plans[planIndex].Cards.Count == 0)
+            planIndex++;
+        if (planIndex != plans.Count)
+        {
+            PlanCardChoice next = plans[planIndex];
+            throw new InvalidOperationException(
+                $"原生选牌会话 {Owner} 仍有 {plans.Count - planIndex} 个计划没有被游戏请求；" +
+                $"下一个={next.SourceId}/{next.Effect}/{next.ContextId}。");
+        }
+    }
+
+    private static IReadOnlyList<CardModel> ResolvePlannedCards(
+        PlanCardChoice plan,
+        NativeChoiceRequest request)
+    {
+        List<CardModel> selected = [];
+        foreach (PlanCardToken token in plan.Cards)
+        {
+            CardModel card = request.Options.Where(option => CardChoiceSupport.MatchesToken(option, token))
+                .Skip(token.OptionOccurrence)
+                .FirstOrDefault()
+                ?? throw new InvalidOperationException(
+                    $"原生选牌页面找不到 {token.CardId}+{token.UpgradeLevel}#{token.OptionOccurrence}；" +
+                    $"候选={string.Join(',', request.Options.Select(CardChoiceSupport.ChoiceCardKey))}。");
+            if (selected.Contains(card))
+                throw new InvalidOperationException($"原生选牌计划重复选择了 {token.CardId}。");
+            selected.Add(card);
+        }
+
+        if (selected.Count < request.MinSelect || selected.Count > request.MaxSelect)
+        {
+            throw new InvalidOperationException(
+                $"原生选牌计划选择 {selected.Count} 张，页面要求 {request.MinSelect}..{request.MaxSelect} 张。");
+        }
+        return selected;
+    }
+
+    private void RecordVisibleOnce(NativeChoiceRequest request)
+    {
+        if (_visibleTraceSequences.Add(request.Sequence))
+            NativeChoiceRuntime.RecordTrace(this, request, "Visible");
+    }
+
+    private static void ValidateImplicitSelection(
+        NativeChoiceRequest request,
+        IReadOnlyList<CardModel> selected)
+    {
+        if (request.Options.Count == 0)
+        {
+            if (selected.Count != 0)
+                throw new InvalidOperationException("无候选的原生选择包含计划卡牌。");
+            return;
+        }
+        if (selected.Count != request.Options.Count
+            || selected.Any(card => !request.Options.Contains(card)))
+        {
+            throw new InvalidOperationException(
+                $"原版会隐式选择全部 {request.Options.Count} 张牌，但计划选择了 {selected.Count} 张。");
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        _driverCancellation?.Cancel();
+        _driverCancellation?.Dispose();
+        _driverCancellation = null;
+        if (!_producerCompleted)
+            _requests.Writer.TryComplete();
+        ReleaseVisibleSurface();
+        NativeChoiceRuntime.End(this);
+    }
+}
+
+internal sealed class NativeChoiceSurfaceLock(
+    NativeChoiceRequest request,
+    Node surface,
+    Control blocker,
+    NPlayerHand? hand,
+    bool handUnhandledInput) : IDisposable
+{
+    private bool _disposed;
+
+    public NativeChoiceRequest Request { get; } = request;
+    public Node Surface { get; } = surface;
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+        _disposed = true;
+        if (GodotObject.IsInstanceValid(blocker))
+        {
+            blocker.GetParent()?.RemoveChild(blocker);
+            blocker.QueueFree();
+        }
+        if (hand != null && GodotObject.IsInstanceValid(hand))
+            hand.SetProcessUnhandledInput(handUnhandledInput);
+    }
+}
+
+internal static class NativeChoiceSurface
+{
+    private const long SurfaceTimeoutMilliseconds = 30_000;
+    private const ulong ChooseCardMinimumOpenMilliseconds = 400;
+    private const ulong OtherSurfaceMinimumOpenMilliseconds = 250;
+    private const ulong MultiSelectStepMilliseconds = 150;
+
+    public static bool IsVisible(NativeChoiceSurfaceKind kind)
+        => FindSurface(kind) is CanvasItem canvas
+           && canvas.IsInsideTree()
+           && canvas.IsVisibleInTree();
+
+    public static async Task<NativeChoiceSurfaceLock> WaitAndLockAsync(
+        NGame host,
+        NativeChoiceRequest request,
+        CancellationToken token)
+    {
+        long deadline = System.Environment.TickCount64 + SurfaceTimeoutMilliseconds;
+        while (true)
+        {
+            token.ThrowIfCancellationRequested();
+            Node? surface = FindSurface(request.Surface);
+            if (surface is CanvasItem canvas && surface.IsInsideTree() && canvas.IsVisibleInTree())
+            {
+                Control blocker = new()
+                {
+                    Name = $"CombatSolverChoiceBlocker{request.Sequence}",
+                    MouseFilter = Control.MouseFilterEnum.Stop,
+                    FocusMode = Control.FocusModeEnum.All,
+                };
+                surface.AddChild(blocker);
+                blocker.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.FullRect);
+                blocker.MoveToFront();
+                NPlayerHand? hand = surface as NPlayerHand;
+                bool handUnhandledInput = hand?.IsProcessingUnhandledInput() ?? false;
+                hand?.SetProcessUnhandledInput(false);
+                blocker.CallDeferred(Control.MethodName.GrabFocus);
+                return new NativeChoiceSurfaceLock(request, surface, blocker, hand, handUnhandledInput);
+            }
+            if (System.Environment.TickCount64 >= deadline)
+            {
+                throw new TimeoutException(
+                    $"30 秒内没有出现原生选牌页面 {request.Surface}（来源 {request.SourceId}）。");
+            }
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+    }
+
+    public static async Task SelectAsync(
+        NGame host,
+        NativeChoiceSurfaceLock surfaceLock,
+        NativeChoiceRequest request,
+        IReadOnlyList<CardModel> selected,
+        CancellationToken token)
+    {
+        ulong minimumOpenMilliseconds = request.Surface == NativeChoiceSurfaceKind.ChooseCard
+            ? ChooseCardMinimumOpenMilliseconds
+            : OtherSurfaceMinimumOpenMilliseconds;
+        ulong openedAt = Time.GetTicksMsec();
+        while (Time.GetTicksMsec() - openedAt < minimumOpenMilliseconds)
+        {
+            token.ThrowIfCancellationRequested();
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+        surfaceLock.Dispose();
+
+        switch (request.Surface)
+        {
+            case NativeChoiceSurfaceKind.ChooseCard:
+                SelectChooseCard(surfaceLock.Surface, request, selected);
+                break;
+            case NativeChoiceSurfaceKind.SimpleGrid:
+            case NativeChoiceSurfaceKind.CombatPile:
+                await SelectGridAsync(host, surfaceLock.Surface, request, selected, token);
+                break;
+            case NativeChoiceSurfaceKind.Hand:
+            case NativeChoiceSurfaceKind.HandUpgrade:
+                await SelectHandAsync(host, surfaceLock.Surface, selected, token);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(request.Surface), request.Surface, null);
+        }
+        await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+    }
+
+    private static void SelectChooseCard(
+        Node surface,
+        NativeChoiceRequest request,
+        IReadOnlyList<CardModel> selected)
+    {
+        if (selected.Count == 0)
+        {
+            if (!request.CanSkip)
+                throw new InvalidOperationException("原生三选一页面不可跳过，但计划没有选择卡牌。");
+            NChoiceSelectionSkipButton skip = surface.GetNode<NChoiceSelectionSkipButton>("SkipButton");
+            skip.EmitSignal(NClickableControl.SignalName.Released, skip);
+            return;
+        }
+        if (selected.Count != 1)
+            throw new InvalidOperationException($"原生三选一页面计划选择了 {selected.Count} 张牌。");
+        NCardHolder holder = Descendants<NCardHolder>(surface)
+            .FirstOrDefault(candidate => ReferenceEquals(candidate.CardModel, selected[0]))
+            ?? throw new InvalidOperationException($"原生三选一页面没有 {selected[0].Id.Entry} 的卡牌节点。");
+        holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
+    }
+
+    private static async Task SelectGridAsync(
+        NGame host,
+        Node surface,
+        NativeChoiceRequest request,
+        IReadOnlyList<CardModel> selected,
+        CancellationToken token)
+    {
+        NCardGrid grid = Descendants<NCardGrid>(surface).Single();
+        foreach (CardModel card in selected)
+        {
+            NGridCardHolder holder = Descendants<NGridCardHolder>(surface)
+                .FirstOrDefault(candidate => ReferenceEquals(candidate.CardModel, card))
+                ?? throw new InvalidOperationException($"原生网格页面没有 {card.Id.Entry} 的卡牌节点。");
+            grid.EmitSignal(NCardGrid.SignalName.HolderPressed, holder);
+            token.ThrowIfCancellationRequested();
+            await WaitMillisecondsAsync(host, MultiSelectStepMilliseconds, token);
+        }
+        if (request.RequireManualConfirmation)
+        {
+            NConfirmButton confirm = surface.GetNode<NConfirmButton>("%Confirm");
+            if (!confirm.IsEnabled)
+                throw new InvalidOperationException("原生网格页面选择完成后确认按钮仍不可用。");
+            confirm.EmitSignal(NClickableControl.SignalName.Released, confirm);
+        }
+    }
+
+    private static async Task SelectHandAsync(
+        NGame host,
+        Node surface,
+        IReadOnlyList<CardModel> selected,
+        CancellationToken token)
+    {
+        NPlayerHand hand = (NPlayerHand)surface;
+        foreach (CardModel card in selected)
+        {
+            NCardHolder holder = hand.GetCardHolder(card)
+                ?? throw new InvalidOperationException($"原生手牌选择没有 {card.Id.Entry} 的卡牌节点。");
+            holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
+            token.ThrowIfCancellationRequested();
+            await WaitMillisecondsAsync(host, MultiSelectStepMilliseconds, token);
+        }
+        NConfirmButton confirm = hand.GetNode<NConfirmButton>("%SelectModeConfirmButton");
+        if (!confirm.IsEnabled)
+            throw new InvalidOperationException("原生手牌选择完成后确认按钮仍不可用。");
+        confirm.EmitSignal(NClickableControl.SignalName.Released, confirm);
+    }
+
+    private static async Task WaitMillisecondsAsync(
+        NGame host,
+        ulong milliseconds,
+        CancellationToken token)
+    {
+        ulong startedAt = Time.GetTicksMsec();
+        while (Time.GetTicksMsec() - startedAt < milliseconds)
+        {
+            token.ThrowIfCancellationRequested();
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+    }
+
+    private static Node? FindSurface(NativeChoiceSurfaceKind kind)
+        => kind switch
+        {
+            NativeChoiceSurfaceKind.ChooseCard => NOverlayStack.Instance?.Peek() as NChooseACardSelectionScreen,
+            NativeChoiceSurfaceKind.SimpleGrid => NOverlayStack.Instance?.Peek() as NSimpleCardSelectScreen,
+            NativeChoiceSurfaceKind.CombatPile => NOverlayStack.Instance?.Peek() as NCombatPileCardSelectScreen,
+            NativeChoiceSurfaceKind.Hand or NativeChoiceSurfaceKind.HandUpgrade
+                when NPlayerHand.Instance?.IsInCardSelection == true => NPlayerHand.Instance,
+            _ => null,
+        };
+
+    private static IEnumerable<T> Descendants<T>(Node node) where T : Node
+    {
+        foreach (Node child in node.GetChildren())
+        {
+            if (child is T match)
+                yield return match;
+            foreach (T descendant in Descendants<T>(child))
+                yield return descendant;
+        }
+    }
+}
+
+internal sealed class ChooseCardObservationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_native_choice_choose_card";
+    public static string Description => "观测原版战斗三选一卡牌页面";
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(CardSelectCmd), nameof(CardSelectCmd.FromChooseACardScreen),
+            [typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext), typeof(IReadOnlyList<CardModel>), typeof(Player), typeof(bool)]),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix(IReadOnlyList<CardModel> cards, Player player, bool canSkip)
+        => NativeChoiceRuntime.Observe(
+            NativeChoiceSurfaceKind.ChooseCard,
+            player,
+            cards,
+            0,
+            1,
+            cards.Count > 0,
+            canSkip);
+}
+
+internal sealed class SimpleGridObservationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_native_choice_simple_grid";
+    public static string Description => "观测原版战斗卡牌网格页面";
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(CardSelectCmd), nameof(CardSelectCmd.FromSimpleGrid),
+            [typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext), typeof(IReadOnlyList<CardModel>), typeof(Player), typeof(CardSelectorPrefs)]),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix(IReadOnlyList<CardModel> cardsIn, Player player, CardSelectorPrefs prefs)
+        => NativeChoiceRuntime.Observe(
+            NativeChoiceSurfaceKind.SimpleGrid,
+            player,
+            cardsIn,
+            prefs.MinSelect,
+            prefs.MaxSelect,
+            cardsIn.Count > 0 && (prefs.RequireManualConfirmation || cardsIn.Count > prefs.MinSelect),
+            requireManualConfirmation: prefs.RequireManualConfirmation);
+}
+
+internal sealed class RewardGridObservationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_native_choice_reward_grid";
+    public static string Description => "观测原版战斗生成牌网格页面";
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(CardSelectCmd), nameof(CardSelectCmd.FromSimpleGridForRewards),
+            [typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext), typeof(List<CardCreationResult>), typeof(Player), typeof(CardSelectorPrefs)]),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix(List<CardCreationResult> cards, Player player, CardSelectorPrefs prefs)
+    {
+        IReadOnlyList<CardModel> options = cards.Select(result => result.Card).ToArray();
+        NativeChoiceRuntime.Observe(
+            NativeChoiceSurfaceKind.SimpleGrid,
+            player,
+            options,
+            prefs.MinSelect,
+            prefs.MaxSelect,
+            options.Count > 0 && (prefs.RequireManualConfirmation || options.Count > prefs.MinSelect),
+            requireManualConfirmation: prefs.RequireManualConfirmation);
+    }
+}
+
+internal sealed class CombatPileObservationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_native_choice_combat_pile";
+    public static string Description => "观测原版战斗牌堆选择页面";
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(CardSelectCmd), nameof(CardSelectCmd.FromCombatPile),
+            [typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext), typeof(CardPile), typeof(Player), typeof(CardSelectorPrefs), typeof(Func<CardModel, bool>)]),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix(
+        CardPile pile,
+        Player player,
+        CardSelectorPrefs prefs,
+        Func<CardModel, bool>? filter)
+    {
+        IReadOnlyList<CardModel> options = (filter == null ? pile.Cards : pile.Cards.Where(filter)).ToArray();
+        NativeChoiceRuntime.Observe(
+            NativeChoiceSurfaceKind.CombatPile,
+            player,
+            options,
+            prefs.MinSelect,
+            prefs.MaxSelect,
+            options.Count > 0 && (prefs.RequireManualConfirmation || options.Count > prefs.MinSelect),
+            requireManualConfirmation: prefs.RequireManualConfirmation);
+    }
+}
+
+internal sealed class HandObservationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_native_choice_hand";
+    public static string Description => "观测原版战斗手牌选择动画";
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(CardSelectCmd), nameof(CardSelectCmd.FromHand),
+            [typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext), typeof(Player), typeof(CardSelectorPrefs), typeof(Func<CardModel, bool>), typeof(AbstractModel)]),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix(
+        Player player,
+        CardSelectorPrefs prefs,
+        Func<CardModel, bool>? filter,
+        AbstractModel source)
+    {
+        IReadOnlyList<CardModel> options = player.PlayerCombatState!.Hand.Cards
+            .Where(filter ?? (_ => true))
+            .ToArray();
+        NativeChoiceRuntime.Observe(
+            NativeChoiceSurfaceKind.Hand,
+            player,
+            options,
+            prefs.MinSelect,
+            prefs.MaxSelect,
+            options.Count > 0 && (prefs.RequireManualConfirmation || options.Count > prefs.MinSelect),
+            requireManualConfirmation: true,
+            sourceId: source.Id.Entry);
+    }
+}
+
+internal sealed class HandUpgradeObservationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_native_choice_hand_upgrade";
+    public static string Description => "观测原版战斗手牌升级页面";
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(CardSelectCmd), nameof(CardSelectCmd.FromHandForUpgrade),
+            [typeof(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext), typeof(Player), typeof(AbstractModel)]),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix(Player player, AbstractModel source)
+    {
+        IReadOnlyList<CardModel> options = player.PlayerCombatState!.Hand.Cards
+            .Where(card => card.IsUpgradable)
+            .ToArray();
+        NativeChoiceRuntime.Observe(
+            NativeChoiceSurfaceKind.HandUpgrade,
+            player,
+            options,
+            1,
+            1,
+            options.Count > 1,
+            requireManualConfirmation: true,
+            sourceId: source.Id.Entry);
+    }
+}
