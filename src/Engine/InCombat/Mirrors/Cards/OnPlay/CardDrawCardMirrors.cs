@@ -1,9 +1,6 @@
-using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
-using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models.Cards;
-using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
@@ -61,7 +58,9 @@ internal static class CardDrawCardMirrors
             .Targeting(context.Target)
             .Simulate(context.Simulator);
 
-        if (!HasCardPlayFinishedThisTurn(context.Simulator, context.Card))
+        SimulatedCombatState combat = context.Simulator.State.CombatState as SimulatedCombatState
+            ?? throw new InvalidOperationException("Fetch requires simulated combat state.");
+        if (!combat.WasFetchPlayedThisTurn(context.Card))
         {
             context.Simulator.Draw(card.Owner, card.DynamicVars.Cards.BaseValue);
         }
@@ -71,7 +70,9 @@ internal static class CardDrawCardMirrors
     {
         context.AttackSingle();
 
-        if (CountCardPlaysFinishedThisTurn(context.Simulator, card.Owner) < card.DynamicVars[Ftl._playMaxKey].IntValue)
+        SimulatedCombatState combat = context.Simulator.State.CombatState as SimulatedCombatState
+            ?? throw new InvalidOperationException("FTL requires simulated combat state.");
+        if (combat.GetCardsPlayedThisTurn(card.Owner.Creature) < card.DynamicVars[Ftl._playMaxKey].IntValue)
         {
             context.Simulator.Draw(card.Owner, card.DynamicVars.Cards.BaseValue);
         }
@@ -144,26 +145,4 @@ internal static class CardDrawCardMirrors
         context.Simulator.Draw(card.Owner, count);
     }
 
-    private static int CountCardPlaysFinishedThisTurn(CombatPredictionSimulator simulator, Player player)
-    {
-        var count = CombatManager.Instance.History.CardPlaysFinished
-            .Count(entry =>
-                entry.HappenedThisTurn(simulator.State.CombatState) &&
-                entry.CardPlay.Player == player);
-        count += simulator.History.OfType<CombatPredictionCardPlayFinishedEntry>()
-            .Count(entry => entry.CardPlay.Player == player);
-        return count;
-    }
-
-    private static bool HasCardPlayFinishedThisTurn(CombatPredictionSimulator simulator, PredictedCard card)
-    {
-        var flag = CombatManager.Instance.History.CardPlaysFinished
-            .Any(entry =>
-                entry.HappenedThisTurn(simulator.State.CombatState) &&
-                entry.CardPlay.Card == card.Original);
-        flag = flag || simulator.History
-            .OfType<CombatPredictionCardPlayFinishedEntry>()
-            .Any(entry => entry.Card.Original == card.Original);
-        return flag;
-    }
 }

@@ -1552,6 +1552,7 @@ internal sealed partial class SimulatedCombatState
             _ = GetNonHandDrawsThisTurn(player);
             _ = GetPreviousTurnAttack(simulator, player);
         }
+        _ = GetFetchCardsPlayedThisTurn();
         _enemiesIntendingAttack = [.. Enemies.Where(enemy => enemy.Monster?.IntendsToAttack == true)];
         _hasPredictedEnemyIntents = true;
         StateFingerprintBuilder fingerprint = new();

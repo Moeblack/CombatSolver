@@ -19,6 +19,7 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Creature, int>? _simulatedOstyMaxHp;
     private HashSet<PredictedCard>? _returnToHandNextTurn;
     private ForkableDictionary<Creature, int>? _cardsPlayedThisTurn;
+    private ForkableSet<CardModel>? _fetchCardsPlayedThisTurn;
     private ISet<uint>? _activeCardExecutionDeaths;
     private int _cardExecutionScopeDepth;
 
@@ -103,6 +104,8 @@ internal sealed partial class SimulatedCombatState
     {
         Creature owner = card.Preview.Owner.Creature;
         (_cardsPlayedThisTurn ??= [])[owner] = GetCardsPlayedThisTurn(owner) + 1;
+        if (card.Preview is Fetch)
+            GetFetchCardsPlayedThisTurn().Add(card.Original);
         RecordRelicCardPlayed(simulator, card.Preview.Owner, card.Preview);
         if (card.Preview.Type == CardType.Skill)
             RecordSkillPlayed(owner);
@@ -396,9 +399,23 @@ internal sealed partial class SimulatedCombatState
         return value;
     }
 
+    public bool WasFetchPlayedThisTurn(PredictedCard card)
+    {
+        if (card.Preview is not Fetch)
+            throw new ArgumentException($"Card {card.Preview.Id.Entry} is not Fetch.", nameof(card));
+        return GetFetchCardsPlayedThisTurn().Contains(card.Original);
+    }
+
+    private ForkableSet<CardModel> GetFetchCardsPlayedThisTurn()
+        => _fetchCardsPlayedThisTurn ??= new ForkableSet<CardModel>(
+            _rootHistory.CardPlaysFinished
+                .Where(entry => entry.HappenedThisTurn(this) && entry.CardPlay.Card is Fetch)
+                .Select(entry => entry.CardPlay.Card));
+
     private void ResetCardLifecycleTurn(Creature owner)
     {
         (_cardsPlayedThisTurn ??= [])[owner] = 0;
+        _fetchCardsPlayedThisTurn?.Clear();
         ResetPowerLifecycleTurn(owner);
     }
 
@@ -426,6 +443,25 @@ internal sealed partial class SimulatedCombatState
             }
         }
         AddUnordered(ref fingerprint, 'r', count, first, second);
+
+        first = 0;
+        second = 0;
+        count = 0;
+        if (_fetchCardsPlayedThisTurn != null && _registeredCombatCards != null)
+        {
+            for (int index = 0; index < _registeredCombatCards.Count; index++)
+            {
+                PredictedCard card = _registeredCombatCards[index];
+                if (!_fetchCardsPlayedThisTurn.Contains(card.Original))
+                    continue;
+                StateFingerprintBuilder item = new();
+                item.Add(index);
+                item.Add(card.Preview.Id.Entry);
+                AddUnorderedItem(item.Finish(), ref first, ref second);
+                count++;
+            }
+        }
+        AddUnordered(ref fingerprint, 'f', count, first, second);
 
         first = 0;
         second = 0;

@@ -801,12 +801,9 @@ internal static class AfterCardPlayedMirrors
             return;
         }
 
-        var count = CombatManager.Instance.History.CardPlaysFinished.Count(entry =>
-            entry.HappenedThisTurn(context.CombatState) &&
-            entry.CardPlay.Card.Type == CardType.Skill &&
-            entry.CardPlay.Player == card.Owner);
-        count += context.History.OfType<CombatPredictionCardPlayFinishedEntry>().Count(entry =>
-            entry.CardPlay.Card.Type == CardType.Skill && entry.CardPlay.Player == card.Owner);
+        SimulatedCombatState combat = context.CombatState as SimulatedCombatState
+            ?? throw new InvalidOperationException("Make It So requires simulated combat state.");
+        int count = combat.GetSkillCardsPlayedThisTurn(card.Owner.Creature);
         if (count % card.DynamicVars.Cards.IntValue == 0)
         {
             context.Simulator.AddToPile(predictedCard, PileType.Hand);

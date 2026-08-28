@@ -58,6 +58,7 @@ internal sealed partial class SimulatedCombatState
             _statefulRelicStates = _statefulRelicStates?.Fork(),
             _simulatedOstyMaxHp = _simulatedOstyMaxHp?.Fork(),
             _cardsPlayedThisTurn = _cardsPlayedThisTurn?.Fork(),
+            _fetchCardsPlayedThisTurn = _fetchCardsPlayedThisTurn?.Fork(),
             _simulatedPlayerGold = _simulatedPlayerGold?.Fork(),
             _liveCardsAtSnapshot = _liveCardsAtSnapshot?.Fork(),
             _swordSageCardsInitialized = _swordSageCardsInitialized,
