@@ -20,6 +20,16 @@
 
   <ItemGroup>
     <Compile Remove="tools\**\*.cs" />
+    <Compile Remove="src\CombatSolver.Nosl.Core\**\*.cs" />
+    <Compile Remove="src\CombatSolver.AnalyticsCore\**\*.cs" />
+    <!-- Keep the runtime Mod self-contained. The SDK default glob includes
+         the NOSL and analytics source trees below src/, so the game loader
+         only has to load CombatSolver.dll. The standalone project files are
+         retained for focused unit tests and do not participate in this build. -->
+    <Compile Include="src\CombatSolver.Nosl.Core\**\*.cs"
+             Exclude="src\CombatSolver.Nosl.Core\bin\**\*;src\CombatSolver.Nosl.Core\obj\**\*" />
+    <Compile Include="src\CombatSolver.AnalyticsCore\**\*.cs"
+             Exclude="src\CombatSolver.AnalyticsCore\bin\**\*;src\CombatSolver.AnalyticsCore\obj\**\*" />
     <PackageReference Include="Krafs.Publicizer" Version="2.3.0" PrivateAssets="all" />
     <Publicize Include="sts2" IncludeVirtualMembers="false" IncludeCompilerGeneratedMembers="false" />
   </ItemGroup>
