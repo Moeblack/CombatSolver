@@ -163,7 +163,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -289,7 +289,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -379,7 +379,7 @@
       "category": "Card",
       "fieldName": "CalculatedForge",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -604,7 +604,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -856,7 +856,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -1243,7 +1243,7 @@
       "category": "Card",
       "fieldName": "CalculatedCards",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -1459,7 +1459,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -1594,7 +1594,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -1846,7 +1846,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -2170,7 +2170,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -2440,7 +2440,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -2485,7 +2485,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -2566,7 +2566,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -2746,7 +2746,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -2926,7 +2926,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -3169,7 +3169,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -3547,7 +3547,7 @@
       "category": "Card",
       "fieldName": "CalculatedShivs",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -3736,7 +3736,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -3970,7 +3970,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4051,7 +4051,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4078,7 +4078,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4150,7 +4150,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4348,7 +4348,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4474,7 +4474,7 @@
       "category": "Card",
       "fieldName": "CalculatedDoom",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4510,7 +4510,7 @@
       "category": "Card",
       "fieldName": "CalculatedCards",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4816,7 +4816,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -4978,7 +4978,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -5050,7 +5050,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -5113,7 +5113,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -5185,7 +5185,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -5266,7 +5266,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -5437,7 +5437,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -5599,7 +5599,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6076,7 +6076,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6103,7 +6103,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6274,7 +6274,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6301,7 +6301,7 @@
       "category": "Card",
       "fieldName": "CalculatedBlock",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedBlockVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6490,7 +6490,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6598,7 +6598,7 @@
       "category": "Card",
       "fieldName": "CalculatedFocus",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6688,7 +6688,7 @@
       "category": "Card",
       "fieldName": "CalculatedHits",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -6886,7 +6886,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -7012,7 +7012,7 @@
       "category": "Card",
       "fieldName": "CalculatedDamage",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedDamageVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {
@@ -7147,7 +7147,7 @@
       "category": "Card",
       "fieldName": "CalculatedChannels",
       "dynamicVarType": "MegaCrit.Sts2.Core.Localization.DynamicVars.CalculatedVar",
-      "role": "Behavior",
+      "role": "Derived",
       "notes": null
     },
     {

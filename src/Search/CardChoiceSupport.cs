@@ -406,7 +406,9 @@ internal static partial class CardChoiceSupport
         return cards.Where(card => MatchesToken(card.Preview, token))
             .Skip(token.SourceOccurrence)
             .FirstOrDefault()
-            ?? throw new InvalidOperationException($"选牌回放时找不到 {token.CardId}+{token.UpgradeLevel}#{token.SourceOccurrence}。");
+            ?? throw new InvalidPlannedChoiceBranchException(
+                $"选牌回放时找不到 {token.CardId}+{token.UpgradeLevel}#{token.SourceOccurrence}；" +
+                $"候选={string.Join(',', cards.Select(card => ChoiceCardKey(card.Preview)))}。");
     }
 
     private static double ChoicePriority(CardChoiceSpec spec, IReadOnlyList<PredictedCard> cards)

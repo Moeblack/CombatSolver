@@ -7,6 +7,7 @@ namespace CombatSolver;
 internal enum SemanticStateFieldRole
 {
     Behavior,
+    Derived,
     PresentationOnly,
 }
 
@@ -32,6 +33,8 @@ internal static class SemanticStateFieldPolicy
         string fieldName,
         DynamicVar value)
     {
+        if (value is CalculatedVar)
+            return SemanticStateFieldRole.Derived;
         if (value is not StringVar)
             return SemanticStateFieldRole.Behavior;
         return ClassifyString(model.GetType(), fieldName);
