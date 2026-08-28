@@ -90,7 +90,8 @@ internal sealed partial class UnattendedTestRunner
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialActionCardId)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialFirstActionCardId)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialActionTitle)
-            || _request.ExpectedInitialActionReplayCount.HasValue;
+            || _request.ExpectedInitialActionReplayCount.HasValue
+            || !string.IsNullOrWhiteSpace(_request.ExpectedInitialSetupChoiceTextStartsWith);
 
     private async Task AssertInitialSolverResultAsync(int startedTurn)
     {
@@ -122,6 +123,21 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException(
                 $"首回合准备阶段没有计划 {_request.ExpectedInitialSetupChoiceSourceId} 的选牌。");
+        }
+        if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialSetupChoiceTextStartsWith))
+        {
+            SolverOverlayTurnSnapshot firstTurn = SolverOverlaySnapshot.Capture(result, unexpectedReplan: false)
+                .Turns
+                .First(turn => turn.Turn == startedTurn);
+            if (!firstTurn.TurnStartChoices.Any(choice => choice.StartsWith(
+                    _request.ExpectedInitialSetupChoiceTextStartsWith,
+                    StringComparison.Ordinal)))
+            {
+                throw new InvalidOperationException(
+                    $"首回合路线没有以“{_request.ExpectedInitialSetupChoiceTextStartsWith}”开头的准备选牌胶囊；" +
+                    $"实际={string.Join('|', firstTurn.TurnStartChoices)}。");
+            }
+            _completedChecks.Add("InitialSetupChoicePill");
         }
         if (expectsInitialSetup)
         {

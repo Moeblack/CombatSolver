@@ -130,7 +130,17 @@ internal sealed partial class CombatBeamSolver
         int outstandingStolenResource = TheftEncounterStrategy.OutstandingStolenResource(simulator, combat);
         if (_theftPolicy == SolverTheftPolicy.PreserveResources)
             score += outstandingStolenResource * SolverWeights.OutstandingStolenResourcePenalty;
+        int retainedAttackValue = 0;
+        foreach (PredictedCard liveCard in liveCards)
+        {
+            if (liveCard.Preview.Type != CardType.Attack)
+                continue;
+            retainedAttackValue += Math.Max(
+                1,
+                (int)Math.Round(CardChoiceSupport.CardValue(liveCard.Preview)));
+        }
         int persistentBuffValue = 0;
+        int offensivePersistentBuffValue = 0;
         PersistentSetupTraits persistentSetupTraits = PersistentSetupTraits.None;
         foreach (PowerModel power in combat.EffectivePowers())
         {
@@ -141,21 +151,17 @@ internal sealed partial class CombatBeamSolver
             {
                 continue;
             }
-            persistentBuffValue += PersistentPowerSetupValue(power);
+            int setupValue = PersistentPowerSetupValue(power);
+            persistentBuffValue += setupValue;
+            if (PersistentPowerAdvancesCombat(power, retainedAttackValue > 0))
+                offensivePersistentBuffValue += setupValue;
             persistentSetupTraits |= PersistentPowerSetupTrait(power);
         }
         int latentSetupValue = 0;
         PersistentSetupTraits latentSetupTraits = PersistentSetupTraits.None;
-        int retainedAttackValue = 0;
         foreach (PredictedCard latentCard in liveCards)
         {
             CardModel preview = latentCard.Preview;
-            if (preview.Type == CardType.Attack)
-            {
-                retainedAttackValue += Math.Max(
-                    1,
-                    (int)Math.Round(CardChoiceSupport.CardValue(preview)));
-            }
             PersistentSetupTraits trait = LatentCardSetupTrait(preview);
             latentSetupTraits |= trait;
             if (trait == PersistentSetupTraits.None
@@ -187,6 +193,11 @@ internal sealed partial class CombatBeamSolver
         int reactiveDamageValue = Math.Max(
             0,
             combat.GetAmount<SleightOfFleshPower>(_player.Creature));
+        bool hasBlockDamagePayoff = liveCards.Any(card => card.Preview is BodySlam);
+        int offensiveProgressValue = offensivePersistentBuffValue
+            + delayedDamageValue
+            + reactiveDamageValue
+            + (hasBlockDamagePayoff ? Math.Max(0, player.Block) : 0);
         int enemyStrengthSuppression = 0;
         int enemyWeakTurns = 0;
         int vulnerable = 0;
@@ -286,6 +297,7 @@ internal sealed partial class CombatBeamSolver
             liveDeckClutter,
             liveCards.Count,
             outstandingStolenResource,
+            offensiveProgressValue,
             playerState.Energy,
             playerState.Stars,
             simulator.History.Entries.Count,
@@ -395,6 +407,14 @@ internal sealed partial class CombatBeamSolver
             _ => amount,
         };
     }
+
+    private static bool PersistentPowerAdvancesCombat(PowerModel power, bool hasAttackPayoff)
+        => power switch
+        {
+            StrengthPower or DemonFormPower or EchoFormPower => hasAttackPayoff,
+            CuriousPower or FocusPower or CreativeAiPower or ThunderPower or LightningRodPower => true,
+            _ => false,
+        };
 
     private static PersistentSetupTraits PersistentPowerSetupTrait(PowerModel power)
         => power switch
@@ -520,9 +540,9 @@ internal sealed partial class CombatBeamSolver
     {
         int hp = player.CurrentHp;
         int block = player.Block;
-        Creature? osty = _player.Osty;
-        int ostyHp = osty == null ? 0 : simulator.State.GetCreature(osty).CurrentHp;
         SimulatedCombatState simulatedCombat = (SimulatedCombatState)simulator.State.CombatState;
+        Creature? osty = simulatedCombat.GetOsty(_player);
+        int ostyHp = osty == null ? 0 : simulator.State.GetCreature(osty).CurrentHp;
         ProjectedDeathPrevention deathPrevention = BuildProjectedDeathPrevention(
             simulator,
             simulatedCombat,
@@ -699,7 +719,7 @@ internal sealed partial class CombatBeamSolver
         key.Add(playerState.Stars);
         key.Add(shufflesCrossed);
         Player owner = _player;
-        if (owner.Osty is { } osty)
+        if (simulatedCombat.GetOsty(owner) is { } osty)
         {
             key.Add(simulator.State.GetCreature(osty).CurrentHp);
             key.Add(simulatedCombat.GetOstyMaxHp(simulator, owner));

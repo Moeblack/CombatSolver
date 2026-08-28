@@ -379,7 +379,7 @@ pwsh -NoProfile -Command "& .\tools\read-game-localization.ps1 -PckPath 'D:\Stea
 | `AmbergrisPower.ShouldTakeExtraTurn(...)` | 龙涎香 | 原生额外回合开始前停止预测 | 正式搜索返回 `DynamicResolution` |
 | `AsleepPower.AfterDamageReceived(...)` | 沉睡 | 未格挡伤害移除覆甲与沉睡，原生苏醒行动前停止 | RF 忽略注册已纠正；动态边界通过 |
 | `AsleepPower.AfterSideTurnEnd(...)` | 沉睡 | 所属方回合末递减；归零苏醒前停止 | `2 → 1` 差分及 `1` 层边界通过 |
-| `BattlewornDummyTimeLimitPower.AfterSideTurnEnd(...)` | 时间限制 | 回合末递减；归零逃跑前停止 | `2 → 1` 差分及逃跑边界通过 |
+| `BattlewornDummyTimeLimitPower.AfterSideTurnEnd(...)` | 时间限制 | 回合末递减；归零逃跑前停止，按事件失败而非击杀结算 | `2 → 1` 差分及 `EventDefeat` 边界通过；第二档问题包完整执行通过 |
 | `BlackHolePower.AfterStarsGained(...)` | 黑洞 | 每次获得星能，对所有可命中敌人造成等于层数的无力量伤害 | 隐秘宝藏获得星能差分一致 |
 | `BurrowedPower.AfterBlockBroken(...)` | 埋地 | 破甲后移除埋地并在原生眩晕换招前停止 | RF 忽略注册已纠正；掘地兽实机通过 |
 | `BurrowedPower.AfterRemoved(...)` | 埋地 | 移除后清空剩余格挡 | 破甲移除路径模拟/实机一致 |

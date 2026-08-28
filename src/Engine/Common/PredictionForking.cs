@@ -34,6 +34,12 @@ internal interface ICombatPredictionPlayerCardRules
     bool AreCardsFree(MegaCrit.Sts2.Core.Entities.Players.Player player);
 }
 
+internal interface ICombatPredictionPetState
+{
+    MegaCrit.Sts2.Core.Entities.Creatures.Creature? GetOsty(
+        MegaCrit.Sts2.Core.Entities.Players.Player player);
+}
+
 internal interface ICombatPredictionStateOwner
 {
     void AttachPredictionState(
@@ -96,24 +102,25 @@ internal interface ICombatPredictionCardExecutionSink
 {
     IDisposable BeginCardExecutionScope();
 
+    void RecordCardPlayStarted(CombatSolver.Engine.Common.PredictedCard card);
+
     void ApplyCardPlayEffects(
         CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,
         CombatSolver.Engine.Common.PredictedCard card,
         MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay,
         MegaCrit.Sts2.Core.Entities.Creatures.Creature? target,
         int ownerBlockBefore,
+        decimal cardBlockGained,
         int historyEntryStart);
 
     void CompleteCardPlayEffects(
         CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,
+        CombatSolver.Engine.Common.PredictedCard card,
+        int ownerBlockBefore,
         int historyEntryStart);
 
     void CompleteCardExecution(
-        CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,
-        CombatSolver.Engine.Common.PredictedCard card,
-        MegaCrit.Sts2.Core.Entities.Creatures.Creature? target,
-        int ownerBlockBefore,
-        int historyEntryStart);
+        CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator);
 }
 
 internal interface ICombatPredictionEffectSink

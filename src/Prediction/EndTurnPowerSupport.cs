@@ -94,11 +94,12 @@ internal static partial class EndTurnPowerSupport
                     }
                     break;
                 }
-                case BattlewornDummyTimeLimitPower when ownerParticipates:
+                case BattlewornDummyTimeLimitPower when ownerParticipates
+                                                        && simulator.State.GetCreature(owner).IsAlive:
                     if (power.Amount > 1)
                         combat.SetPowerAmount(power, power.Amount - 1);
                     else
-                        combat.CreatureEscaped(owner);
+                        combat.MarkBattlewornDummyTimedOut();
                     break;
                 case DarkEmbracePower when ownerParticipates
                                                  && etherealExhaustCount > 0

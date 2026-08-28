@@ -47,6 +47,25 @@ internal sealed partial class UnattendedTestRunner
         if (computed.CalculateCalled)
             throw new InvalidOperationException("未知计算型动态变量仍调用了原生求值器。");
 
+        IncompatibleGameplayModException incompatible = new(
+            "Watcher",
+            "The Watcher [Test]",
+            "WatcherMod.WatcherEnchantStackHookProxy",
+            "combat");
+        string playerMessage = SolverController.FormatSearchSetupFailure(incompatible);
+        if (!playerMessage.Contains("The Watcher ［Test］（Watcher）", StringComparison.Ordinal)
+            || !playerMessage.Contains("不兼容的第三方 Mod", StringComparison.Ordinal)
+            || !playerMessage.Contains("建议卸载", StringComparison.Ordinal)
+            || playerMessage.Contains("WatcherEnchantStackHookProxy", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("第三方玩法 Mod 初始化失败提示缺少名称、标识或卸载建议。");
+        }
+        if (!incompatible.Message.Contains("WatcherEnchantStackHookProxy", StringComparison.Ordinal)
+            || !incompatible.Message.Contains("Watcher", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("第三方玩法 Mod 初始化失败日志缺少 Mod 或订阅器上下文。");
+        }
+
         bool firstInferredActionRan = false;
         InvalidOperationException inferredFailure = new("inferred-action-failure");
         try

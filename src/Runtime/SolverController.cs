@@ -488,12 +488,25 @@ internal static class SolverController
             _combat.PendingCompleteProjectionBaseline = null;
             SolverOverlay.Show(
                 host,
-                $"[color={SolverUiTokens.Palette.DangerHex}][b]搜索初始化失败[/b][/color]  {ex.Message}");
+                FormatSearchSetupFailure(ex));
             Entry.Logger.Error(
                 $"[CombatSolver/Test] SEARCH_SETUP_FAILURE stage={setupStage} " +
                 $"reason={reason} exception={ex}");
         }
     }
+
+    internal static string FormatSearchSetupFailure(Exception exception)
+    {
+        string title = $"[color={SolverUiTokens.Palette.DangerHex}][b]搜索初始化失败[/b][/color]";
+        if (exception is not IncompatibleGameplayModException incompatible)
+            return $"{title}  {exception.Message}";
+
+        string modName = EscapeRichText(incompatible.PlayerFacingModName);
+        return $"{title}  检测到不兼容的第三方 Mod：{modName}。建议卸载该 Mod 并重启游戏后再使用求解器。";
+    }
+
+    private static string EscapeRichText(string value)
+        => value.Replace('[', '［').Replace(']', '］');
 
     public static void RequestDeploy(NGame host, CombatState state)
     {
@@ -1058,11 +1071,7 @@ internal static class SolverController
                 Player player = LocalContext.GetMe(state)!;
                 Creature? target = state.GetCreature(action.TargetCombatId);
                 SolverOverlay.ShowDeploymentStep(actionIndex, actions.Count, action.ActionTitle);
-                List<PlanCardChoice> actionChoices = [];
-                if (action.Choice != null)
-                    actionChoices.Add(action.Choice);
-                if (action.NestedChoices is { Count: > 0 })
-                    actionChoices.AddRange(action.NestedChoices);
+                List<PlanCardChoice> actionChoices = [.. action.GetActionChoicesInExecutionOrder()];
                 // Void Form advances the turn inside its own action, so its next-turn choices
                 // belong to this native UI session rather than a later explicit EndTurn action.
                 if (action.CardId == "VOID_FORM" && action.TurnStartChoices is { Count: > 0 })

@@ -37,9 +37,9 @@
       "RINGING_POWER": 1
     },
     "expectedPlayerCardStates": {
-      "Discard:STRIKE_IRONCLAD:RINGING:1:-": 1,
-      "Hand:ARMAMENTS:RINGING:1:-": 1,
-      "Hand:BODY_SLAM:RINGING:1:-": 1
+      "Discard:STRIKE_IRONCLAD:RINGING:1:-:R0:XFalse:SFalse:TFalse:DTrue:MFalse": 1,
+      "Hand:ARMAMENTS:RINGING:1:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:BODY_SLAM:RINGING:1:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   },
   {
@@ -50,9 +50,9 @@
       "RINGING_POWER"
     ],
     "expectedPlayerCardStates": {
-      "Discard:STRIKE_IRONCLAD:-:0:-": 1,
-      "Hand:ARMAMENTS:-:0:-": 1,
-      "Hand:BODY_SLAM:-:0:-": 1
+      "Discard:STRIKE_IRONCLAD:-:0:-:R0:XFalse:SFalse:TFalse:DTrue:MFalse": 1,
+      "Hand:ARMAMENTS:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:BODY_SLAM:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   }
 ]

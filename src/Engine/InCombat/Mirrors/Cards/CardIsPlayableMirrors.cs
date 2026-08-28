@@ -69,7 +69,7 @@ internal static class CardIsPlayableMirrors
 
     private static bool HandleHighFive(HighFive card, CardIsPlayableMirrorContext context)
     {
-        return card.Owner.Osty is { } osty && context.State.GetCreature(osty).IsAlive;
+        return context.State.GetOsty(card.Owner) is { } osty && context.State.GetCreature(osty).IsAlive;
     }
 }
 

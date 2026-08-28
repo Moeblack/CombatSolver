@@ -2,7 +2,7 @@
 
 > **审计基线**：分支 `optimize/solver-objective-search`，提交 `7db2b81`（前序关键提交 `6dc19df`）  
 > **程序集与版本**：`CombatSolver.json` 声明版本 `0.10.1`，目标游戏版本 `STS2 0.111.0`，依赖 `STS2-RitsuLib 0.5.14`  
-> **实机数据事实来源**：`%APPDATA%\SlayTheSpire2\logs\godot2026-08-21T23.15.37.log` 及 `godot.log`
+> **实机数据事实来源**：`C:\Users\The_M\AppData\Roaming\SlayTheSpire2\logs\godot2026-08-21T23.15.37.log` 及 `godot.log`
 
 ---
 

@@ -23,6 +23,7 @@ internal static class CorePowerSupport
         CardPlay cardPlay,
         Creature? target,
         int ownerBlockBefore,
+        decimal cardBlockGained,
         int historyEntryStart,
         ISet<uint> processedEnemyDeaths)
     {
@@ -114,14 +115,11 @@ internal static class CorePowerSupport
                 break;
             case ToricToughness:
             {
-                int toricBlockGained = Math.Max(
-                    0,
-                    simulator.State.GetCreature(owner).Block - ownerBlockBefore);
                 ToricToughnessPower power = combat.AddPowerInstance<ToricToughnessPower>(
                     owner,
                     card.DynamicVars["Turns"].IntValue,
                     owner);
-                power.SetBlock(toricBlockGained);
+                power.SetBlock(cardBlockGained);
                 break;
             }
             case Accelerant:

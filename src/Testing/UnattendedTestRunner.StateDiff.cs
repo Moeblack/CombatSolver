@@ -158,15 +158,16 @@ internal sealed partial class UnattendedTestRunner
                 MonsterAiCountersByRound = [],
             },
             turn).StateText;
+        Creature? osty = combat.GetOsty(player);
         return new MoveStateSnapshot(
             simulatedPlayer.CurrentHp,
             simulatedPlayer.MaxHp,
             simulatedPlayer.Block,
-            player.Osty is { } osty ? simulator.State.GetCreature(osty).CurrentHp : 0,
+            osty is null ? 0 : simulator.State.GetCreature(osty).CurrentHp,
             combat.GetOstyMaxHp(simulator, player),
             combat.IsOstyHittable(simulator, player),
-            player.Osty is { } presentOsty && simulator.State.Allies.Contains(presentOsty),
-            NormalizePowers(combat.EffectivePowers().Where(power => ReferenceEquals(power.Owner, player.Osty))),
+            osty is not null && simulator.State.Allies.Contains(osty),
+            NormalizePowers(combat.EffectivePowers().Where(power => ReferenceEquals(power.Owner, osty))),
             playerState.Energy,
             playerState.Stars,
             combat.GetPlayerGold(player),
@@ -863,7 +864,8 @@ internal sealed partial class UnattendedTestRunner
         {
             if (actual.GetValueOrDefault(cardState) != count)
                 throw new InvalidOperationException(
-                    $"{monsterId}.{moveId} 的玩家卡牌状态 {cardState}={actual.GetValueOrDefault(cardState)}，预期 {count}。");
+                    $"{monsterId}.{moveId} 的玩家卡牌状态 {cardState}={actual.GetValueOrDefault(cardState)}，预期 {count}；" +
+                    $"实际状态=[{string.Join(",", actual.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}={pair.Value}"))}]。");
         }
     }
 

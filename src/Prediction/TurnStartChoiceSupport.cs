@@ -251,6 +251,14 @@ internal static class TurnStartChoiceSupport
     {
         TurnStartChoiceRequest request = combat.PendingTurnStartChoice
             ?? throw new InvalidOperationException("模拟状态没有待处理的回合开始选牌。");
+        return BuildSpec(simulator, player, request);
+    }
+
+    public static CardChoiceSpec BuildSpec(
+        CombatPredictionSimulator simulator,
+        Player player,
+        TurnStartChoiceRequest request)
+    {
         if (request.Spec != null)
             return request.Spec;
         SimPlayerCombatState state = simulator.State.GetPlayerCombatState(player);

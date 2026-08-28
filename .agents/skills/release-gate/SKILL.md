@@ -51,8 +51,8 @@ pwsh -NoProfile -File tools\build-local-stack.ps1 -Configuration Release
 
 用户说“上传创意工坊”或“更新创意工坊”时，视为已授权这一次外部上传，直接执行，不再询问是否确认。默认工具与暂存目录为：
 
-- `<workspace>\ModUploader-win-x64\ModUploader.exe`；
-- `<workspace>\ModUploader-win-x64\CombatSolverWorkshop`。
+- `D:\Desktop\sts2mod\ModUploader-win-x64\ModUploader.exe`；
+- `D:\Desktop\sts2mod\ModUploader-win-x64\CombatSolverWorkshop`。
 
 上传前只做一次本地暂存：
 

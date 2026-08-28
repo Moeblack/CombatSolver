@@ -44,7 +44,6 @@ internal sealed partial class CombatPredictionSimulator
         }
 
         int historyEntryStart = History.Entries.Count;
-        int ownerBlockBefore = State.GetCreature(card.Preview.Owner.Creature).Block;
         // Game 0.111.0 has no vanilla BeforeCardAutoPlayed listeners; the hook catalog will expose any future addition.
         var resources = SpendResources(card, isAutoPlay: true, skipXCapture);
         OnPlayWrapper(card, target, isAutoPlay: true, resources, out _, nestedChoiceSourceId);
@@ -54,7 +53,7 @@ internal sealed partial class CombatPredictionSimulator
             && !HasPendingChoice
             && State.CombatState is ICombatPredictionCardExecutionSink sink)
         {
-            sink.CompleteCardExecution(this, card, target, ownerBlockBefore, historyEntryStart);
+            sink.CompleteCardExecution(this);
         }
         return true;
     }

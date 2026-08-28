@@ -55,7 +55,8 @@ internal static class AfterAttackMirrors
 
     private static void HandleFlatten(Flatten card, AfterAttackMirrorContext context)
     {
-        if (context.Command.Attacker is not null && context.Command.Attacker == card.Owner.Osty)
+        if (context.Command.Attacker is not null
+            && context.Command.Attacker == context.State.GetOsty(card.Owner))
         {
             context.State.FindCard(card)?.MutablePreview.EnergyCost.SetThisTurn(0);
         }

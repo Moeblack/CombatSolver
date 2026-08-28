@@ -363,7 +363,7 @@ internal sealed partial class CombatPredictionSimulator
         var playerState = State.GetPlayerCombatState(player);
         playerState.OrbQueue.Clear();
 
-        if (player.Osty is { } osty && State.GetCreature(osty).IsAlive)
+        if (State.GetOsty(player) is { } osty && State.GetCreature(osty).IsAlive)
         {
             Kill(osty, force: true);
         }

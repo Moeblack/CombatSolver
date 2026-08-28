@@ -1,7 +1,7 @@
 # CombatSolver 性能实测复盘与视觉掉帧根因排查报告
 
-> **数据源**：`%APPDATA%\SlayTheSpire2\logs\godot.log`  
-> **测试环境**：13th Gen Intel Core i7-13650HX (20 线程), NVIDIA RTX 4060 Laptop GPU, Godot 4.5.1 Mono (custom build), STS2 `0.111.0`  
+> **数据源**：`%APPDATA%\SlayTheSpire2\logs\godot.log`<br>
+> **测试环境**：13th Gen Intel Core i7-13650HX (20 线程), NVIDIA RTX 4060 Laptop GPU, Godot 4.5.1 Mono (custom build), STS2 `0.111.0`<br>
 > **核心现象**：后台搜索启动时，游戏主画面出现明显掉帧与卡顿，抽牌补间动画、卡牌悬停物理效果和主视觉粒子特效出现抽搐。
 
 > [!WARNING]

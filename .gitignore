@@ -21,4 +21,3 @@ Thumbs.db
 *.bak
 .local/
 releases/*.zip
-coverage/unattended/*.save

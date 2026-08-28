@@ -37,6 +37,7 @@ internal sealed partial class SimulatedCombatState
       ICombatPredictionCreatureSemantics, ICombatPredictionMonsterStateSink,
       ICombatPredictionCardExecutionSink, ICombatPredictionPendingChoiceState,
       ICombatPredictionRunSnapshot, ICombatPredictionPlayerLimits, ICombatPredictionPlayerCardRules,
+      ICombatPredictionPetState,
       ICombatPredictionStateOwner, ICombatPredictionRootCaptureBoundary,
       ICombatPredictionRootMaterializable, IPredictionForkBoundary
 {
@@ -56,6 +57,7 @@ internal sealed partial class SimulatedCombatState
     private readonly IReadOnlyDictionary<Player, int> _rootPotionSlotCounts;
     private readonly IReadOnlyDictionary<Player, int> _rootPlayerTurnNumbers;
     private readonly IReadOnlyDictionary<(Creature Owner, Type Type), int> _rootPowerAmounts;
+    private readonly IReadOnlySet<PowerModel> _rootMultiInstancePowers;
     private readonly IReadOnlyDictionary<Player, string> _playerNames;
     private readonly IReadOnlySet<CardModel> _rootFloatingCards;
     private readonly IReadOnlySet<Creature> _rootDeadCreatures;
@@ -143,6 +145,7 @@ internal sealed partial class SimulatedCombatState
     }
 
     private Dictionary<(Creature Owner, Type Type), PowerModel>? _powers;
+    private Dictionary<PowerModel, PowerModel>? _rootMultiInstancePowerClones;
     private List<PredictedCard>? _generatedCombatCards;
     private List<PredictedCard>? _registeredCombatCards;
     private AbstractModel[]? _baseHookListeners;
@@ -173,9 +176,9 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Player, int>? _energySpentThisTurn;
     private ForkableDictionary<Player, int>? _starsGainedThisTurn;
     private ForkableDictionary<Player, int>? _nonHandDrawsThisTurn;
+    private ForkableDictionary<Creature, int>? _cardPlaysStartedThisTurn;
     private ForkableSet<Creature>? _enemiesIntendingAttack;
     private bool _hasPredictedEnemyIntents;
-    private ForkableSet<Player>? _ringingCardPlayed;
     private ForkableDictionary<Player, int>? _playerTurnNumbers;
     private ForkableList<Creature> _allies;
     private ForkableList<Creature> _enemies;
@@ -185,6 +188,7 @@ internal sealed partial class SimulatedCombatState
     private uint _nextCreatureId;
     private int _roundNumber;
     private CombatSide _currentSide;
+    private bool _battlewornDummyTimedOut;
     private bool _rootMaterialized;
     private CombatPredictionState? _predictionState;
 
@@ -251,9 +255,19 @@ internal sealed partial class SimulatedCombatState
             player => player.PlayerCombatState is { } state
                 ? state.TurnNumber
                 : throw new InvalidOperationException($"Player {player.NetId} has no combat state to capture."));
-        _rootPowerAmounts = _rootCreatures
+        PowerModel[] rootPowers = _rootCreatures
             .SelectMany(creature => creature.Powers)
-            .ToDictionary(power => (power.Owner, power.GetType()), power => power.Amount);
+            .ToArray();
+        _rootPowerAmounts = rootPowers
+            .GroupBy(power => (power.Owner, power.GetType()))
+            .ToDictionary(
+                group => group.Key,
+                group => (int)Math.Clamp(group.Sum(power => (long)power.Amount), int.MinValue, int.MaxValue));
+        _rootMultiInstancePowers = rootPowers
+            .GroupBy(power => (power.Owner, power.GetType()))
+            .Where(group => group.Skip(1).Any())
+            .SelectMany(group => group)
+            .ToHashSet<PowerModel>(ReferenceEqualityComparer.Instance);
         _playerNames = inner.Players.ToDictionary(
             player => player,
             player => PlatformUtil.GetPlayerName(RunManager.Instance.NetService.Platform, player.NetId));
@@ -395,6 +409,7 @@ internal sealed partial class SimulatedCombatState
         _rootPotionSlotCounts = source._rootPotionSlotCounts;
         _rootPlayerTurnNumbers = source._rootPlayerTurnNumbers;
         _rootPowerAmounts = source._rootPowerAmounts;
+        _rootMultiInstancePowers = source._rootMultiInstancePowers;
         _playerNames = source._playerNames;
         _rootFloatingCards = source._rootFloatingCards;
         _rootDeadCreatures = source._rootDeadCreatures;
@@ -419,6 +434,7 @@ internal sealed partial class SimulatedCombatState
     public MultiplayerScalingModel? MultiplayerScalingModel => _multiplayerScalingModel;
     public int RoundNumber { get => _roundNumber; set => _roundNumber = value; }
     public CombatSide CurrentSide { get => _currentSide; set => _currentSide = value; }
+    public bool BattlewornDummyTimedOut => _battlewornDummyTimedOut;
     public EncounterModel? Encounter => _encounter;
     public IReadOnlyList<Creature> EscapedCreatures => _escapedCreatures;
     public IReadOnlyList<Creature> CreaturesOnCurrentSide => GetCreaturesOnSide(CurrentSide);
@@ -460,6 +476,9 @@ internal sealed partial class SimulatedCombatState
         _enemiesIntendingAttack = [.. attackingEnemies];
         _hasPredictedEnemyIntents = true;
     }
+
+    public void MarkBattlewornDummyTimedOut()
+        => _battlewornDummyTimedOut = true;
 
     public int GetPlayerTurnNumber(Player player)
     {
@@ -671,6 +690,21 @@ internal sealed partial class SimulatedCombatState
     {
         if (_addedPowerInstances?.Contains(power) == true)
             return power;
+        if (_rootMultiInstancePowerClones?.TryGetValue(power, out PowerModel? rootClone) == true)
+            return rootClone;
+
+        if (_rootMultiInstancePowers.Contains(power))
+        {
+            rootClone = PredictionUtils.CloneModelForSimulation(power);
+            rootClone._owner = power.Owner;
+            rootClone._applier = power.Applier;
+            rootClone._target = power.Target;
+            rootClone._amount = power.Amount;
+            (_addedPowerInstances ??= []).Add(rootClone);
+            (_rootMultiInstancePowerClones ??= new(ReferenceEqualityComparer.Instance)).Add(power, rootClone);
+            InvalidateHookListeners();
+            return rootClone;
+        }
 
         (Creature, Type) key = (power.Owner, power.GetType());
         if (_powers != null && _powers.TryGetValue(key, out PowerModel? simulated))
@@ -961,7 +995,6 @@ internal sealed partial class SimulatedCombatState
     {
         Player player = owner.Player
             ?? throw new InvalidOperationException("玩家回合开始钩子的持有者没有 Player。");
-        _ringingCardPlayed?.Remove(player);
         if (TurnStartRelicSupport.TriggerAfterPlayerTurnStart(simulator, this, player, choices))
             return true;
         if (TurnStartPowerSupport.TriggerAfterPlayerTurnStart(simulator, this, player, choices))
@@ -1027,6 +1060,7 @@ internal sealed partial class SimulatedCombatState
         (_cardsExhaustedThisTurn ??= [])[owner] = 0;
         (_cardsDiscardedThisTurn ??= [])[owner] = 0;
         (_creatureAttacksThisTurn ??= [])[owner] = 0;
+        (_cardPlaysStartedThisTurn ??= [])[owner] = 0;
         if (owner.Player is { } ownerPlayer)
         {
             (_energySpentThisTurn ??= [])[ownerPlayer] = 0;
@@ -1311,10 +1345,7 @@ internal sealed partial class SimulatedCombatState
             return false;
         if (!simulator.CanPlay(card))
             return false;
-        if (card.Preview.Affliction is Smog)
-            return false;
-        return card.Preview.Affliction is not Ringing
-               || _ringingCardPlayed?.Contains(card.Preview.Owner) != true;
+        return card.Preview.Affliction is not Smog;
     }
 
     public IReadOnlyList<PowerModel> EffectivePowers()
@@ -1416,7 +1447,8 @@ internal sealed partial class SimulatedCombatState
         foreach (AbstractModel listener in baseListeners)
         {
             if (listener is PowerModel power
-                && _powers?.ContainsKey((power.Owner, power.GetType())) == true)
+                && (_powers?.ContainsKey((power.Owner, power.GetType())) == true
+                    || _rootMultiInstancePowerClones?.ContainsKey(power) == true))
                 continue;
             listeners.Add(listener);
         }
@@ -1574,6 +1606,7 @@ internal sealed partial class SimulatedCombatState
             _ = GetCardsExhaustedThisTurn(creature);
             _ = GetSkillCardsPlayedThisTurn(creature);
             _ = GetCardsPlayedThisTurn(creature);
+            _ = GetCardPlaysStartedThisTurn(creature);
             _ = GetAttacksPlayedThisTurn(creature);
             _ = GetShivsPlayedThisTurn(creature);
             _ = GetBlockCardsPlayedThisTurn(creature);
@@ -1674,7 +1707,6 @@ internal sealed partial class SimulatedCombatState
         AddSteamEruptionPhases(ref fingerprint, _steamEruptionPhases);
         AddAeonglassCounters(ref fingerprint, 'A', _aeonglassAdditionalStrength, "AdditionalStrength");
         AddAeonglassCounters(ref fingerprint, 'W', _aeonglassWitherUpgradeCount, "WitherUpgradeCount");
-        AddPlayerSet(ref fingerprint, 'Q', _ringingCardPlayed);
         AddCreatureIntMap(ref fingerprint, 'a', _attacksPlayedThisTurn);
         AddCreatureIntMap(ref fingerprint, 'j', _shivsPlayedThisTurn);
         AddCreatureIntMap(ref fingerprint, 'b', _blockCardsPlayedThisTurn);
@@ -1688,10 +1720,12 @@ internal sealed partial class SimulatedCombatState
         AddPlayerIntMap(ref fingerprint, 'e', _energySpentThisTurn);
         AddPlayerIntMap(ref fingerprint, 'z', _starsGainedThisTurn);
         AddPlayerIntMap(ref fingerprint, 'n', _nonHandDrawsThisTurn);
+        AddCreatureIntMap(ref fingerprint, 'Q', _cardPlaysStartedThisTurn);
         AddCreatureIntMap(ref fingerprint, 'k', _knowledgeDemonCurseCounters);
         AddCreatureSet(ref fingerprint, 'i', _enemiesIntendingAttack);
         fingerprint.Add(_hasPredictedEnemyIntents);
         fingerprint.Add(HasPendingChoice);
+        fingerprint.Add(_battlewornDummyTimedOut);
         AddFeralStates(ref fingerprint, simulator, effectivePowers);
         AddJugglingStates(ref fingerprint, simulator, effectivePowers);
         AddTurnStartStates(ref fingerprint, simulator, effectivePowers);
@@ -1973,27 +2007,6 @@ internal sealed partial class SimulatedCombatState
         AddUnordered(ref fingerprint, marker, count, first, second);
     }
 
-    private static void AddPlayerSet(
-        ref StateFingerprintBuilder fingerprint,
-        char marker,
-        IReadOnlySet<Player>? values)
-    {
-        ulong first = 0;
-        ulong second = 0;
-        int count = 0;
-        if (values != null)
-        {
-            foreach (Player player in values)
-            {
-                StateFingerprintBuilder item = new();
-                item.Add(player.NetId);
-                AddUnorderedItem(item.Finish(), ref first, ref second);
-                count++;
-            }
-        }
-        AddUnordered(ref fingerprint, marker, count, first, second);
-    }
-
     private static void AddSteamEruptionPhases(
         ref StateFingerprintBuilder fingerprint,
         IReadOnlyDictionary<Creature, SteamEruptionPhase>? values)
@@ -2154,6 +2167,8 @@ internal sealed partial class SimulatedCombatState
     }
     public void CreatureEscaped(Creature creature)
     {
+        if (_escapedCreatures.Contains(creature))
+            return;
         if (!ContainsCreature(creature))
             throw new InvalidOperationException("逃跑的生物不在当前模拟战斗中。");
         foreach (PowerModel power in EffectivePowers()

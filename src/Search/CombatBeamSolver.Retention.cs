@@ -159,6 +159,7 @@ internal sealed partial class CombatBeamSolver
                 or SearchBoundaryReason.TimeLimit => 1,
             SearchBoundaryReason.PendingChoice => 2,
             SearchBoundaryReason.UnsupportedEffect => 3,
+            SearchBoundaryReason.EventDefeat => 4,
             _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, null),
         };
 

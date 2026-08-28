@@ -76,7 +76,7 @@ internal static class PowerLifecycleSupport
             if (power.Amount <= 0
                 || !ReferenceEquals(power.Owner, owner)
                 || combat.IsPaleBlueDotActivated(power)
-                || combat.GetCardsPlayedThisTurn(owner) < 5)
+                || combat.GetCardsPlayedThisTurn(owner) + 1 < PaleBlueDotPower.cardPlayThresholdValue)
             {
                 continue;
             }

@@ -77,21 +77,25 @@ internal static class CalculatedVarSpecRegistry
             Mirage => combat.Enemies
                 .Where(enemy => simulator.State.GetCreature(enemy).IsAlive)
                 .Sum(enemy => combat.GetAmount<PoisonPower>(enemy)),
-            Rattle => 1 + (model.Owner.Osty is { } osty ? combat.GetCreatureAttacksThisTurn(osty) : 0),
+            Rattle => 1 + (simulator.State.GetOsty(model.Owner) is { } osty
+                ? combat.GetCreatureAttacksThisTurn(osty)
+                : 0),
             MindBlast => playerState.DrawPile.Cards.Count,
             GangUp => target == null ? 0 : combat.Creatures
                 .Where(creature => creature != owner && creature.Side == owner.Side)
                 .Sum(creature => combat.GetPoweredAttackHitsThisTurn(creature, target)),
             Mimic => target == null ? 0 : simulator.State.GetCreature(target).Block,
             KnifeTrap => playerState.ExhaustPile.Cards.Count(candidate => candidate.Preview.Tags.Contains(CardTag.Shiv)),
-            Unleash => model.Owner.Osty is { } unleashOsty && simulator.State.GetCreature(unleashOsty).IsAlive
+            Unleash => simulator.State.GetOsty(model.Owner) is { } unleashOsty
+                && simulator.State.GetCreature(unleashOsty).IsAlive
                 ? simulator.State.GetCreature(unleashOsty).CurrentHp
                 : 0,
             Radiate => combat.GetStarsGainedThisTurn(model.Owner),
             PerfectedStrike => playerState.AllCards.Count(candidate => candidate.Preview.Tags.Contains(CardTag.Strike)),
             SovereignBlade => combat.GetAmount<ParryPower>(owner),
             Supermassive => CountGeneratedCards(simulator, model.Owner),
-            Sacrifice => model.Owner.Osty is { } sacrificeOsty && simulator.State.GetCreature(sacrificeOsty).IsAlive
+            Sacrifice => simulator.State.GetOsty(model.Owner) is { } sacrificeOsty
+                && simulator.State.GetCreature(sacrificeOsty).IsAlive
                 ? combat.GetOstyMaxHp(simulator, model.Owner) * 3
                 : 0,
             TimesUp => target == null ? 0 : combat.GetAmount<DoomPower>(target),
@@ -105,7 +109,8 @@ internal static class CalculatedVarSpecRegistry
             PullFromBelow => CountEtherealPlays(simulator, model.Owner),
             Normality => Math.Min(3, combat.GetCardsPlayedThisTurn(owner)),
             Synchronize or CompileDriver => playerState.OrbQueue.Orbs.Select(orb => orb.Id).Distinct().Count(),
-            Protector => model.Owner.Osty is { } protectorOsty && simulator.State.GetCreature(protectorOsty).IsAlive
+            Protector => simulator.State.GetOsty(model.Owner) is { } protectorOsty
+                && simulator.State.GetCreature(protectorOsty).IsAlive
                 ? combat.GetOstyMaxHp(simulator, model.Owner)
                 : 0,
             NoEscape => target == null

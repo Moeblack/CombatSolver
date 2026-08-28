@@ -250,7 +250,8 @@ internal static class CardEffectSpecRegistry
                 applied = true;
                 break;
             case BoneShards:
-                if (card.Owner.Osty is { } osty && simulator.State.GetCreature(osty).IsAlive)
+                if (simulator.State.GetOsty(card.Owner) is { } osty
+                    && simulator.State.GetCreature(osty).IsAlive)
                     simulator.Kill(osty, force: true);
                 applied = true;
                 break;

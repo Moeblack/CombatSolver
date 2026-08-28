@@ -42,6 +42,7 @@ internal enum SearchBoundaryReason
     UnsupportedEffect,
     DynamicResolution,
     PendingChoice,
+    EventDefeat,
     TurnLimit,
     NodeLimit,
     TimeLimit,
@@ -113,6 +114,7 @@ internal sealed record PlanAction(
     string TargetName = "",
     PlanCardChoice? Choice = null,
     IReadOnlyList<PlanCardChoice>? NestedChoices = null,
+    int NestedChoicesBeforePrimary = 0,
     int PotionSlot = -1,
     string PotionId = "",
     string PotionTitle = "",
@@ -122,6 +124,23 @@ internal sealed record PlanAction(
 {
     public bool IsExecutable => Kind is PlanActionKind.PlayCard or PlanActionKind.UsePotion;
     public string ActionTitle => Kind == PlanActionKind.UsePotion ? PotionTitle : CardTitle;
+
+    public IReadOnlyList<PlanCardChoice> GetActionChoicesInExecutionOrder()
+    {
+        IReadOnlyList<PlanCardChoice> nested = NestedChoices ?? [];
+        if (NestedChoicesBeforePrimary < 0 || NestedChoicesBeforePrimary > nested.Count)
+        {
+            throw new InvalidOperationException(
+                $"动作内前置选择数量越界：{NestedChoicesBeforePrimary}/{nested.Count}。");
+        }
+
+        List<PlanCardChoice> ordered = new(nested.Count + (Choice == null ? 0 : 1));
+        ordered.AddRange(nested.Take(NestedChoicesBeforePrimary));
+        if (Choice != null)
+            ordered.Add(Choice);
+        ordered.AddRange(nested.Skip(NestedChoicesBeforePrimary));
+        return ordered;
+    }
 }
 
 internal sealed record TurnOutcome(
@@ -131,6 +150,52 @@ internal sealed record TurnOutcome(
     int MaxBlock,
     int ActualBlock,
     int EnergyLeft);
+
+internal readonly record struct CombatProgressState(
+    int BestEnemyHp,
+    int BestAliveEnemyCount,
+    int BestOffensiveProgressValue,
+    int BestLiveDeckClutter,
+    int BestLiveDeckSize,
+    int BestOutstandingStolenResource,
+    int BestSandpitRemaining,
+    int MostProcessedEnemyDeaths,
+    int TurnsWithoutProgress)
+{
+    public static CombatProgressState Capture(SimulationSnapshot snapshot)
+        => new(
+            snapshot.EnemyHp,
+            snapshot.AliveEnemyCount,
+            snapshot.OffensiveProgressValue,
+            snapshot.LiveDeckClutter,
+            snapshot.LiveDeckSize,
+            snapshot.OutstandingStolenResource,
+            snapshot.SandpitRemaining,
+            snapshot.ProcessedEnemyDeaths.Count,
+            0);
+
+    public CombatProgressState Advance(SimulationSnapshot snapshot)
+    {
+        bool progressed = snapshot.EnemyHp < BestEnemyHp
+            || snapshot.AliveEnemyCount < BestAliveEnemyCount
+            || snapshot.OffensiveProgressValue > BestOffensiveProgressValue
+            || snapshot.LiveDeckClutter < BestLiveDeckClutter
+            || snapshot.LiveDeckSize < BestLiveDeckSize
+            || snapshot.OutstandingStolenResource < BestOutstandingStolenResource
+            || snapshot.SandpitRemaining < BestSandpitRemaining
+            || snapshot.ProcessedEnemyDeaths.Count > MostProcessedEnemyDeaths;
+        return new CombatProgressState(
+            Math.Min(BestEnemyHp, snapshot.EnemyHp),
+            Math.Min(BestAliveEnemyCount, snapshot.AliveEnemyCount),
+            Math.Max(BestOffensiveProgressValue, snapshot.OffensiveProgressValue),
+            Math.Min(BestLiveDeckClutter, snapshot.LiveDeckClutter),
+            Math.Min(BestLiveDeckSize, snapshot.LiveDeckSize),
+            Math.Min(BestOutstandingStolenResource, snapshot.OutstandingStolenResource),
+            Math.Min(BestSandpitRemaining, snapshot.SandpitRemaining),
+            Math.Max(MostProcessedEnemyDeaths, snapshot.ProcessedEnemyDeaths.Count),
+            progressed ? 0 : TurnsWithoutProgress + 1);
+    }
+}
 
 internal sealed record SearchNode(
     PlanAction? Action,
@@ -147,6 +212,7 @@ internal sealed record SearchNode(
     bool IsTerminal,
     SearchNode? Parent,
     SimulationSnapshot Snapshot,
+    CombatProgressState CombatProgress,
     TurnOutcome? Outcome = null,
     string? RepeatableNoProgressCardId = null,
     int RepeatableNoProgressCount = 0,
@@ -232,6 +298,7 @@ internal sealed class SimulationSnapshot(
     int liveDeckClutter,
     int liveDeckSize,
     int outstandingStolenResource,
+    int offensiveProgressValue,
     int energy,
     int stars,
     int historyEntryCount,
@@ -296,6 +363,7 @@ internal sealed class SimulationSnapshot(
     public int LiveDeckClutter { get; } = liveDeckClutter;
     public int LiveDeckSize { get; } = liveDeckSize;
     public int OutstandingStolenResource { get; } = outstandingStolenResource;
+    public int OffensiveProgressValue { get; } = offensiveProgressValue;
     public int Energy { get; } = energy;
     public int Stars { get; } = stars;
     public int HistoryEntryCount { get; } = historyEntryCount;

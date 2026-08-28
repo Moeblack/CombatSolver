@@ -2857,9 +2857,9 @@
   },
   "Power|MegaCrit.Sts2.Core.Models.Powers.RingingPower|MegaCrit.Sts2.Core.Models.AbstractModel.ShouldPlay(MegaCrit.Sts2.Core.Models.CardModel,MegaCrit.Sts2.Core.Entities.Cards.AutoPlayType)": {
     "status": "SolverCompensation",
-    "source": "src/Search/SimulatedCombatState.cs + src/Search/CombatBeamSolver.cs",
-    "notes": "Allows the first Ringing-afflicted card each turn and rejects later ones. The per-player simulated flag is included in state fingerprints and reset at turn start.",
-    "testId": "MONSTER-MOVES-BATCH-029"
+    "source": "src/Engine/InCombat/Mirrors/Hooks/Card/ShouldPlayMirrors.cs + src/Search/SimulatedCombatState.CardLifecycle.cs",
+    "notes": "Mirrors the original CardPlaysStarted gate for manual and automatic plays. The branch-local started count is captured from the root, incremented before OnPlay, forked, fingerprinted, and reset at side-turn start.",
+    "testId": "RINGING-HAVOC-AUTOPLAY-0160"
   },
   "Power|MegaCrit.Sts2.Core.Models.Powers.RingingPower|MegaCrit.Sts2.Core.Models.AbstractModel.AfterSideTurnEnd(MegaCrit.Sts2.Core.GameActions.Multiplayer.PlayerChoiceContext,MegaCrit.Sts2.Core.Combat.CombatSide,System.Collections.Generic.IEnumerable\u003CMegaCrit.Sts2.Core.Entities.Creatures.Creature\u003E)": {
     "status": "SolverCompensation",

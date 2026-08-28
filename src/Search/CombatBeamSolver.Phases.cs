@@ -123,6 +123,7 @@ internal sealed partial class CombatBeamSolver
                 false,
                 null,
                 snapshot,
+                CombatProgressState.Capture(snapshot),
                 TurnSetupChoices: choices,
                 TurnSetupPlayState: turnSetupPlayState);
             frontier.Add(root);
