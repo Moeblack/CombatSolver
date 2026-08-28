@@ -12,11 +12,18 @@ internal sealed partial class CombatPredictionSimulator
     /// <summary>
     /// Mirrors <see cref="CardCmd.AutoPlay"/>.
     /// </summary>
+    /// <param name="nestedChoiceSourceId">
+    /// Identifies the effect that requested this auto-play, for the card's own selection. Vanilla awaits
+    /// that selection inside <c>OnPlay</c>, so it is resolved within <see cref="OnPlayWrapper"/> and the
+    /// selected card reaches its pile before this card moves to its result pile. Leave null only when the
+    /// card cannot request a selection.
+    /// </param>
     public bool AutoPlay(
         PredictedCard card,
         Creature? target = null,
         AutoPlayType type = AutoPlayType.Default,
-        bool skipXCapture = false)
+        bool skipXCapture = false,
+        string? nestedChoiceSourceId = null)
     {
         if (IsOverOrEnding || State.GetCreature(card.Preview.Owner.Creature).IsDead)
         {
@@ -40,10 +47,11 @@ internal sealed partial class CombatPredictionSimulator
         int ownerBlockBefore = State.GetCreature(card.Preview.Owner.Creature).Block;
         // Game 0.111.0 has no vanilla BeforeCardAutoPlayed listeners; the hook catalog will expose any future addition.
         var resources = SpendResources(card, isAutoPlay: true, skipXCapture);
-        OnPlayWrapper(card, target, isAutoPlay: true, resources, out _);
+        OnPlayWrapper(card, target, isAutoPlay: true, resources, out _, nestedChoiceSourceId);
         if (History.Entries.Skip(historyEntryStart)
             .OfType<CombatPredictionCardPlayStartedEntry>()
             .Any(entry => ReferenceEquals(entry.Card, card))
+            && !HasPendingChoice
             && State.CombatState is ICombatPredictionCardExecutionSink sink)
         {
             sink.CompleteCardExecution(this, card, target, ownerBlockBefore, historyEntryStart);
@@ -53,13 +61,21 @@ internal sealed partial class CombatPredictionSimulator
 
     public bool PaidAutoPlay(
         PredictedCard card,
-        Creature? target = null)
+        Creature? target = null,
+        string? nestedChoiceSourceId = null)
     {
         SpendResources(card, isAutoPlay: false);
-        return AutoPlay(card, target, AutoPlayType.Default, skipXCapture: true);
+        return AutoPlay(card, target, AutoPlayType.Default, skipXCapture: true, nestedChoiceSourceId);
     }
 
-    public bool ResolveNestedAutoPlayChoice(PredictedCard card, string sourceId)
+    /// <summary>
+    /// True while a card selection has been requested but not yet supplied by a plan. Auto-play loops stop
+    /// on this instead of advancing to the next card, matching vanilla's paused player choice.
+    /// </summary>
+    public bool HasPendingChoice
+        => State.CombatState is ICombatPredictionPendingChoiceState { HasPendingChoice: true };
+
+    private bool ResolveNestedAutoPlayChoice(PredictedCard card, string sourceId)
         => State.CombatState is not ICombatPredictionNestedChoiceSink sink
             || sink.ResolveNestedCardChoice(this, card, sourceId);
 
@@ -87,8 +103,8 @@ internal sealed partial class CombatPredictionSimulator
             }
 
             card.MutablePreview.ExhaustOnNextPlay = forceExhaust;
-            if (AutoPlay(card)
-                && !ResolveNestedAutoPlayChoice(card, card.Preview.Id.Entry))
+            AutoPlay(card, nestedChoiceSourceId: card.Preview.Id.Entry);
+            if (HasPendingChoice)
             {
                 break;
             }
@@ -108,7 +124,7 @@ internal sealed partial class CombatPredictionSimulator
         for (var i = 0; i < count; i++)
         {
             ShuffleIfNecessary(player);
-            if (State.CombatState is ICombatPredictionPendingChoiceState { HasPendingChoice: true })
+            if (HasPendingChoice)
                 break;
             var card = position switch
             {

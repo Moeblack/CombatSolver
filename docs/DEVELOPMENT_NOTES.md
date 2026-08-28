@@ -6,6 +6,18 @@
 
 ## 0.15.0：稳定性与跨回合执行修复
 
+- 修复宇宙冷漠等效果在原版内部发出“不显示页面、无候选、固定选择 0 张”的空选牌请求时，自动执行误报计划外选择的问题。这类原版无操作请求现在会单独记录并继续，不消耗路线中后续的真实选牌计划；其他计划外或边界不匹配的请求仍显式中止。
+
+### 自动出牌自身选牌的统一解析点
+
+- 三骑士问题包的失败发生在上一场 `SLIMED_BERSERKER_NORMAL` 第 6 回合：生存者按路线弃掉带 `Sly` 的杂技+，原版随即自动打出杂技+，杂技+ 又要求从手牌弃 1 张。搜索完全没有产生这第二层选择，路线里因此没有对应计划，部署到该动作时原版真的弹出请求，`DEPLOY_FAILURE` 报告“收到计划外选择：ACROBATICS/Hand”。这属于搜索/模拟遗漏，不能靠放宽部署校验掩盖。
+- 根因是自动出牌的选牌约定。`OnPlayWrapper` 原先只在手动出牌时解析卡牌自身的选牌，自动出牌要求调用方在 `AutoPlay` 返回之后自己补一次 `ResolveNestedAutoPlayChoice`；`CardCmd.Discard`/`DiscardAndDraw` 镜像的 `Sly` 分支从未补这一步。
+- 原版 `CardCmd.AutoPlay` 把 `PlayerChoiceContext` 透传给 `OnPlayWrapper`，选牌在 `OnPlay` 内部等待，因此被选牌先进入牌堆，来源卡之后才归位到结果堆。事后解析的顺序正好相反。现在 `AutoPlay` 接收 `nestedChoiceSourceId`，在 `OnPlayWrapper` 中与手动出牌同一位置解析，成为唯一权威解析点；`ResolveNestedAutoPlayChoice` 收回为内部实现，自动出牌循环改用 `CombatPredictionSimulator.HasPendingChoice` 判断是否停在待选状态。
+- 随之统一的调用点：抽牌堆自动出牌、`Sly` 弃牌自动出牌、横祸/破灭/狠揍等选牌后自动出牌、地狱使者抽牌自动出牌、彼岸咆哮与践踏的出牌后阶段、抉择的重复自动出牌、低语耳环的 Vakuu 连续出牌。各处 `sourceId` 取值不变，计划格式与跨回合复用不变；行为差异只有弃牌堆顺序改为与原版一致。回合开始的 `AutoPlayWithChoice`（骚动、历史课程）保留 `TurnStartChoiceCursor` 自带的 `ContextId` 与“空选择消耗计划位”契约，不并入本次统一。
+- 定向回归 `SLY-DISCARD-NESTED-CHOICE-0150`（runId `53d9f1e8d0fb49f49449a0f1ee7e3b00`）以手牌戏法给杂技上单回合 `Sly`、生存者弃掉它并触发第二层弃牌，actual/simulated 有序牌堆、逐牌状态、Power、九条 RNG 计数与 continuation 全等。修复前同一场景在弃牌堆顺序 `C[1]` 处失败；更早的未修复版本连第二层弃牌都不会发生。
+- 被统一的既有路径全部重跑通过：横祸 `1cc142ee275c4014887c22ebde1aab09`、破灭 `b031b8597fa14b15b913a5665d2eb269`、骚动 `6fd0f669cb504db6a0020a3a22e46919`、狠揍 `temp-beatdown-nested-choice-cards-336`、蒸馏混沌严格差分 `07b82b4c30874093bd6c420cbf0a557d`、低语耳环 `8cbe191b50744c4e9db0675cff86efd4`、彼岸咆哮/我无敌了 `ba68269e79794175a7a2170ed7357597`、抉择嵌套选牌、抽牌钩子审计、手动选牌批次，以及 `card-completion-batch-113` 的 32 项检查（runId `d394a8debd894e28a4795dc96022fba5`）。骚动预设的 Mayhem 路线未迁移但共用同一 helper，也已复跑通过。
+- 未执行项：没有用三骑士问题包做逐动作回放，仓库没有通用 replay-state 导入器；结构门禁仍因既有的 `Cannot fork Vambrace` 标记失败，与本次改动无关。
+
 ### 瓶中仙女的生存路线与自动用药
 
 - 女王问题包的首轮根已捕获瓶中仙女，但威胁评分在精确结束回合结算之前直接扣减预报伤害，把本可以交掉精灵药继续战斗的铺垫路线当成死亡节点。同时，精灵药由死亡钩子自动消耗，旧路线只统计显式 `UsePotion` 动作，因而把实际用药记为 `0` 瓶。

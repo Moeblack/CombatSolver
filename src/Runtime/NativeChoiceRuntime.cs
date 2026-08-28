@@ -307,6 +307,20 @@ internal sealed class NativeChoiceSession : IDisposable
         int planIndex = 0;
         await foreach (NativeChoiceRequest request in _requests.Reader.ReadAllAsync(token))
         {
+            if (SolverStateMachineRules.IsImplicitEmptyChoiceRequest(
+                    request.RequiresSurface,
+                    request.Options.Count,
+                    request.MinSelect,
+                    request.MaxSelect))
+            {
+                ValidateImplicitSelection(request, Array.Empty<CardModel>());
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] NATIVE_CHOICE_IMPLICIT_EMPTY owner={Owner} " +
+                    $"sequence={request.Sequence} surface={request.Surface}");
+                NativeChoiceRuntime.RecordTrace(this, request, "ImplicitEmpty");
+                continue;
+            }
+
             if (planIndex >= plans.Count)
             {
                 throw new InvalidOperationException(

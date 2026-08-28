@@ -22,9 +22,9 @@ internal static class CardExecutionSupport
         try
         {
             if (payResources)
-                simulator.PaidAutoPlay(card, target);
+                simulator.PaidAutoPlay(card, target, nestedChoiceSourceId);
             else
-                simulator.AutoPlay(card, target);
+                simulator.AutoPlay(card, target, nestedChoiceSourceId: nestedChoiceSourceId);
         }
         finally
         {
@@ -37,11 +37,6 @@ internal static class CardExecutionSupport
             .FirstOrDefault(entry => ReferenceEquals(entry.CardPlay.Card, card.Preview));
         if (started == null)
             return false;
-        if (nestedChoiceSourceId != null
-            && !simulator.ResolveNestedAutoPlayChoice(card, nestedChoiceSourceId))
-        {
-            return false;
-        }
-        return true;
+        return nestedChoiceSourceId == null || !simulator.HasPendingChoice;
     }
 }

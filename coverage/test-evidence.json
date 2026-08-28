@@ -1,4 +1,12 @@
 {
+  "SLY-AUTOPLAY-NESTED-CHOICE-0150": {
+    "status": "Passed",
+    "level": "HeadlessExactSlyAutoPlayNestedChoiceStrictDifferentialAndUnifiedResolutionRegression",
+    "procedure": "以手牌戏法给手牌中的杂技上单回合 Sly，再打出生存者弃掉它，触发原版 Sly 自动出牌以及杂技自身的第二层弃牌；同一回合对 actual 与 simulated 做完整状态严格差分。随后把自动出牌自身选牌的解析统一到 OnPlayWrapper，并复跑所有被统一的既有路径：抽牌堆自动出牌、横祸、破灭、骚动、狠揍、抉择、地狱使者抽牌自动出牌、彼岸咆哮与我无敌了的出牌后阶段、低语耳环 Vakuu 连续出牌、手动选牌批次与 Mayhem 路线。",
+    "expected": "带 Sly 的选牌卡被弃掉后，搜索必须展开它自身的第二层选择并写入父动作 NestedChoices，部署时不再出现“收到计划外选择”。原版在 OnPlay 内部等待该选择，因此被选牌先入牌堆、来源卡后归位到结果堆，模拟的有序牌堆必须与实机逐位一致。统一解析点后各调用点 sourceId、计划格式与跨回合复用保持不变。",
+    "observed": "定向差分 runId 53d9f1e8d0fb49f49449a0f1ee7e3b00 Passed、mainThread=true，有序牌堆、逐牌状态、Power、九条 RNG 计数与 continuation 全等。统一顺序之前同一场景在 field=C[1] 失败：预测 C=[HAND_TRICK,ACROBATICS,STRIKE_IRONCLAD,SURVIVOR]、实机 C=[HAND_TRICK,STRIKE_IRONCLAD,ACROBATICS,SURVIVOR]；补上嵌套请求之前第二层弃牌根本不发生。复跑全部通过：横祸 1cc142ee275c4014887c22ebde1aab09、破灭 b031b8597fa14b15b913a5665d2eb269、骚动 6fd0f669cb504db6a0020a3a22e46919 三场整战均 combatEnded 且增量回放一致；蒸馏混沌药水严格差分 07b82b4c30874093bd6c420cbf0a557d；低语耳环 8cbe191b50744c4e9db0675cff86efd4 完成 TurnSetupNativeChoiceOrder 与 InitialSetupChoices；彼岸咆哮/我无敌了 ba68269e79794175a7a2170ed7357597；狠揍整战、抉择嵌套选牌、抽牌钩子审计与手动选牌批次通过；card-completion-batch-113 全 32 项检查 d394a8debd894e28a4795dc96022fba5 通过。Release 构建 0 警告 0 错误；收窄内部可见性后重新部署的交付产物以 runId af9836e7d6b3428b8514d9e37815fafb 复验通过。",
+    "evidence": "src/Engine/InCombat/Simulation/CombatPredictionSimulator.AutoPlay.cs；src/Engine/InCombat/Simulation/CombatPredictionSimulator.Card.cs；coverage/unattended/havoc-nested-choice-404-cards.json；catastrophe-nested-choice-403-cards.json；uproar-nested-choice-406-cards.json；distilled-chaos-nested-choice-405.json；temp-beatdown-nested-choice-cards-336.json；card-auto-post-play-audit-312.json；card-after-drawn-audit-311.json；card-on-play-batch-042-choice-hand.json；card-completion-batch-113.json；initial-earring-nested-choice-401.json；mayhem-route-210-cards.json；上述 runId；游戏 0.111.0 CardCmd.AutoPlay 与 CardModel.OnPlayWrapper 源码；验证日期 2026-08-28。"
+  },
   "NATIVE-CHOICE-SURFACES-553": {
     "status": "Passed",
     "level": "HeadlessNativeSurfaceLifecycleOrderExactTurnSetupActionDeploymentAndStrictDifferential",
@@ -340,7 +348,7 @@
     "level": "HeadlessExactAutoPlayNestedChoiceSearchDeploymentAndDifferential",
     "procedure": "分别构造横祸随机自动打出生存者、破灭从抽牌堆顶自动打出生存者、骚动自动打出觅踪打击，以及蒸馏混沌自动打出生存者；要求搜索规划嵌套选择、原版自动提交并比较后续状态。",
     "expected": "所有 AutoPlay/AutoPlayFromDrawPile 来源必须在每张自动牌完成后继续解析其选牌，缺计划时形成搜索分支，不得漏效果或把选择留给玩家。",
-    "observed": "runId 5c7ebc3043544c729618408bd608dc8d、9e923f232ece4fa680a5f687cfb2d272、9dd66522ea4e416db06f2231593d6398、7187663997164f0785e87987c3af2fcb 全部 Passed。前三场实际记录 DEPLOY_CHOICE_PLAN/Player chose cards，后续回合精确复用且 UnexpectedReplans=0；蒸馏混沌完整状态与 RNG 差分一致。",
+    "observed": "runId 5c7ebc3043544c729618408bd608dc8d、9e923f232ece4fa680a5f687cfb2d272、9dd66522ea4e416db06f2231593d6398、7187663997164f0785e87987c3af2fcb 全部 Passed。前三场实际记录 DEPLOY_CHOICE_PLAN/Player chose cards，后续回合精确复用且 UnexpectedReplans=0；蒸馏混沌完整状态与 RNG 差分一致。 0.15.0 把自动出牌自身选牌的解析统一到 OnPlayWrapper 之后，这些路径的弃牌堆顺序改为与原版一致（被选牌先、来源卡后），并已按 SLY-AUTOPLAY-NESTED-CHOICE-0150 全部复跑通过。",
     "evidence": "coverage/unattended/catastrophe-nested-choice-403-cards.json；havoc-nested-choice-404-cards.json；uproar-nested-choice-406-cards.json；distilled-chaos-nested-choice-405.json；上述 runId；验证日期 2026-08-24。"
   },
   "COMBAT-CHOICE-SOURCE-GATE-402": {

@@ -222,30 +222,10 @@ internal static partial class CardChoiceSupport
                     combat,
                     selected[0],
                     target: null,
-                    processedEnemyDeaths))
+                    processedEnemyDeaths,
+                    nestedChoiceSourceId: source.Id.Entry))
             {
                 break;
-            }
-            CardChoiceSpec? nestedSpec = GetSpec(simulator, selected[0]);
-            if (nestedSpec != null)
-            {
-                if (!combat.ResolveActionCardChoice(
-                        simulator,
-                        selected[0],
-                        source.Id.Entry,
-                        nestedSpec,
-                        processedEnemyDeaths))
-                {
-                    break;
-                }
-            }
-            else if (BuildRequiredEmptyChoice(selected[0].Preview) is { } emptyChoice)
-            {
-                Apply(simulator, combat, selected[0], emptyChoice, processedEnemyDeaths);
-            }
-            else
-            {
-                ApplyNoChoiceEffects(simulator, combat, selected[0]);
             }
         }
     }

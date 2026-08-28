@@ -59,7 +59,7 @@ internal sealed partial class CombatPredictionSimulator
 
             ShuffleIfNecessary(player);
 
-            if (State.CombatState is ICombatPredictionPendingChoiceState { HasPendingChoice: true })
+            if (HasPendingChoice)
                 break;
 
             if (state.DrawPile.IsEmpty || state.Hand.Cards.Count >= CardPile.MaxCardsInHand)
