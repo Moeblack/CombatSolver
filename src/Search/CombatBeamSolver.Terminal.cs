@@ -97,16 +97,20 @@ internal sealed partial class CombatBeamSolver
     private static ulong CurrentTurnPotionSlotsUsed(SearchNode turnStart, SearchNode outcome)
     {
         ulong slots = 0;
+        int explicitUses = 0;
         for (SearchNode? node = outcome; node != null && !ReferenceEquals(node, turnStart); node = node.Parent)
         {
             PlanAction action = node.Action
                 ?? throw new InvalidOperationException("卖血统计动作链提前抵达根节点。");
             if (action.Kind != PlanActionKind.UsePotion)
                 continue;
-            if ((uint)action.PotionSlot >= 64u)
+            if ((uint)action.PotionSlot >= 63u)
                 throw new InvalidOperationException($"药水槽位超出卖血分组范围：{action.PotionSlot}。");
             slots |= 1UL << action.PotionSlot;
+            explicitUses++;
         }
+        if (outcome.PotionCount - turnStart.PotionCount > explicitUses)
+            slots |= 1UL << 63;
         return slots;
     }
 
@@ -122,6 +126,8 @@ internal sealed partial class CombatBeamSolver
         Dictionary<int, int> maxBlock = [];
         Dictionary<int, int> actualBlock = [];
         Dictionary<int, int> energy = [];
+        Dictionary<int, int> potionCounts = [];
+        Dictionary<int, int> potionCosts = [];
         Dictionary<int, IReadOnlyList<string>> kills = [];
         ulong aliveMask = root.InitialAliveEnemyMask;
         int? combatEndedTurn = null;
@@ -132,6 +138,12 @@ internal sealed partial class CombatBeamSolver
             SearchNode parent = node.Parent!;
             PlanAction action = node.Action
                 ?? throw new InvalidOperationException("路线标注节点缺少动作。");
+            int potionCount = node.PotionCount - parent.PotionCount;
+            int potionCost = node.PotionStrategicCost - parent.PotionStrategicCost;
+            if (potionCount > 0)
+                potionCounts[action.Turn] = potionCounts.GetValueOrDefault(action.Turn) + potionCount;
+            if (potionCost > 0)
+                potionCosts[action.Turn] = potionCosts.GetValueOrDefault(action.Turn) + potionCost;
             ulong newlyKilledMask = aliveMask & ~node.Snapshot.AliveEnemyMask;
             if (action.IsExecutable && newlyKilledMask != 0)
             {
@@ -162,7 +174,17 @@ internal sealed partial class CombatBeamSolver
             if (deathTurn == null && node.Snapshot.PlayerDead)
                 deathTurn = action.Turn;
         }
-        return new RouteAnnotations(losses, sold, maxBlock, actualBlock, energy, kills, combatEndedTurn, deathTurn);
+        return new RouteAnnotations(
+            losses,
+            sold,
+            maxBlock,
+            actualBlock,
+            energy,
+            potionCounts,
+            potionCosts,
+            kills,
+            combatEndedTurn,
+            deathTurn);
     }
 
     private static SearchNode FindTurnStart(SearchNode node)

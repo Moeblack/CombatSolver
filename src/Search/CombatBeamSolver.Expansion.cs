@@ -176,8 +176,8 @@ internal sealed partial class CombatBeamSolver
                         SearchNode child = new(
                             finalAction,
                             node.ActionCount + 1,
-                            node.PotionCount,
-                            node.PotionStrategicCost,
+                            finalSnapshot.PotionUseCount,
+                            finalSnapshot.PotionStrategicCost,
                             forcedTurnEnd ? node.Turn + 1 : node.Turn,
                             node.Traits,
                             node.FutureSoldHp,
@@ -354,8 +354,8 @@ internal sealed partial class CombatBeamSolver
                         SearchNode child = new(
                             finalAction,
                             node.ActionCount + 1,
-                            node.PotionCount + 1,
-                            node.PotionStrategicCost + PotionUsePolicy.StrategicHpCost(potion),
+                            finalSnapshot.PotionUseCount,
+                            finalSnapshot.PotionStrategicCost,
                             node.Turn,
                             ClassifyPotionTraits(node.Traits, snapshot, finalSnapshot),
                             node.FutureSoldHp,
@@ -397,8 +397,8 @@ internal sealed partial class CombatBeamSolver
             SearchNode endNode = new(
                 endAction,
                 node.ActionCount + 1,
-                node.PotionCount,
-                node.PotionStrategicCost,
+                endSnapshot.PotionUseCount,
+                endSnapshot.PotionStrategicCost,
                 nextTurn,
                 ClassifyRoundTransitionTraits(node.Traits, snapshot, endSnapshot),
                 node.FutureSoldHp,
@@ -1550,6 +1550,7 @@ internal sealed partial class CombatBeamSolver
     {
         TranspositionLabel next = new(
             candidate.PotionCount,
+            candidate.PotionStrategicCost,
             candidate.FutureSoldHp,
             candidate.ActionCount,
             candidate.Score);
@@ -1568,6 +1569,7 @@ internal sealed partial class CombatBeamSolver
     {
         TranspositionLabel next = new(
             node.PotionCount,
+            node.PotionStrategicCost,
             node.FutureSoldHp,
             node.ActionCount,
             node.Score);

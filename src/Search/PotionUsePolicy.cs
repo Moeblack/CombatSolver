@@ -55,6 +55,7 @@ internal static class PotionUsePolicy
     public static bool IsEligible(
         SolverPotionPolicy policy,
         int potionCount,
+        int automaticPotionCount,
         int strategicHpCost,
         bool potionFreeWon,
         int potionFreeHpDeficit,
@@ -62,7 +63,7 @@ internal static class PotionUsePolicy
         int potionRouteHpDeficit)
         => policy switch
         {
-            SolverPotionPolicy.Disabled => potionCount == 0,
+            SolverPotionPolicy.Disabled => potionCount == automaticPotionCount,
             SolverPotionPolicy.RequireAtLeastOne => potionCount > 0
                 && potionRouteWon
                 && (potionCount == 1

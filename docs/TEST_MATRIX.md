@@ -8,6 +8,9 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `FAIRY-AUTOMATIC-RESCUE-FINAL2-0150` | 通过 | 1 HP 铁甲战士持瓶中仙女，手牌/抽牌堆各一张重锤；求解器不再判定仅有死亡路线，第 1 回合精灵药自动复活，第 2 回合击杀。首轮路线记录 1 瓶药，实机消耗 `FAIRY_IN_A_BOTTLE`，增量/完整回放一致，计划外重算 0。runId `bbddfcc1e1e54be2a4405e58cd7f557e` | 2026-08-28 |
+| `FAIRY-DEATH-LIFECYCLE-FINAL2-0150` | 通过 | 瓶中仙女的自动防死、消耗槽位和 30% 回复与原版完整状态严格一致，已消耗实例不会再次进入死亡监听。runId `e601bec430ea49318ef57a550d8284f8` | 2026-08-28 |
+| `ONLY-DEATH-NO-FAIRY-REGRESSION-0150` | 通过 | 相同 1 HP 与酸液攻击下不注入精灵药，首轮仍正确报告仅死亡路线并在第 1 回合死亡，用药数 0。runId `53ad9b78496646b196aa4844794766ef` | 2026-08-28 |
 | `VAMBRACE-STABLE-FORK-FINAL-0150` | 通过 | 原版臂铠已经获得本场首次格挡后仍保留触发卡引用；修复后状态可 Fork，触发卡身份和 `BlockGainedThisCombat=true` 均保持。runId `31793a0e83df4656aa0ea3b9182c4c29`；修复前基线 runId `0e1c56fe922c4b4a87109dbd1c06acd0` 稳定抛出问题包同款异常 | 2026-08-28 |
 | `TUNNELER-IMBUED-GLACIER-VAMBRACE-0150` | 通过 | 缺陷机器人持臂铠，注能冰川开局自动打出并进入弃牌堆，原版得到 12 格挡；首轮搜索正常返回，未镜像项为 0。runId `a9ebb7b36f554948a8de0f658385aa34` | 2026-08-28 |
 | `TUNNELER-IMBUED-GLACIER-VAMBRACE-INCREMENTAL-0150` | 通过 | 同一组合启用增量搜索核对，增量分叉与完整前缀回放一致；开局 12 格挡、未镜像项 0，搜索正常返回。runId `689793cd6343465393fdd567a4a7c41e` | 2026-08-28 |
@@ -360,6 +363,7 @@
 运行命令：
 
 ```powershell
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId FAIRY-AUTOMATIC-RESCUE-FINAL2-0150 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 57 -InitialPlayerHp 1 -PotionId FairyInABottle -ClearPlayerPiles -CardsPath coverage\unattended\fairy-automatic-rescue-0150-cards.json -InitialEnemyMoveIdsJson '["FIRST_ACID_GOOP"]' -ExpectedInitialOnlyDeathRoutesFound 0 -ExpectedInitialCombatEndedTurn 2 -ExpectedInitialPotionCount 1 -ExpectedUsedPotionId FAIRY_IN_A_BOTTLE -ExpectedFinishedTurn 2 -ExpectedUnexpectedReplansAtMost 0 -VerifyIncrementalSearch -DeploymentFastModeForTest Instant -DeploymentInterActionDelaySecondsForTest 0 -TimeoutSeconds 180 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId INSATIABLE-MALAISE-CONTROL-150 -CharacterId SILENT -Seed 2DJ8M7EAKQUS -EncounterId THE_INSATIABLE_BOSS -EnemyCurrentHp 341 -InitialPlayerHp 24 -InitialPlayerMaxHp 57 -InitialPlayerEnergy 4 -InitialEnemyMoveIdsJson '["LIQUIFY_GROUND_MOVE"]' -ClearPlayerPiles -CardsPath coverage\unattended\insatiable-malaise-control-150-cards.json -PerformancePresetForTest High -ForceShortSearchOnly -ExpectedInitialFirstActionCardId MALAISE -StopAfterInitialSolverResultAssertion -TimeoutSeconds 180 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BUILTIN-LISTENER-IDENTITY-533 -CharacterId SILENT -Seed BJCZX3J13PZJ -RunSnapshotPath coverage\unattended\solver-longline-run-snapshot.json -EncounterId NIBBITS_NORMAL -EnemyCurrentHp 999 -InitialPlayerHp 35 -PotionId WeakPotion -ExpectedInitialPotionCount 0 -ExpectedInitialHpLostAtMost 0 -ExpectedInitialProjectedBattleHpLostAtMost 0 -ExpectedInitialShufflesCrossedAtLeast 2 -ExpectedUnexpectedReplansAtMost 0 -ExpectedFinishedTurn 5 -VerifyCombatRootSnapshot -VerifyIncrementalSearch -DeploymentFastModeForTest Instant -DeploymentInterActionDelaySecondsForTest 0 -TimeoutSeconds 300 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MODIFIER-IDENTITY-532 -ModifierId MURDEROUS -MonsterMoveChecksPath coverage\unattended\murderous-fabricator-spawn-532.json -ExitOnComplete

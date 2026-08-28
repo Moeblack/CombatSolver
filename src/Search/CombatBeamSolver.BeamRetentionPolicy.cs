@@ -798,6 +798,7 @@ internal sealed partial class CombatBeamSolver
             StateFingerprintBuilder key = new();
             key.Add(node.Turn);
             key.Add(node.PotionCount);
+            key.Add(node.PotionStrategicCost);
             key.Add(node.FutureSoldHp);
             key.Add(snapshot.PlayerHp);
             key.Add(snapshot.ProjectedPlayerHp);
@@ -1572,6 +1573,7 @@ internal sealed partial class CombatBeamSolver
                 && left.Snapshot.LiveDeckClutter <= right.Snapshot.LiveDeckClutter
                 && left.Snapshot.LiveDeckSize <= right.Snapshot.LiveDeckSize
                 && left.PotionCount <= right.PotionCount
+                && left.PotionStrategicCost <= right.PotionStrategicCost
                 && left.FutureSoldHp <= right.FutureSoldHp
                 && left.ActionCount <= right.ActionCount;
             bool strictlyBetter = left.Snapshot.ProjectedPlayerHp > right.Snapshot.ProjectedPlayerHp
@@ -1599,6 +1601,7 @@ internal sealed partial class CombatBeamSolver
                 || left.Snapshot.LiveDeckClutter < right.Snapshot.LiveDeckClutter
                 || left.Snapshot.LiveDeckSize < right.Snapshot.LiveDeckSize
                 || left.PotionCount < right.PotionCount
+                || left.PotionStrategicCost < right.PotionStrategicCost
                 || left.FutureSoldHp < right.FutureSoldHp
                 || left.ActionCount < right.ActionCount;
             return noWorse && strictlyBetter;

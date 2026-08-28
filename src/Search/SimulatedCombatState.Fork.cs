@@ -64,6 +64,7 @@ internal sealed partial class SimulatedCombatState
             _swordSageCardsInitialized = _swordSageCardsInitialized,
             _skillsPlayedThisTurn = _skillsPlayedThisTurn?.Fork(),
             _potionSlots = _potionSlots?.Fork(),
+            _potionUses = _potionUses?.Fork(),
             _outstandingStolenGold = _outstandingStolenGold,
             _outstandingStolenCards = _outstandingStolenCards,
         };

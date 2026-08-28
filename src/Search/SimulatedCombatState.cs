@@ -1442,9 +1442,19 @@ internal sealed partial class SimulatedCombatState
             {
                 MonsterModel monster => ContainsCreature(monster.Creature),
                 PowerModel power => ContainsCreature(power.Owner) || _knownEnemies.Contains(power.Owner),
+                PotionModel potion => ContainsPotion(potion),
                 _ => true,
             })
             .ToList();
+        foreach (Player player in Players)
+        {
+            for (int slot = 0; slot < PotionSlotCount(player); slot++)
+            {
+                PotionModel? potion = GetPotionAtSlot(player, slot);
+                if (potion != null && !listeners.Contains(potion))
+                    listeners.Add(potion);
+            }
+        }
         foreach (Creature creature in Creatures.Where(creature => !_rootCreatures.Contains(creature)))
         {
             listeners.AddRange(creature.Powers);
@@ -1475,6 +1485,17 @@ internal sealed partial class SimulatedCombatState
         }
         _baseHookListeners = listeners.ToArray();
         return _baseHookListeners;
+    }
+
+    private bool ContainsPotion(PotionModel potion)
+    {
+        Player player = potion.Owner;
+        for (int slot = 0; slot < PotionSlotCount(player); slot++)
+        {
+            if (ReferenceEquals(GetPotionAtSlot(player, slot), potion))
+                return true;
+        }
+        return false;
     }
 
     internal void MaterializeRoot(CombatPredictionSimulator simulator)

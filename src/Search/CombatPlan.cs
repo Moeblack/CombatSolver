@@ -239,6 +239,9 @@ internal sealed class SimulationSnapshot(
     int pocketwatchCardsPlayedThisTurn,
     int pocketwatchCardsPlayedLastTurn,
     int pocketwatchCardThreshold,
+    int potionUseCount,
+    int potionStrategicCost,
+    int automaticPotionUseCount,
     int turn,
     int shufflesCrossed,
     IReadOnlySet<uint> processedEnemyDeaths,
@@ -300,6 +303,9 @@ internal sealed class SimulationSnapshot(
     public int PocketwatchCardsPlayedThisTurn { get; } = pocketwatchCardsPlayedThisTurn;
     public int PocketwatchCardsPlayedLastTurn { get; } = pocketwatchCardsPlayedLastTurn;
     public int PocketwatchCardThreshold { get; } = pocketwatchCardThreshold;
+    public int PotionUseCount { get; } = potionUseCount;
+    public int PotionStrategicCost { get; } = potionStrategicCost;
+    public int AutomaticPotionUseCount { get; } = automaticPotionUseCount;
     public bool CanStillTriggerPocketwatch => PocketwatchCardThreshold >= 0
         && PocketwatchCardsPlayedThisTurn <= PocketwatchCardThreshold;
     public int Turn { get; } = turn;
@@ -463,6 +469,8 @@ internal sealed class SolverResult
     public required IReadOnlyDictionary<int, int> MaxBlockByTurn { get; init; }
     public required IReadOnlyDictionary<int, int> ActualBlockByTurn { get; init; }
     public required IReadOnlyDictionary<int, int> EnergyLeftByTurn { get; init; }
+    public required IReadOnlyDictionary<int, int> PotionCountByTurn { get; init; }
+    public required IReadOnlyDictionary<int, int> PotionStrategicCostByTurn { get; init; }
     public required IReadOnlyDictionary<int, IReadOnlyList<string>> KillsAfterAction { get; init; }
     public required int? CombatEndedTurn { get; init; }
     public required int? DeathTurn { get; init; }
@@ -503,12 +511,12 @@ internal sealed class SolverResult
             .DefaultIfEmpty(cached.StartTurnNumber)
             .Max() - cached.StartTurnNumber + 1);
         int totalRemainingLoss = Math.Max(0, currentHp - Snapshot.PlayerHp);
-        int remainingPotionCount = BestNode.Actions.Count(action =>
-            action.Kind == PlanActionKind.UsePotion && action.Turn >= cached.StartTurnNumber);
-        int remainingPotionCost = BestNode.Actions
-            .Where(action => action.Kind == PlanActionKind.UsePotion
-                && action.Turn >= cached.StartTurnNumber)
-            .Sum(action => PotionUsePolicy.StrategicHpCost(action.PotionId));
+        int remainingPotionCount = PotionCountByTurn
+            .Where(item => item.Key >= cached.StartTurnNumber)
+            .Sum(item => item.Value);
+        int remainingPotionCost = PotionStrategicCostByTurn
+            .Where(item => item.Key >= cached.StartTurnNumber)
+            .Sum(item => item.Value);
         Dictionary<int, int> soldByTurn = SoldHpByTurn.ToDictionary(item => item.Key, item => item.Value);
         int remainingSold = Math.Min(totalRemainingLoss, SoldHpByTurn
             .Where(item => item.Key >= cached.StartTurnNumber)
@@ -573,6 +581,8 @@ internal sealed class SolverResult
             MaxBlockByTurn = MaxBlockByTurn,
             ActualBlockByTurn = ActualBlockByTurn,
             EnergyLeftByTurn = EnergyLeftByTurn,
+            PotionCountByTurn = PotionCountByTurn,
+            PotionStrategicCostByTurn = PotionStrategicCostByTurn,
             KillsAfterAction = KillsAfterAction,
             CombatEndedTurn = CombatEndedTurn,
             DeathTurn = DeathTurn,

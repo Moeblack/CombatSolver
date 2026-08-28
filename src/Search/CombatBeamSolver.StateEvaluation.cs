@@ -11,12 +11,14 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Models.Powers;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Simulation;
 using BufferCard = MegaCrit.Sts2.Core.Models.Cards.Buffer;
 
@@ -238,6 +240,9 @@ internal sealed partial class CombatBeamSolver
             out int pocketwatchCardsPlayedThisTurn,
             out int pocketwatchCardsPlayedLastTurn,
             out int pocketwatchCardThreshold);
+        int potionUseCount = combat.PotionUses.Count;
+        int potionStrategicCost = combat.PotionUses.Sum(use => use.StrategicHpCost);
+        int automaticPotionUseCount = combat.PotionUses.Count(use => use.Automatic);
 
         return new SimulationSnapshot(
             score,
@@ -288,6 +293,9 @@ internal sealed partial class CombatBeamSolver
             pocketwatchCardsPlayedThisTurn,
             pocketwatchCardsPlayedLastTurn,
             pocketwatchCardThreshold,
+            potionUseCount,
+            potionStrategicCost,
+            automaticPotionUseCount,
             turn,
             shufflesCrossed,
             processedEnemyDeaths,
@@ -515,6 +523,10 @@ internal sealed partial class CombatBeamSolver
         Creature? osty = _player.Osty;
         int ostyHp = osty == null ? 0 : simulator.State.GetCreature(osty).CurrentHp;
         SimulatedCombatState simulatedCombat = (SimulatedCombatState)simulator.State.CombatState;
+        ProjectedDeathPrevention deathPrevention = BuildProjectedDeathPrevention(
+            simulator,
+            simulatedCombat,
+            player.MaxHp);
         IReadOnlyList<ForecastMove> moves = simulatedCombat.CurrentMonsterMoves();
         foreach (ForecastMove move in moves)
         {
@@ -537,7 +549,8 @@ internal sealed partial class CombatBeamSolver
                     osty,
                     ref ostyHp,
                     ref block,
-                    ref hp);
+                    ref hp,
+                    ref deathPrevention);
                 continue;
             }
             foreach (ForecastAttackHit hit in move.AttackHits)
@@ -551,7 +564,8 @@ internal sealed partial class CombatBeamSolver
                     osty,
                     ref ostyHp,
                     ref block,
-                    ref hp);
+                    ref hp,
+                    ref deathPrevention);
             }
         }
         return hp;
@@ -565,7 +579,8 @@ internal sealed partial class CombatBeamSolver
         Creature? osty,
         ref int ostyHp,
         ref int block,
-        ref int playerHp)
+        ref int playerHp,
+        ref ProjectedDeathPrevention deathPrevention)
     {
         int adjustedHit = CorePowerSupport.AdjustForecastAttack(
             simulator,
@@ -614,9 +629,56 @@ internal sealed partial class CombatBeamSolver
             int absorbed = Math.Min(ostyHp, loss);
             ostyHp -= absorbed;
             playerHp -= loss - absorbed;
+            deathPrevention.TryRevive(ref playerHp);
             return;
         }
         playerHp -= loss;
+        deathPrevention.TryRevive(ref playerHp);
+    }
+
+    private ProjectedDeathPrevention BuildProjectedDeathPrevention(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        int playerMaxHp)
+    {
+        int fairyCount = 0;
+        for (int slot = 0; slot < root.PotionSlotCount; slot++)
+        {
+            if (combat.GetPotionAtSlot(_player, slot) is FairyInABottle)
+                fairyCount++;
+        }
+
+        LizardTail? lizardTail = combat.RelicsOf(_player)
+            .OfType<LizardTail>()
+            .FirstOrDefault(relic => !LizardTailMirrors.WasUsed(relic, simulator));
+        return new ProjectedDeathPrevention(
+            fairyCount,
+            (int)FairyInABottleMirrors.HealAmount(playerMaxHp),
+            lizardTail != null,
+            lizardTail == null ? 0 : (int)LizardTailMirrors.HealAmount(lizardTail, playerMaxHp));
+    }
+
+    private struct ProjectedDeathPrevention(
+        int fairyCount,
+        int fairyHeal,
+        bool lizardTailAvailable,
+        int lizardTailHeal)
+    {
+        public void TryRevive(ref int hp)
+        {
+            if (hp > 0)
+                return;
+            if (fairyCount > 0)
+            {
+                fairyCount--;
+                hp = fairyHeal;
+                return;
+            }
+            if (!lizardTailAvailable)
+                return;
+            lizardTailAvailable = false;
+            hp = lizardTailHeal;
+        }
     }
 
     private StateFingerprint BuildStateKey(

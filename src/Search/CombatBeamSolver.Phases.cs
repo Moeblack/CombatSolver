@@ -111,8 +111,8 @@ internal sealed partial class CombatBeamSolver
             SearchNode root = new(
                 null,
                 0,
-                0,
-                0,
+                snapshot.PotionUseCount,
+                snapshot.PotionStrategicCost,
                 _startTurnNumber,
                 SearchRouteTraits.None,
                 0,
@@ -127,11 +127,21 @@ internal sealed partial class CombatBeamSolver
                 TurnSetupPlayState: turnSetupPlayState);
             frontier.Add(root);
             if (_run.Transpositions.TryGetValue(root.StateKey, out TranspositionFrontier? existing))
-                existing.TryAccept(new TranspositionLabel(0, 0, 0, root.Score));
+                existing.TryAccept(new TranspositionLabel(
+                    root.PotionCount,
+                    root.PotionStrategicCost,
+                    0,
+                    0,
+                    root.Score));
             else
                 _run.Transpositions.Add(
                     root.StateKey,
-                    new TranspositionFrontier(new TranspositionLabel(0, 0, 0, root.Score)));
+                    new TranspositionFrontier(new TranspositionLabel(
+                        root.PotionCount,
+                        root.PotionStrategicCost,
+                        0,
+                        0,
+                        root.Score)));
         }
         List<SearchNode> completed = [];
         SearchNode fallback = frontier.MaxBy(static node => node.Score)!;
@@ -533,6 +543,8 @@ internal sealed partial class CombatBeamSolver
             MaxBlockByTurn = annotations.MaxBlockByTurn,
             ActualBlockByTurn = annotations.ActualBlockByTurn,
             EnergyLeftByTurn = annotations.EnergyLeftByTurn,
+            PotionCountByTurn = annotations.PotionCountByTurn,
+            PotionStrategicCostByTurn = annotations.PotionStrategicCostByTurn,
             KillsAfterAction = annotations.KillsAfterAction,
             CombatEndedTurn = annotations.CombatEndedTurn,
             DeathTurn = annotations.DeathTurn,

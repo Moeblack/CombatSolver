@@ -26,6 +26,7 @@ internal sealed partial class CombatBeamSolver
 {
     private readonly record struct TranspositionLabel(
         int PotionCount,
+        int PotionStrategicCost,
         int FutureSoldHp,
         int ActionCount,
         double Score);
@@ -48,6 +49,7 @@ internal sealed partial class CombatBeamSolver
 
         private static bool Dominates(TranspositionLabel left, TranspositionLabel right)
             => left.PotionCount <= right.PotionCount
+                && left.PotionStrategicCost <= right.PotionStrategicCost
                 && left.FutureSoldHp <= right.FutureSoldHp
                 && left.ActionCount <= right.ActionCount
                 && left.Score >= right.Score;
@@ -109,6 +111,7 @@ internal sealed partial class CombatBeamSolver
                 Transpositions[node.StateKey] = new TranspositionFrontier(
                     new TranspositionLabel(
                         node.PotionCount,
+                        node.PotionStrategicCost,
                         node.FutureSoldHp,
                         node.ActionCount,
                         node.Score));
@@ -144,6 +147,8 @@ internal sealed partial class CombatBeamSolver
         IReadOnlyDictionary<int, int> MaxBlockByTurn,
         IReadOnlyDictionary<int, int> ActualBlockByTurn,
         IReadOnlyDictionary<int, int> EnergyLeftByTurn,
+        IReadOnlyDictionary<int, int> PotionCountByTurn,
+        IReadOnlyDictionary<int, int> PotionStrategicCostByTurn,
         IReadOnlyDictionary<int, IReadOnlyList<string>> KillsAfterAction,
         int? CombatEndedTurn,
         int? DeathTurn);

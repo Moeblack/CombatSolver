@@ -126,6 +126,7 @@ internal sealed partial class CombatBeamSolver
                     (PotionUsePolicy.IsEligible(
                          potionPolicy,
                          candidate.PotionCount,
+                         candidate.Snapshot.AutomaticPotionUseCount,
                          candidate.PotionStrategicCost,
                          potionFreeWon,
                          potionFreeStrategicHpDeficit,
@@ -167,6 +168,7 @@ internal sealed partial class CombatBeamSolver
                 && (!(PotionUsePolicy.IsEligible(
                           potionPolicy,
                           candidate.PotionCount,
+                          candidate.Snapshot.AutomaticPotionUseCount,
                           candidate.PotionStrategicCost,
                           potionFreeWon,
                           potionFreeStrategicHpDeficit,

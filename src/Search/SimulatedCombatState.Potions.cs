@@ -5,9 +5,19 @@ using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
 
+internal readonly record struct PredictedPotionUse(
+    int Slot,
+    string PotionId,
+    int StrategicHpCost,
+    bool Automatic);
+
 internal sealed partial class SimulatedCombatState
 {
     private ForkableDictionary<(Player Player, int Slot), PotionModel?>? _potionSlots;
+    private ForkableList<PredictedPotionUse>? _potionUses;
+
+    internal IReadOnlyList<PredictedPotionUse> PotionUses
+        => _potionUses is { } uses ? uses : Array.Empty<PredictedPotionUse>();
 
     public PotionModel? GetPotionAtSlot(Player player, int slot)
     {
@@ -33,10 +43,19 @@ internal sealed partial class SimulatedCombatState
     }
 
     public void ConsumePotion(Player player, int slot)
+        => ConsumePotion(player, slot, automatic: false);
+
+    private void ConsumePotion(Player player, int slot, bool automatic)
     {
-        if (!IsPotionAvailable(player, slot))
-            throw new InvalidOperationException($"药水槽位 {slot} 已不可用。");
+        PotionModel potion = GetPotionAtSlot(player, slot)
+            ?? throw new InvalidOperationException($"药水槽位 {slot} 已不可用。");
         (_potionSlots ??= [])[(player, slot)] = null;
+        (_potionUses ??= []).Add(new PredictedPotionUse(
+            slot,
+            potion.Id.Entry,
+            PotionUsePolicy.StrategicHpCost(potion),
+            automatic));
+        InvalidateBaseHookListeners();
     }
 
     public void ConsumePotion(PotionModel potion)
@@ -46,7 +65,7 @@ internal sealed partial class SimulatedCombatState
         {
             if (!ReferenceEquals(GetPotionAtSlot(player, slot), potion))
                 continue;
-            ConsumePotion(player, slot);
+            ConsumePotion(player, slot, automatic: true);
             return;
         }
         throw new InvalidOperationException($"预测药水槽中找不到实例 {potion.Id.Entry}。");
@@ -85,6 +104,7 @@ internal sealed partial class SimulatedCombatState
             if (GetPotionAtSlot(player, slot) != null)
                 continue;
             (_potionSlots ??= [])[(player, slot)] = potion;
+            InvalidateBaseHookListeners();
             TriggerRelicsAfterPotionProcured(player);
             return true;
         }

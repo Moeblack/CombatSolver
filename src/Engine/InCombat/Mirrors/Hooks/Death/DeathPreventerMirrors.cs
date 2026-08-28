@@ -1,44 +1,30 @@
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Relics;
 using CombatSolver.Engine.Common;
+using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 
 internal static class FairyInABottleMirrors
 {
     public static bool ShouldDie(FairyInABottle potion, ShouldDieMirrorContext context)
-    {
-        if (context.Creature == potion.Owner.Creature)
-        {
-            return GetState(potion, context).WasUsed;
-        }
-
-        return true;
-    }
+        => context.Creature != potion.Owner.Creature;
 
     public static void AfterPreventingDeath(
         FairyInABottle potion,
         AfterPreventingDeathMirrorContext context)
     {
-        GetState(potion, context).WasUsed = true;
         if (context.CombatState is not ICombatPredictionEffectSink effects)
             throw new InvalidOperationException("瓶中仙女结算缺少可写的预测状态。");
         effects.ConsumePotion(potion);
+        effects.BeforePotionUsed(context.Simulator, potion, context.Creature);
         int maxHp = context.State.GetCreature(context.Creature).MaxHp;
-        context.Simulator.Heal(context.Creature, Math.Max(1m, maxHp * 0.3m));
+        context.Simulator.Heal(context.Creature, HealAmount(maxHp));
+        if (context.State.GetCreature(context.Creature).IsAlive)
+            effects.AfterPotionUsed(context.Simulator, potion, context.Creature);
     }
 
-    private static State GetState(FairyInABottle potion, CombatMirrorContext context)
-    {
-        return context.StateStore.Get<State>(potion);
-    }
-
-    private sealed class State : IPredictionStateForkable
-    {
-        public bool WasUsed { get; set; }
-
-        public object Fork(PredictionForkContext context) => MemberwiseClone();
-    }
+    internal static decimal HealAmount(int maxHp) => Math.Max(1m, maxHp * 0.3m);
 }
 
 internal static class LizardTailMirrors
@@ -58,9 +44,16 @@ internal static class LizardTailMirrors
         GetState(relic, context).WasUsed = true;
 
         int maxHp = context.State.GetCreature(context.Creature).MaxHp;
-        var amount = Math.Max(1m, maxHp * (relic.DynamicVars.Heal.BaseValue / 100m));
-        context.Simulator.Heal(context.Creature, amount);
+        context.Simulator.Heal(context.Creature, HealAmount(relic, maxHp));
     }
+
+    internal static decimal HealAmount(LizardTail relic, int maxHp)
+        => Math.Max(1m, maxHp * (relic.DynamicVars.Heal.BaseValue / 100m));
+
+    internal static bool WasUsed(LizardTail relic, CombatPredictionSimulator simulator)
+        => simulator.StateStore
+            .Peek(relic, () => new LizardTailPredictionState(relic))
+            .WasUsed;
 
     private static LizardTailPredictionState GetState(LizardTail relic, CombatMirrorContext context)
         => context.StateStore.Get(relic, () => new LizardTailPredictionState(relic));
