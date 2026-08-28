@@ -702,6 +702,7 @@ internal sealed partial class CombatBeamSolver
             AddRequired(required, bestPotionFreeUtilityDefensive, limit);
             AddRequired(required, bestOffensive, limit);
             AddRequired(required, bestResourcePreserving, limit);
+            AddRequired(required, FindBestLane(ranked, SearchRouteTraits.LongTermResource), limit);
             if (preserveDefensiveRoute
                 && _profile.Phase == SolverSearchPhase.Deep
                 && limit >= 18)
@@ -714,6 +715,7 @@ internal sealed partial class CombatBeamSolver
                              SearchRouteTraits.RevivalWindow,
                              SearchRouteTraits.ReactiveDamage,
                              SearchRouteTraits.EndTurnDeckCompression,
+                             SearchRouteTraits.LongTermResource,
                          })
                 {
                     foreach (IGrouping<int, SearchNode> potionCountGroup in ranked
@@ -1469,6 +1471,7 @@ internal sealed partial class CombatBeamSolver
                     + snapshot.Stars * 8
                     + snapshot.HandCount
                     + snapshot.FutureResourceValue,
+                SearchRouteTraits.LongTermResource => snapshot.LongTermResourceValue,
                 SearchRouteTraits.Control => snapshot.SandpitRemaining * 32
                     + snapshot.EnemyStrengthSuppression * 32
                     + snapshot.EnemyWeakTurns * 8
@@ -1549,6 +1552,10 @@ internal sealed partial class CombatBeamSolver
                 return false;
             }
             bool noWorse = left.Snapshot.ProjectedPlayerHp >= right.Snapshot.ProjectedPlayerHp
+                && left.Snapshot.PlayerMaxHp >= right.Snapshot.PlayerMaxHp
+                && left.Snapshot.CumulativePlayerHpLost <= right.Snapshot.CumulativePlayerHpLost
+                && left.Snapshot.LongTermResourceValue >= right.Snapshot.LongTermResourceValue
+                && left.Snapshot.AngerCopiesGenerated <= right.Snapshot.AngerCopiesGenerated
                 && (_theftPolicy != SolverTheftPolicy.PreserveResources
                     || left.Snapshot.OutstandingStolenResource <= right.Snapshot.OutstandingStolenResource)
                 && left.Snapshot.AliveEnemyCount <= right.Snapshot.AliveEnemyCount
@@ -1577,6 +1584,10 @@ internal sealed partial class CombatBeamSolver
                 && left.FutureSoldHp <= right.FutureSoldHp
                 && left.ActionCount <= right.ActionCount;
             bool strictlyBetter = left.Snapshot.ProjectedPlayerHp > right.Snapshot.ProjectedPlayerHp
+                || left.Snapshot.PlayerMaxHp > right.Snapshot.PlayerMaxHp
+                || left.Snapshot.CumulativePlayerHpLost < right.Snapshot.CumulativePlayerHpLost
+                || left.Snapshot.LongTermResourceValue > right.Snapshot.LongTermResourceValue
+                || left.Snapshot.AngerCopiesGenerated < right.Snapshot.AngerCopiesGenerated
                 || _theftPolicy == SolverTheftPolicy.PreserveResources
                     && left.Snapshot.OutstandingStolenResource < right.Snapshot.OutstandingStolenResource
                 || left.Snapshot.AliveEnemyCount < right.Snapshot.AliveEnemyCount

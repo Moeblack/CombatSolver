@@ -771,6 +771,11 @@ internal static class AfterCardPlayedMirrors
         if (context.Card.References(enchantment.Card) && context.MutablePreviewCard.Enchantment is Goopy preview)
         {
             preview._amount++;
+            if (context.MutablePreviewCard.DeckVersion != null
+                && context.State.CombatState is SimulatedCombatState combat)
+            {
+                combat.RecordLongTermResource(1);
+            }
         }
     }
 

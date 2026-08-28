@@ -42,6 +42,8 @@ internal static class LizardTailMirrors
     public static void AfterPreventingDeath(LizardTail relic, AfterPreventingDeathMirrorContext context)
     {
         GetState(relic, context).WasUsed = true;
+        if (context.Simulator.IsRecordingActionRelicTriggers)
+            context.Simulator.RecordRelicTrigger(relic, "：复活");
 
         int maxHp = context.State.GetCreature(context.Creature).MaxHp;
         context.Simulator.Heal(context.Creature, HealAmount(relic, maxHp));

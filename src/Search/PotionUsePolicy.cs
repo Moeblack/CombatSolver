@@ -1,5 +1,6 @@
 using MegaCrit.Sts2.Core.Entities.Potions;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Potions;
 
 namespace CombatSolver;
 
@@ -15,6 +16,16 @@ internal static class PotionUsePolicy
 
     public static int StrategicHpCost(PotionModel potion)
         => potion.Rarity == PotionRarity.Token ? 0 : SolverWeights.PotionMinimumHpSaved;
+
+    public static bool RequiresOpeningUse(PotionModel potion)
+        => potion is DexterityPotion
+            or FocusPotion
+            or FyshOil
+            or LiquidBronze
+            or MazalethsGift
+            or PotionOfCapacity
+            or SoldiersStew
+            or StrengthPotion;
 
     public static int StrategicHpCost(string potionId)
     {

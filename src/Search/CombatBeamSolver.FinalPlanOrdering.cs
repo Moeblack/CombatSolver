@@ -26,8 +26,11 @@ internal sealed partial class CombatBeamSolver
                     int ambergrisCount = candidate.Node.Actions.Count(action =>
                         action.Kind == PlanActionKind.UsePotion
                         && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
-                    int hpDeficit = Math.Max(0, initialHp - candidate.Snapshot.PlayerHp);
-                    int strategicHpDeficit = hpDeficit;
+                    int hpDeficit = features.CumulativePlayerHpLost;
+                    int maxHpDeficit = Math.Max(0, initialPlayerMaxHp - features.PlayerMaxHp);
+                    int strategicHpDeficit = hpDeficit + maxHpDeficit;
+                    int healthResourceCost = initialHp - features.PlayerHp
+                        + initialPlayerMaxHp - features.PlayerMaxHp;
                     int strategicSold = battleSold;
                     int policyHpDeficit = strategicHpDeficit
                         + (potionPolicy == SolverPotionPolicy.RequireAtLeastOne
@@ -37,6 +40,7 @@ internal sealed partial class CombatBeamSolver
                     return (candidate.Node, candidate.Snapshot, candidate.Annotations, Features: features,
                         FutureSold: sold, BattleSold: battleSold, PotionCount: potionCount, HpDeficit: hpDeficit,
                         StrategicHpDeficit: strategicHpDeficit, PolicyHpDeficit: policyHpDeficit,
+                        MaxHpDeficit: maxHpDeficit, HealthResourceCost: healthResourceCost,
                         StrategicSold: strategicSold, PotionStrategicCost: candidate.Node.PotionStrategicCost,
                         AmbergrisCount: ambergrisCount, Score: features.Score);
                 })
@@ -69,6 +73,9 @@ internal sealed partial class CombatBeamSolver
                     ? item.Candidate.Features.OutstandingStolenResource
                     : 0)
                 .ThenBy(item => item.Candidate.StrategicHpDeficit)
+                .ThenBy(item => item.Candidate.HealthResourceCost)
+                .ThenByDescending(item => item.Candidate.Features.LongTermResourceValue)
+                .ThenBy(item => item.Candidate.Features.AngerCopiesGenerated)
                 .ThenBy(item => CombatBeamSolver.PolicyBoundaryRank(item.Candidate.Features.BoundaryReason))
                 .ThenBy(item => item.Candidate.Features.EnemyHp)
                 .ThenByDescending(item => item.Candidate.Score)
@@ -147,7 +154,9 @@ internal sealed partial class CombatBeamSolver
                     ? candidate.Features.OutstandingStolenResource
                     : 0)
                 .ThenBy(candidate => candidate.PolicyHpDeficit)
-                .ThenBy(candidate => candidate.StrategicHpDeficit)
+                .ThenBy(candidate => candidate.HealthResourceCost)
+                .ThenByDescending(candidate => candidate.Features.LongTermResourceValue)
+                .ThenBy(candidate => candidate.Features.AngerCopiesGenerated)
                 .ThenBy(candidate => CombatBeamSolver.PolicyBoundaryRank(candidate.Features.BoundaryReason))
                 .ThenBy(candidate => candidate.PotionCount)
                 .ThenBy(candidate => candidate.StrategicSold)

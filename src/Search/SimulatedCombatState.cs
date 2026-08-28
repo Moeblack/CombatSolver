@@ -170,6 +170,7 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Creature, int>? _cardsExhaustedThisTurn;
     private ForkableSet<Creature>? _doomAppliersThisTurn;
     private ForkableSet<Creature>? _unblockedDamageThisTurn;
+    private ForkableDictionary<Creature, int>? _cumulativeHpLost;
     private ForkableDictionary<(Creature Dealer, Creature Receiver), int>? _poweredAttackHitsThisTurn;
     private ForkableDictionary<Creature, int>? _cardsDiscardedThisTurn;
     private ForkableDictionary<Creature, int>? _creatureAttacksThisTurn;
@@ -1726,6 +1727,10 @@ internal sealed partial class SimulatedCombatState
         fingerprint.Add(_hasPredictedEnemyIntents);
         fingerprint.Add(HasPendingChoice);
         fingerprint.Add(_battlewornDummyTimedOut);
+        fingerprint.Add('g');
+        fingerprint.Add(_longTermResourceValue);
+        fingerprint.Add('A');
+        fingerprint.Add(_angerCopiesGenerated);
         AddFeralStates(ref fingerprint, simulator, effectivePowers);
         AddJugglingStates(ref fingerprint, simulator, effectivePowers);
         AddTurnStartStates(ref fingerprint, simulator, effectivePowers);

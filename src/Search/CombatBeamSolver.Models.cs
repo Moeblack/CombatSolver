@@ -28,6 +28,7 @@ internal sealed partial class CombatBeamSolver
         int PotionCount,
         int PotionStrategicCost,
         int FutureSoldHp,
+        int CumulativePlayerHpLost,
         int ActionCount,
         double Score);
 
@@ -51,6 +52,7 @@ internal sealed partial class CombatBeamSolver
             => left.PotionCount <= right.PotionCount
                 && left.PotionStrategicCost <= right.PotionStrategicCost
                 && left.FutureSoldHp <= right.FutureSoldHp
+                && left.CumulativePlayerHpLost <= right.CumulativePlayerHpLost
                 && left.ActionCount <= right.ActionCount
                 && left.Score >= right.Score;
     }
@@ -113,6 +115,7 @@ internal sealed partial class CombatBeamSolver
                         node.PotionCount,
                         node.PotionStrategicCost,
                         node.FutureSoldHp,
+                        node.Snapshot.CumulativePlayerHpLost,
                         node.ActionCount,
                         node.Score));
             }
@@ -132,6 +135,10 @@ internal sealed partial class CombatBeamSolver
         int Damage,
         int Block,
         int Hp,
+        int MaxHp,
+        int CumulativeHpLost,
+        int LongTermResourceValue,
+        int AngerCopiesGenerated,
         bool IsPure,
         double NormalizedValue);
 
@@ -156,6 +163,11 @@ internal sealed partial class CombatBeamSolver
     private readonly record struct SearchFeatures(
         bool AllEnemiesDead,
         int ProjectedPlayerHp,
+        int PlayerHp,
+        int PlayerMaxHp,
+        int CumulativePlayerHpLost,
+        int LongTermResourceValue,
+        int AngerCopiesGenerated,
         int PlayerBlock,
         int AliveEnemyCount,
         int EnemyHp,
@@ -190,6 +202,11 @@ internal sealed partial class CombatBeamSolver
             return new SearchFeatures(
                 snapshot.AllEnemiesDead,
                 snapshot.ProjectedPlayerHp,
+                snapshot.PlayerHp,
+                snapshot.PlayerMaxHp,
+                snapshot.CumulativePlayerHpLost,
+                snapshot.LongTermResourceValue,
+                snapshot.AngerCopiesGenerated,
                 snapshot.PlayerBlock,
                 snapshot.AliveEnemyCount,
                 snapshot.EnemyHp,

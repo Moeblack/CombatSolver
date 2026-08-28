@@ -162,10 +162,10 @@ internal static class CombatSearchCoordinator
             return primary;
         }
 
-        int initialHp = root.InitialPlayerHp;
         PotionFreePolicyBaseline baseline = new(
             Won: true,
-            HpDeficit: Math.Max(0, initialHp - potionFree.Snapshot.PlayerHp),
+            HpDeficit: potionFree.Snapshot.CumulativePlayerHpLost
+                + Math.Max(0, root.InitialPlayerMaxHp - potionFree.Snapshot.PlayerMaxHp),
             PlayerHp: potionFree.Snapshot.PlayerHp);
         SolverResult audited = new CombatBeamSolver(
             root,

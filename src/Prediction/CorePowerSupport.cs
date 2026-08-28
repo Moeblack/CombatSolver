@@ -102,8 +102,12 @@ internal static class CorePowerSupport
                 break;
             }
             case HandOfGreed when target != null && WasFatalKill(combat, simulator, playedCard, target, historyEntryStart):
-                combat.GainPlayerGold(card.Owner, card.DynamicVars["Gold"].IntValue);
+            {
+                int gold = card.DynamicVars["Gold"].IntValue;
+                combat.GainPlayerGold(card.Owner, gold);
+                combat.RecordLongTermResource(gold);
                 break;
+            }
             case KnockoutBlow when target != null && WasCardKill(simulator, playedCard, target, historyEntryStart):
                 simulator.GainStars(card.Owner, card.DynamicVars.Stars.IntValue);
                 break;
@@ -111,8 +115,11 @@ internal static class CorePowerSupport
                 simulator.GainEnergy(card.Owner, card.DynamicVars.Energy.IntValue);
                 break;
             case TheHunt when target != null && WasFatalKill(combat, simulator, playedCard, target, historyEntryStart):
+            {
                 combat.Apply<TheHuntPower>(owner, 1, owner);
+                combat.RecordLongTermResource(30);
                 break;
+            }
             case ToricToughness:
             {
                 ToricToughnessPower power = combat.AddPowerInstance<ToricToughnessPower>(
@@ -196,6 +203,7 @@ internal static class CorePowerSupport
                     card.Owner,
                     CardPilePosition.Bottom,
                     CardGenerationResultKind.Fixed);
+                combat.RecordAngerCopyGenerated();
                 break;
             case BattleTrance:
                 combat.Apply<NoDrawPower>(owner, 1, owner);

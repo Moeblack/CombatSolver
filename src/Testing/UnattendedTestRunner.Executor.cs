@@ -299,11 +299,27 @@ internal sealed partial class UnattendedTestRunner
                     runner._completedChecks.Add($"UnexpectedReplanWarning:{maximumUnexpectedReplans}");
                     break;
                 }
-                expectedReuseObserved |= SolverController.LastCompletedResultForTesting is
+                SolverResult? latestResult = SolverController.LastCompletedResultForTesting;
+                int? observedReusedTurn = SolverController.LastReusedTurnForTesting
+                    ?? (latestResult?.WasReused == true
+                        ? latestResult.StartTurnNumber
+                        : null);
+                if (request.ExpectedReusedTurn.HasValue
+                    && observedReusedTurn == request.ExpectedReusedTurn)
                 {
-                    WasReused: true,
-                    StartTurnNumber: var reusedTurn,
-                } && reusedTurn == request.ExpectedReusedTurn;
+                    int observedProjectedBattleHpLost =
+                        SolverController.LastReusedProjectedBattleHpLostForTesting
+                        ?? latestResult?.ProjectedBattleHpLost
+                        ?? throw new InvalidOperationException("复用测试没有记录整场预计战损。");
+                    if (request.ExpectedReusedProjectedBattleHpLost is { } expectedReusedLoss
+                        && observedProjectedBattleHpLost != expectedReusedLoss)
+                    {
+                        throw new InvalidOperationException(
+                            $"第 {observedReusedTurn} 回合复用路线预计整场掉血 " +
+                            $"{observedProjectedBattleHpLost}，预期为 {expectedReusedLoss}。");
+                    }
+                    expectedReuseObserved = true;
+                }
                 if (request.StopAfterExpectedReuse && expectedReuseObserved)
                 {
                     stoppedAfterExpectedReuse = true;

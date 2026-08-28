@@ -10,6 +10,19 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `OPENING-STRENGTH/DEXTERITY-POTION-0170` | 通过 | 力量药与敏捷药均为最终路线首个动作、位于首张牌之前；runId `a65e0ce7c1e1478c949052d86ed799a7`、`c6217b9d975e4ecbaf0e26a4a3dd7a5d` | 2026-08-29 |
+| `LIZARD-TAIL-LIVE-REUSE-0170` | 通过 | 1 HP 触发蜥蜴尾巴后，首轮与第 2 回合复用均保留整场战损 1；路线有“蜥蜴尾巴：复活”，计划外重算 0。runId `735a14adb16241719f220badb89f00a9` | 2026-08-29 |
+| `BRIGHTEST-FLAME-TERMINAL/NECESSARY-0170` | 通过 | 同样无伤可胜时不打至亮之焰；必须用它完成当回合击杀时，路线保留 78 最大生命与 2 点当前损失。runId `c6b2b17afea34e9d8befaf3f32401f36`、`207af957f0664c478201bcd4c49bffd2` | 2026-08-29 |
+| `BATTLEWORN-DUMMY-V1/V2/V3-KILL-0170` | 通过 | 三档训练假人均以自伤攻击完成击杀，不用安全停滞替代目标；runId `319a22b784414d4d8f75559ecaa21779`、`9f7666436f4c4451907971ae732211b1`、`b61f285e96ce40e2bef847e1c708250c` | 2026-08-29 |
+| `BATTLEWORN-DUMMY-EVENT-DEFEAT-0170` | 通过 | 倒计时耗尽返回 `EventDefeat`，不授予胜利。runId `963ddd67b7db402da7a46f17a73cd7a3` | 2026-08-29 |
+| `TWO-CARD-INFINITE-DEPLOY-0170` | 通过 | 亮剑/亮技双卡无限执行 19 个动作、18 次洗牌，当回合零战损击杀；完整自动执行计划外重算 0。runId `54b78ec8e2ef4baf80a452ff0744a81f` | 2026-08-29 |
+| `ANGER-COMPACT-ALTERNATIVE/REQUIRED-0170` | 通过 | 等价击杀选择切割且不打愤怒；只有愤怒可击杀时仍使用。runId `03bfc9e0b0d44389aaba29c74f6a99fa`、`64a3b6d6d4304bdd9c6db48386983122` | 2026-08-29 |
+| `AEONGLASS-ANGER-MIDCOMBAT-0170` | 通过（近似重建） | 按问题包第 9 回合手牌、生命、格挡、Power 和行动历史近似重建，路线不再加入愤怒。该夹具仍只找到死亡路线，省略完整消耗堆与部分历史，不作为原包战损复放。runId `58125330c52a4552b196021df614298e` | 2026-08-29 |
+| `BECKON-CROSS-TURN-DEPLOY-0170` | 通过 | 首动打出呼唤，预计整场战损 4，第 2 回合自动击杀，计划外重算 0。runId `41198704657b42d284ff24113dbc429b` | 2026-08-29 |
+| `GENETIC-ALGORITHM-REPLAY / GOOPY / SCYTHE-0170` | 通过 | 遗传算法华彩重放累计成长 6，并在第 2 回合继续执行、计划外重算 0；黏糊防御成长 1；巨镰成长 5，三者均在同战损胜利路线中主动培养。runId `6097ecc0ab3142a0a6c0ee187c1eda54`、`4b36668f89c449ca8eeb5ea6e6e1d2e4`、`4420c21826404907b33a1e9543949cdc` | 2026-08-29 |
+| `NIGHTMARE-CLONE-GROWTH-BOUNDARY / SOULS-POWER-GROWTH-0170` | 通过 | 梦魇 `Clone` 不带 `DeckVersion`，因此不虚构跑局成长；灵魂之力跨回合培养至少 6。边界验证 runId `6e616ddf5c9b45b9a7c20434a8f912c1`，灵魂之力 runId `4e265950217046f886890458d2728220`；错误保留跑局版本会在第 2 回合产生状态差异，失败证据 runId `6112275ee763406abe03f23dfdc5238c` | 2026-08-29 |
+| `FEED / THE-HUNT / HAND-OF-GREED-FATAL-0170` | 通过 | 三类斩杀分别获取最大生命、卡牌奖励和金币，且优先于普通等价击杀。runId `1e25b558793e445cbfa2394b23e2ef7a`、`41205c552552424197c3dde4827fa0f7`、`716c7e94d0c44b659672a8954b47de20` | 2026-08-29 |
+| `NOT-YET / ROYALTIES / FORBIDDEN-GRIMOIRE / ALCHEMIZE-0170` | 通过 | 同战损胜利中依次保留治疗、金币奖励、移除奖励和生成药水；runId `72e453a92041468e8b041df280512ecb`、`3d1538b146e249b6b9debbb1a84ee54c`、`62943077e9a241ff90097518571d6dfc`、`532ddda82beb48fe815a0f66d8528d06` | 2026-08-29 |
 
 ## 0.16.0
 

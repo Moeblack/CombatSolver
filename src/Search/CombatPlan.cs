@@ -59,6 +59,7 @@ internal enum SearchRouteTraits
     DeclinedExtraTurn = 1 << 4,
     ReactiveDamage = 1 << 5,
     EndTurnDeckCompression = 1 << 6,
+    LongTermResource = 1 << 7,
 }
 
 [Flags]
@@ -266,6 +267,10 @@ internal sealed class SimulationSnapshot(
     bool playerDead,
     bool allEnemiesDead,
     int playerHp,
+    int playerMaxHp,
+    int cumulativePlayerHpLost,
+    int longTermResourceValue,
+    int angerCopiesGenerated,
     int projectedPlayerHp,
     int playerBlock,
     int enemyHp,
@@ -329,6 +334,10 @@ internal sealed class SimulationSnapshot(
     public bool PlayerDead { get; } = playerDead;
     public bool AllEnemiesDead { get; } = allEnemiesDead;
     public int PlayerHp { get; } = playerHp;
+    public int PlayerMaxHp { get; } = playerMaxHp;
+    public int CumulativePlayerHpLost { get; } = cumulativePlayerHpLost;
+    public int LongTermResourceValue { get; } = longTermResourceValue;
+    public int AngerCopiesGenerated { get; } = angerCopiesGenerated;
     public int ProjectedPlayerHp { get; } = projectedPlayerHp;
     public int PlayerBlock { get; } = playerBlock;
     public int EnemyHp { get; } = enemyHp;
@@ -417,6 +426,10 @@ internal sealed record SolverSnapshot(
     bool PlayerDead,
     bool AllEnemiesDead,
     int PlayerHp,
+    int PlayerMaxHp,
+    int CumulativePlayerHpLost,
+    int LongTermResourceValue,
+    int AngerCopiesGenerated,
     int ProjectedPlayerHp,
     int PlayerBlock,
     int EnemyHp,

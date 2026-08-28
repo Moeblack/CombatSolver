@@ -92,12 +92,19 @@ internal sealed partial class SimulatedCombatState
     public void RecordDamageReceived(Creature receiver, Creature? dealer, DamageResult result)
     {
         if (result.UnblockedDamage > 0)
+        {
             (_unblockedDamageThisTurn ??= []).Add(receiver);
+            (_cumulativeHpLost ??= [])[receiver] =
+                GetCumulativeHpLost(receiver) + result.UnblockedDamage;
+        }
         if (dealer == null || !result.Props.IsPoweredAttack())
             return;
         var key = (dealer, receiver);
         (_poweredAttackHitsThisTurn ??= [])[key] = GetPoweredAttackHitsThisTurn(dealer, receiver) + 1;
     }
+
+    public int GetCumulativeHpLost(Creature receiver)
+        => _cumulativeHpLost?.GetValueOrDefault(receiver) ?? 0;
 
     public bool HasLostHpThisTurn(Creature receiver)
     {

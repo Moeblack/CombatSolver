@@ -110,8 +110,14 @@ internal static class BespokeCardMirrors
             .Targeting(context.Target)
             .Simulate(context.Simulator);
         TheScythe mutable = (TheScythe)context.Card.MutablePreview;
-        mutable.IncreasedDamage += card.DynamicVars["Increase"].IntValue;
+        int increase = card.DynamicVars["Increase"].IntValue;
+        mutable.IncreasedDamage += increase;
         mutable.CurrentDamage = 13 + mutable.IncreasedDamage;
+        if (mutable.DeckVersion != null
+            && context.CombatState is SimulatedCombatState combat)
+        {
+            combat.RecordLongTermResource(increase);
+        }
     }
 
     public static void SacrificeOnPlay(Sacrifice card, CardOnPlayMirrorContext context)

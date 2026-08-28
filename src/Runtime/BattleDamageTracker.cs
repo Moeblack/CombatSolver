@@ -16,6 +16,7 @@ internal static class BattleDamageTracker
     private static int _hpLostSoFar;
     private static int _soldHpCommitted;
     private static int _potionHistoryCountAtStart;
+    private static int _historyEntryCountAtLastObservation;
     private static int? _plannedTurn;
     private static int _plannedTurnStartHp;
     private static int _plannedSoldHp;
@@ -26,6 +27,7 @@ internal static class BattleDamageTracker
         _combat = combat;
         _lastObservedHp = GetSinglePlayer(combat)?.Creature.CurrentHp;
         _potionHistoryCountAtStart = CountPotionHistoryEntries();
+        _historyEntryCountAtLastObservation = CombatManager.Instance.History.Entries.Count();
         Entry.Logger.Info($"[CombatSolver/Test] BATTLE_DAMAGE_RESET start_hp={_lastObservedHp?.ToString() ?? "-"}");
     }
 
@@ -39,6 +41,12 @@ internal static class BattleDamageTracker
             return new BattleDamageSnapshot(_hpLostSoFar, _soldHpCommitted, PotionsUsedSoFar());
 
         int currentHp = player.Creature.CurrentHp;
+        var historyEntries = CombatManager.Instance.History.Entries;
+        int historyHpLost = historyEntries
+            .Skip(_historyEntryCountAtLastObservation)
+            .OfType<DamageReceivedEntry>()
+            .Where(entry => ReferenceEquals(entry.Receiver, player.Creature))
+            .Sum(entry => Math.Max(0, entry.Result.UnblockedDamage));
         int turn = player.PlayerCombatState?.TurnNumber ?? -1;
         if (_plannedTurn is int plannedTurn && turn > plannedTurn)
         {
@@ -50,9 +58,12 @@ internal static class BattleDamageTracker
             ClearPlan();
         }
 
-        if (_lastObservedHp is int previousHp && currentHp < previousHp)
-            _hpLostSoFar += previousHp - currentHp;
+        int observedHpDrop = _lastObservedHp is int previousHp
+            ? Math.Max(0, previousHp - currentHp)
+            : 0;
+        _hpLostSoFar += Math.Max(observedHpDrop, historyHpLost);
         _lastObservedHp = currentHp;
+        _historyEntryCountAtLastObservation = historyEntries.Count();
         return new BattleDamageSnapshot(_hpLostSoFar, _soldHpCommitted, PotionsUsedSoFar());
     }
 
@@ -77,6 +88,7 @@ internal static class BattleDamageTracker
         _hpLostSoFar = 0;
         _soldHpCommitted = 0;
         _potionHistoryCountAtStart = 0;
+        _historyEntryCountAtLastObservation = 0;
         ClearPlan();
     }
 

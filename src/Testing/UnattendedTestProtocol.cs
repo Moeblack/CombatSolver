@@ -98,11 +98,16 @@ internal sealed class UnattendedTestRequest
     public int? ExpectedInitialShufflesCrossedAtLeast { get; init; }
     public int? ExpectedInitialUnmirroredCount { get; init; }
     public int? ExpectedInitialHpLostAtMost { get; init; }
+    public int? ExpectedInitialProjectedBattleHpLost { get; init; }
     public int? ExpectedInitialProjectedBattleHpLostAtMost { get; init; }
+    public int? ExpectedInitialLongTermResourceValueAtLeast { get; init; }
+    public int? ExpectedInitialFinalMaxHp { get; init; }
     public int? ExpectedInitialMaxBlockAtLeast { get; init; }
     public int? ExpectedInitialActualBlockAtLeast { get; init; }
     public string? ExpectedInitialActionCardId { get; init; }
+    public string? ExpectedInitialAbsentActionCardId { get; init; }
     public string? ExpectedInitialFirstActionCardId { get; init; }
+    public string? ExpectedInitialFirstActionPotionId { get; init; }
     public string? ExpectedInitialActionTitle { get; init; }
     public int? ExpectedInitialActionReplayCount { get; init; }
     public bool? ExpectedInitialOnlyDeathRoutesFound { get; init; }
@@ -127,6 +132,7 @@ internal sealed class UnattendedTestRequest
     public string? ExpectedInitialRelicEffectId { get; init; }
     public string? ExpectedInitialRelicEffectSummary { get; init; }
     public int? ExpectedReusedTurn { get; init; }
+    public int? ExpectedReusedProjectedBattleHpLost { get; init; }
     public int? ExpectedUnexpectedReplansAtMost { get; init; }
     public bool StopAfterExpectedReuse { get; init; }
     public string? ExpectedPlayedCardId { get; init; }

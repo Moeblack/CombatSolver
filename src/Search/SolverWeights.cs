@@ -41,6 +41,10 @@ internal static class SolverWeights
     // routes alive until their repeated card effects become concrete combat state.
     public const int ReplayPotentialBeamCap = 64;
     public const double ReplayPotentialBeamValue = 10_000d;
+    // Permanent card growth and post-combat rewards get their own Beam value. Final selection is
+    // lexicographic, so this value only keeps low-immediate-impact growth routes searchable.
+    public const double LongTermResourceBeamValue = 25_000d;
+    public const double AngerCopyBeamPenalty = -15_000d;
     public const int RetainedAttackGrowthBeamCap = 16;
     public const double RetainedAttackGrowthBeamValue = 20_000d;
     public const double FutureResourceBeamValue = 10_000d;

@@ -82,6 +82,7 @@ internal static partial class CardPowerOnPlaySupport
                 break;
             case ForbiddenGrimoire:
                 combat.Apply<ForbiddenGrimoirePower>(owner, 1, owner);
+                combat.RecordLongTermResource(50);
                 break;
             case Hailstorm:
                 combat.Apply<HailstormPower>(owner, card.DynamicVars["HailstormPower"].IntValue, owner);
@@ -191,8 +192,12 @@ internal static partial class CardPowerOnPlaySupport
                 combat.Apply<RollingBoulderPower>(owner, card.DynamicVars["RollingBoulderPower"].IntValue, owner);
                 break;
             case Royalties:
-                combat.Apply<RoyaltiesPower>(owner, card.DynamicVars.Gold.IntValue, owner);
+            {
+                int gold = card.DynamicVars.Gold.IntValue;
+                combat.Apply<RoyaltiesPower>(owner, gold, owner);
+                combat.RecordLongTermResource(gold);
                 break;
+            }
             case Rupture:
                 combat.Apply<RupturePower>(owner, card.DynamicVars.Strength.IntValue, owner);
                 break;

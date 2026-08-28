@@ -54,7 +54,10 @@ internal sealed partial class UnattendedTestRunner
             || _request.ExpectedInitialShufflesCrossedAtLeast.HasValue
             || _request.ExpectedInitialUnmirroredCount.HasValue
             || _request.ExpectedInitialHpLostAtMost.HasValue
+            || _request.ExpectedInitialProjectedBattleHpLost.HasValue
             || _request.ExpectedInitialProjectedBattleHpLostAtMost.HasValue
+            || _request.ExpectedInitialLongTermResourceValueAtLeast.HasValue
+            || _request.ExpectedInitialFinalMaxHp.HasValue
             || _request.ExpectedInitialMaxBlockAtLeast.HasValue
             || _request.ExpectedInitialActualBlockAtLeast.HasValue
             || _request.ExpectedInitialSearchPhase.HasValue
@@ -88,7 +91,9 @@ internal sealed partial class UnattendedTestRunner
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialRelicEffectId)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialRelicEffectSummary)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialActionCardId)
+            || !string.IsNullOrWhiteSpace(_request.ExpectedInitialAbsentActionCardId)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialFirstActionCardId)
+            || !string.IsNullOrWhiteSpace(_request.ExpectedInitialFirstActionPotionId)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialActionTitle)
             || _request.ExpectedInitialActionReplayCount.HasValue
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialSetupChoiceTextStartsWith);
@@ -240,11 +245,30 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException(
                 $"首轮路线预计掉血 {initialHpLost}，超过预期上限 {maximumHpLost}。");
         }
+        if (_request.ExpectedInitialProjectedBattleHpLost is { } expectedProjectedBattleHpLost
+            && result.ProjectedBattleHpLost != expectedProjectedBattleHpLost)
+        {
+            throw new InvalidOperationException(
+                $"首轮路线预计整场掉血 {result.ProjectedBattleHpLost}，预期为 {expectedProjectedBattleHpLost}。");
+        }
         if (_request.ExpectedInitialProjectedBattleHpLostAtMost is { } maximumProjectedBattleHpLost
             && result.ProjectedBattleHpLost > maximumProjectedBattleHpLost)
         {
             throw new InvalidOperationException(
                 $"首轮路线预计整场掉血 {result.ProjectedBattleHpLost}，超过预期上限 {maximumProjectedBattleHpLost}。");
+        }
+        if (_request.ExpectedInitialLongTermResourceValueAtLeast is { } minimumLongTermResource
+            && result.Snapshot.LongTermResourceValue < minimumLongTermResource)
+        {
+            throw new InvalidOperationException(
+                $"首轮路线长期资源价值为 {result.Snapshot.LongTermResourceValue}，" +
+                $"低于预期 {minimumLongTermResource}。");
+        }
+        if (_request.ExpectedInitialFinalMaxHp is { } expectedFinalMaxHp
+            && result.Snapshot.PlayerMaxHp != expectedFinalMaxHp)
+        {
+            throw new InvalidOperationException(
+                $"首轮路线终局最大生命为 {result.Snapshot.PlayerMaxHp}，预期为 {expectedFinalMaxHp}。");
         }
         if (_request.ExpectedInitialMaxBlockAtLeast is { } minimumMaxBlock && initialMaxBlock < minimumMaxBlock)
         {
@@ -503,6 +527,34 @@ internal sealed partial class UnattendedTestRunner
             }
             _completedChecks.Add($"InitialFirstAction:{firstAction.CardId}");
         }
+        if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialFirstActionPotionId))
+        {
+            PlanAction? firstAction = result.BestNode.Actions.FirstOrDefault(action =>
+                action.Turn == startedTurn && action.IsExecutable);
+            if (firstAction?.Kind != PlanActionKind.UsePotion
+                || !firstAction.PotionId.Equals(
+                    _request.ExpectedInitialFirstActionPotionId,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"首轮第一个可执行动作是 " +
+                    $"{(firstAction == null ? "-" : firstAction.Kind == PlanActionKind.PlayCard ? firstAction.CardId : firstAction.PotionId)}，" +
+                    $"预期为药水 {_request.ExpectedInitialFirstActionPotionId}。");
+            }
+            _completedChecks.Add($"InitialFirstPotion:{firstAction.PotionId}");
+        }
+        if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialAbsentActionCardId)
+            && result.BestNode.Actions.Any(action =>
+                action.Kind == PlanActionKind.PlayCard
+                && action.CardId.Equals(
+                    _request.ExpectedInitialAbsentActionCardId,
+                    StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                $"首轮路线仍包含禁止动作卡牌 {_request.ExpectedInitialAbsentActionCardId}。");
+        }
+        if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialAbsentActionCardId))
+            _completedChecks.Add($"InitialAbsentAction:{_request.ExpectedInitialAbsentActionCardId}");
         if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialActionCardId)
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialActionTitle))
         {

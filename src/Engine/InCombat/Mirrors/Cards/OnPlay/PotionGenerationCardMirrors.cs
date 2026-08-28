@@ -13,7 +13,9 @@ internal static class PotionGenerationCardMirrors
             context.Rng.CombatPotionGeneration);
         if (context.State.CombatState is not ICombatPredictionEffectSink effects)
             throw new InvalidOperationException("炼制药水结算缺少可写的预测状态。");
-        effects.TryProcurePotion(card.Owner, potion);
+        bool procured = effects.TryProcurePotion(card.Owner, potion);
+        if (procured && context.State.CombatState is SimulatedCombatState combat)
+            combat.RecordLongTermResource(20);
         context.Simulator.History.PotionGenerated(potion);
     }
 }

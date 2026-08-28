@@ -46,7 +46,10 @@ internal sealed partial class CombatBeamSolver
                 node,
                 turnStart,
                 action.Turn,
-                Math.Max(0, turnStart.Snapshot.PlayerHp - node.Snapshot.PlayerHp),
+                Math.Max(
+                    0,
+                    node.Snapshot.CumulativePlayerHpLost
+                    - turnStart.Snapshot.CumulativePlayerHpLost),
                 actualBlock,
                 energyLeft,
                 CurrentTurnPotionSlotsUsed(turnStart, node),

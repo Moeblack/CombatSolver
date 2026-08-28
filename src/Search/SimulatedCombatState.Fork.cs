@@ -30,6 +30,7 @@ internal sealed partial class SimulatedCombatState
             _cardsExhaustedThisTurn = _cardsExhaustedThisTurn?.Fork(),
             _doomAppliersThisTurn = _doomAppliersThisTurn?.Fork(),
             _unblockedDamageThisTurn = _unblockedDamageThisTurn?.Fork(),
+            _cumulativeHpLost = _cumulativeHpLost?.Fork(),
             _poweredAttackHitsThisTurn = _poweredAttackHitsThisTurn?.Fork(),
             _cardsDiscardedThisTurn = _cardsDiscardedThisTurn?.Fork(),
             _creatureAttacksThisTurn = _creatureAttacksThisTurn?.Fork(),
@@ -69,6 +70,8 @@ internal sealed partial class SimulatedCombatState
             _potionUses = _potionUses?.Fork(),
             _outstandingStolenGold = _outstandingStolenGold,
             _outstandingStolenCards = _outstandingStolenCards,
+            _longTermResourceValue = _longTermResourceValue,
+            _angerCopiesGenerated = _angerCopiesGenerated,
         };
 
         if (_addedPowerInstances is not null)

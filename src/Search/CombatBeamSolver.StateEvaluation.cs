@@ -69,7 +69,8 @@ internal sealed partial class CombatBeamSolver
         if (boundary == SearchBoundaryReason.None && combat.HasPendingChoice)
             boundary = SearchBoundaryReason.PendingChoice;
         bool dead = player.IsDead;
-        bool won = !dead
+        bool won = boundary != SearchBoundaryReason.EventDefeat
+            && !dead
             && !combat.HasPendingChoice
             && (!simulator.IsInProgress || simulator.IsEnding);
         CoverageSummary coverage = GetCoverageSummary(simulator);
@@ -114,10 +115,17 @@ internal sealed partial class CombatBeamSolver
             _run.ThreatProjectionCache.Add((key, roundIndex), projectedHp);
         }
         _run.Performance.End(SearchMetricPhase.ThreatProjection, threatMeasurement);
+        int cumulativePlayerHpLost = combat.GetCumulativeHpLost(_player.Creature);
         double hpWeight = SolverWeights.Hp;
         double score = dead || projectedHp <= 0
             ? SolverWeights.DeathPenalty
             : projectedHp * hpWeight;
+        score += (player.MaxHp - root.InitialPlayerMaxHp) * hpWeight;
+        score -= cumulativePlayerHpLost * hpWeight;
+        int longTermResourceValue = combat.LongTermResourceValue;
+        score += longTermResourceValue * SolverWeights.LongTermResourceBeamValue;
+        int angerCopiesGenerated = combat.AngerCopiesGenerated;
+        score += angerCopiesGenerated * SolverWeights.AngerCopyBeamPenalty;
         if (won && !uncertainVictory)
             score += SolverWeights.VictoryBonus;
         score += enemyHp * SolverWeights.EnemyHp;
@@ -265,6 +273,10 @@ internal sealed partial class CombatBeamSolver
             dead,
             won,
             player.CurrentHp,
+            player.MaxHp,
+            cumulativePlayerHpLost,
+            longTermResourceValue,
+            angerCopiesGenerated,
             projectedHp,
             player.Block,
             enemyHp,

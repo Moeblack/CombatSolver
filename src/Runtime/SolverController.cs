@@ -73,6 +73,8 @@ internal static class SolverController
     internal static Exception? LastSearchFailureForTesting { get; private set; }
     internal static bool LastFullAutoStoppedForWorseRecalculationForTesting { get; private set; }
     internal static bool LastFullAutoStoppedAtLiveRiskForTesting { get; private set; }
+    internal static int? LastReusedTurnForTesting { get; private set; }
+    internal static int? LastReusedProjectedBattleHpLostForTesting { get; private set; }
     internal static int UnexpectedReplanCountForTesting
         => UnexpectedReplanCount;
     internal static int ManualDivergenceCountForTesting
@@ -135,6 +137,8 @@ internal static class SolverController
         LastDeployedActionStartedAtMillisecondsForTesting = 0;
         NativeChoiceRuntime.ResetTraceForTesting();
         LastTurnSetupResultForTesting = null;
+        LastReusedTurnForTesting = null;
+        LastReusedProjectedBattleHpLostForTesting = null;
         SearchGcPolicy.ResetRolloverCountForTesting();
         BattleDamageTracker.Begin(state);
         CombatBugReportExporter.BeginCombat(state);
@@ -335,7 +339,11 @@ internal static class SolverController
                 _combat.LatestStamp = stamp;
                 _combat.ContinuationsReused++;
                 if (UnattendedTestRunner.IsActive)
+                {
                     LastCompletedResultForTesting = reused;
+                    LastReusedTurnForTesting = reused!.StartTurnNumber;
+                    LastReusedProjectedBattleHpLostForTesting = reused.ProjectedBattleHpLost;
+                }
                 BattleDamageTracker.RegisterPlan(state, reused!);
                 CombatBugReportExporter.RecordCheckpoint(
                     state,

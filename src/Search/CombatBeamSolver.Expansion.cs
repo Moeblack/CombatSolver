@@ -252,7 +252,9 @@ internal sealed partial class CombatBeamSolver
             PotionModel? potion = simulatedCombat.GetPotionAtSlot(_player, potionSlot);
             if (potion == null
                 || !simulatedCombat.IsPotionAvailable(_player, potionSlot)
-                || !PotionOnUseSupport.CanSearch(potion))
+                || !PotionOnUseSupport.CanSearch(potion)
+                || PotionUsePolicy.RequiresOpeningUse(potion)
+                    && node.Actions.Any(action => action.Kind != PlanActionKind.UsePotion))
             {
                 continue;
             }
@@ -1511,6 +1513,10 @@ internal sealed partial class CombatBeamSolver
             damage,
             block,
             after.PlayerHp,
+            after.PlayerMaxHp,
+            after.CumulativePlayerHpLost,
+            after.LongTermResourceValue,
+            after.AngerCopiesGenerated,
             pure,
             normalized);
     }
@@ -1529,10 +1535,13 @@ internal sealed partial class CombatBeamSolver
             traits |= SearchRouteTraits.DeclinedExtraTurn;
         if (after.PersistentBuffValue > before.PersistentBuffValue
             || after.DelayedDamageValue > before.DelayedDamageValue
-            || after.ReplayPotentialValue > before.ReplayPotentialValue)
+            || after.ReplayPotentialValue > before.ReplayPotentialValue
+            || after.LongTermResourceValue > before.LongTermResourceValue)
         {
             traits |= SearchRouteTraits.Scaling;
         }
+        if (after.LongTermResourceValue > before.LongTermResourceValue)
+            traits |= SearchRouteTraits.LongTermResource;
         if (after.ReactiveDamageValue > before.ReactiveDamageValue)
             traits |= SearchRouteTraits.ReactiveDamage;
         if (after.Energy > before.Energy
@@ -1640,10 +1649,18 @@ internal sealed partial class CombatBeamSolver
 
         bool noWorse = left.Damage >= right.Damage
             && left.Block >= right.Block
-            && left.Hp >= right.Hp;
+            && left.Hp >= right.Hp
+            && left.MaxHp >= right.MaxHp
+            && left.CumulativeHpLost <= right.CumulativeHpLost
+            && left.LongTermResourceValue >= right.LongTermResourceValue
+            && left.AngerCopiesGenerated <= right.AngerCopiesGenerated;
         bool strictlyBetter = left.Damage > right.Damage
             || left.Block > right.Block
-            || left.Hp > right.Hp;
+            || left.Hp > right.Hp
+            || left.MaxHp > right.MaxHp
+            || left.CumulativeHpLost < right.CumulativeHpLost
+            || left.LongTermResourceValue > right.LongTermResourceValue
+            || left.AngerCopiesGenerated < right.AngerCopiesGenerated;
         return noWorse && strictlyBetter;
     }
 
@@ -1673,6 +1690,7 @@ internal sealed partial class CombatBeamSolver
             candidate.PotionCount,
             candidate.PotionStrategicCost,
             candidate.FutureSoldHp,
+            candidate.Snapshot.CumulativePlayerHpLost,
             candidate.ActionCount,
             candidate.Score);
         if (!_run.Transpositions.TryGetValue(candidate.StateKey, out TranspositionFrontier? frontier))
@@ -1692,6 +1710,7 @@ internal sealed partial class CombatBeamSolver
             node.PotionCount,
             node.PotionStrategicCost,
             node.FutureSoldHp,
+            node.Snapshot.CumulativePlayerHpLost,
             node.ActionCount,
             node.Score);
         if (!_run.ExpandedTranspositions.TryGetValue(node.StateKey, out TranspositionFrontier? frontier))

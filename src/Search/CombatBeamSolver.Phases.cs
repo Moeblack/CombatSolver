@@ -132,6 +132,7 @@ internal sealed partial class CombatBeamSolver
                     root.PotionCount,
                     root.PotionStrategicCost,
                     0,
+                    root.Snapshot.CumulativePlayerHpLost,
                     0,
                     root.Score));
             else
@@ -141,6 +142,7 @@ internal sealed partial class CombatBeamSolver
                         root.PotionCount,
                         root.PotionStrategicCost,
                         0,
+                        root.Snapshot.CumulativePlayerHpLost,
                         0,
                         root.Score)));
         }
@@ -374,7 +376,7 @@ internal sealed partial class CombatBeamSolver
                  && policy.VerifyIncrementalSearch
                  && searchedTurnLayers >= SolverWeights.IncrementalVerificationMaxTurns)
             boundary = SearchBoundaryReason.TurnLimit;
-        int futureHpLost = Math.Max(0, initialHp - finalSnapshot.PlayerHp);
+        int futureHpLost = finalSnapshot.CumulativePlayerHpLost;
         int futureUnavoidableHpLost = annotations.HpLostByTurn.Sum(item =>
             Math.Max(0, item.Value - annotations.SoldHpByTurn.GetValueOrDefault(item.Key)));
         int battleUnavoidableHpLost = Math.Max(0, battleDamage.HpLostSoFar - battleDamage.SoldHpCommitted)
@@ -446,6 +448,10 @@ internal sealed partial class CombatBeamSolver
             finalSnapshot.PlayerDead,
             finalSnapshot.AllEnemiesDead,
             finalSnapshot.PlayerHp,
+            finalSnapshot.PlayerMaxHp,
+            finalSnapshot.CumulativePlayerHpLost,
+            finalSnapshot.LongTermResourceValue,
+            finalSnapshot.AngerCopiesGenerated,
             finalSnapshot.ProjectedPlayerHp,
             finalSnapshot.PlayerBlock,
             finalSnapshot.EnemyHp,
