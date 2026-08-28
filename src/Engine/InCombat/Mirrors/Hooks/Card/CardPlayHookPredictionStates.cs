@@ -81,23 +81,13 @@ internal sealed class PaelsLegionPredictionState(PaelsLegion relic)
     }
 }
 
-internal sealed class VambracePredictionState(Vambrace relic) : IPredictionStateForkable, IPredictionForkBoundary
+internal sealed class VambracePredictionState(Vambrace relic) : IPredictionStateForkable
 {
     public CardModel? TriggeringCard { get; set; } = relic._triggeringCard;
 
     public bool BlockGainedThisCombat { get; set; } = relic._blockGainedThisCombat;
 
-    public object Fork(PredictionForkContext context)
-    {
-        AssertForkable();
-        return MemberwiseClone();
-    }
-
-    public void AssertForkable()
-    {
-        if (TriggeringCard is not null)
-            throw new InvalidOperationException("Cannot fork Vambrace during card-play resolution.");
-    }
+    public object Fork(PredictionForkContext context) => MemberwiseClone();
 }
 
 internal sealed class VoidFormPredictionState(VoidFormPower power) : IPredictionStateForkable

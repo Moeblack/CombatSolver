@@ -8,6 +8,10 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `VAMBRACE-STABLE-FORK-FINAL-0150` | 通过 | 原版臂铠已经获得本场首次格挡后仍保留触发卡引用；修复后状态可 Fork，触发卡身份和 `BlockGainedThisCombat=true` 均保持。runId `31793a0e83df4656aa0ea3b9182c4c29`；修复前基线 runId `0e1c56fe922c4b4a87109dbd1c06acd0` 稳定抛出问题包同款异常 | 2026-08-28 |
+| `TUNNELER-IMBUED-GLACIER-VAMBRACE-0150` | 通过 | 缺陷机器人持臂铠，注能冰川开局自动打出并进入弃牌堆，原版得到 12 格挡；首轮搜索正常返回，未镜像项为 0。runId `a9ebb7b36f554948a8de0f658385aa34` | 2026-08-28 |
+| `TUNNELER-IMBUED-GLACIER-VAMBRACE-INCREMENTAL-0150` | 通过 | 同一组合启用增量搜索核对，增量分叉与完整前缀回放一致；开局 12 格挡、未镜像项 0，搜索正常返回。runId `689793cd6343465393fdd567a4a7c41e` | 2026-08-28 |
+| `RELIC-CARD-HOOKS-AUDIT-PART-2-VAMBRACE-FINAL-0150` | 通过 | 臂铠连续打出两张防御，第一张 5 格挡翻倍为 10，第二张按普通值获得 5，最终严格为 15；同批遗物 Hook 11/11 通过。runId `eddeca24b4544e918299e4b4bb2a401b` | 2026-08-28 |
 | `AXEBOT-THORNS-MULTIHIT-FINAL-0150` | 通过 | 巨斧机器人以 `2 HP`、`2` 层库存执行两连击；玩家持有 `3` 点荆棘和 `12` 格挡。修复前模拟继续执行第二段并产生 `8` 点虚构战损；修复后第一段反伤致死即中止剩余攻击，玩家保持 `75 HP / 2` 格挡，库存重生后的完整实机/模拟状态一致。相邻上勾锤击同时核对攻击者死亡后仍结算虚弱/脆弱。runId `fac22ea0270a4996afa276df384ba370`，基线 runId `fc33aad095054c37a3de730d89472d2a` | 2026-08-28 |
 | `AXEBOTS-BUNDLE-FULL-AUTO-FINAL2-0150` | 通过 | 从问题包战前存档重建，以 Low、Instant/0 秒完整自动结束于第 11 回合，`UnexpectedReplans:0`。当前路线与原包不同，不记作逐动作回放。runId `fca4e9e3a09d4ab490271ec6d38ad10a` | 2026-08-28 |
 | `AXEBOTS-BUNDLE-INCREMENTAL-FINAL2-0150` | 通过 | 同一问题包状态以 Low/Short 完成增量分叉与完整前缀回放一致性，覆盖 11 回合、3 次洗牌，未镜像效果为 0。runId `c8c8f3675a934f028704ab82e2f7dd4d` | 2026-08-28 |
@@ -163,7 +167,7 @@
 | `RUN-SNAPSHOT-HOOK-PREFIX-531` | 通过 | Run 标量、RNG、起始回合和 Hook 前缀进入主线程根；牌组 Card/Enchantment listener 使用克隆，卡池筛选显式消费捕获约束。根隔离、攻击药生成差分和双小啃兽增量整战通过 | 2026-08-26 |
 | `ROOT-MODEL-INVENTORY-530` | 通过 | 玩家回合/金币、Relic/Potion、卡牌注册、Osty、初始 Power、Run RNG 和怪物私有字段进入主线程根；listener 使用克隆。首次严格复跑抓到并根修复 Relic `AfterCloned` 重置私有计数；最终遗物 Hook 11/11、钢笔尖、Knowledge Demon、Smart 救命药和双小啃兽增量整战通过 | 2026-08-26 |
 | `COMBAT-ROOT-SNAPSHOT-529` | 通过 | 搜索根只能在主线程捕获；live 与根投影 continuation 逐项一致。捕获后修改实机能量，后台 Fork 仍保持捕获值。Beam 根、当前历史和 Hook listeners 不再从 worker 惰性构造；钢笔尖增量与双小啃兽普通/增量整战保持通过 | 2026-08-26 |
-| `FORK-BOUNDARIES-528` | 通过 | Fork 在克隆前统一拒绝未完成 trace、选择、出牌、Hook 私有事务、延迟历史和遗物记录；钢笔尖、臂铠、蜷身的瞬时引用不进入稳定节点。配对中途死亡、钢笔尖增量、两组 Hook 差分及双小啃兽增量整战全部通过并零重算 | 2026-08-26 |
+| `FORK-BOUNDARIES-528` | 通过 | Fork 在克隆前统一拒绝未完成 trace、选择、出牌、Hook 私有事务、延迟历史和遗物记录；钢笔尖与蜷身的瞬时引用不进入稳定节点。臂铠触发卡由 `0.15.0` 依据原版生命周期纠正为可 Fork 的持续状态。配对中途死亡、钢笔尖增量、两组 Hook 差分及双小啃兽增量整战全部通过并零重算 | 2026-08-28 |
 | `CONTROLLER-SESSIONS-527` | 通过 | 战斗、搜索和部署状态进入独立会话；取消搜索后旧 callback 不得写回。战斗结束异步 GC 回收与新搜索按完成信号串行。策略快照/取消/重搜/完整部署通过；双小啃兽普通与增量均第 5 回合、两次洗牌、0 药、0 战损并零重算 | 2026-08-26 |
 | `REFACTOR-BOUNDARIES-526` | 通过 | 不支持的动态数值、推断 OnPlay 异常与搜索转移异常均 fail-fast 且保留搜索上下文；搜索只消费主线程捕获的策略快照。双小啃兽普通/增量均第 5 回合、两次洗牌、0 药、0 战损并成功复用；药水 17/17、推断选牌 12/12、推断卡 43/43、CalculatedVar 25/25 通过；Smart 与至少一瓶策略均零重算 | 2026-08-26 |
 | `DECIMILLIPEDE-LATE-DEATH-REATTACH-524` | 通过 | 肢节先执行正常行动、再于同一敌方回合死亡时，`DEAD_MOVE` 按原状态机直接过渡到 `REATTACH_MOVE`，死亡保留 Power、行动历史、私有死亡阶段和九条 RNG 严格一致；结束回合产生的复活窗口进入通用 Beam 保留。亡灵契约师问题包第 6 回合两药胜利，第 2-6 回合精确复用、零计划外重算；上一份千足虫和双小啃兽普通/增量均保持通过 | 2026-08-25 |

@@ -54,8 +54,18 @@ internal sealed partial class UnattendedTestRunner
             (AbstractModel)vambraceRelic,
             () => new VambracePredictionState(vambraceRelic));
         vambrace.TriggeringCard = card;
-        AssertForkRejected(simulator, "Vambrace");
+        vambrace.BlockGainedThisCombat = true;
+        CombatPredictionSimulator vambraceFork = simulator.Fork();
+        VambracePredictionState forkedVambrace = vambraceFork.StateStore.GetReadOnly(
+            (AbstractModel)vambraceRelic,
+            () => new VambracePredictionState(vambraceRelic));
+        if (!ReferenceEquals(forkedVambrace.TriggeringCard, card)
+            || !forkedVambrace.BlockGainedThisCombat)
+        {
+            throw new InvalidOperationException("Vambrace 稳定战斗状态没有跨 Fork 保留。");
+        }
         vambrace.TriggeringCard = null;
+        vambrace.BlockGainedThisCombat = false;
 
         CurlUpPredictionState curlUp = simulator.StateStore.Get<CurlUpPredictionState>(card);
         curlUp.PlayedCard = card;

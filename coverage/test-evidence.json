@@ -474,10 +474,18 @@
   "RELIC-CARD-HOOKS-AUDIT-PART-2-329": {
     "status": "Passed",
     "level": "HeadlessRelicCardPairedHooksReplayPersistentStateFullDifferential",
-    "procedure": "11 个隔离场景按 coveredRelicHooks 验证 PenNib、Permafrost、RazorTooth、Regalite、ThrowingAxe、TuningFork、UnsettlingLamp、Vambrace、VelvetChoker 与 PaelsLegion。",
-    "expected": "第十次攻击双伤、一次双重出牌、永久升级、生成牌响应、减益翻倍、可出牌限制和成对格挡 Hook 的内部引用/计数均与原版一致。",
-    "observed": "runId 45bb9ca019224ee091ef3b9c05dfabef Passed，11/11 场景；覆盖 18 个行为 Hook。",
-    "evidence": "coverage/unattended/relic-card-hooks-audit-part-2-329.json；上述 runId；游戏 0.111.0 对应遗物、CardPlay、Power 与格挡源码；验证日期 2026-08-23。"
+    "procedure": "11 个隔离场景按 coveredRelicHooks 验证 PenNib、Permafrost、RazorTooth、Regalite、ThrowingAxe、TuningFork、UnsettlingLamp、Vambrace、VelvetChoker 与 PaelsLegion；Vambrace 场景连续打出两张防御并从 0 格挡开始。",
+    "expected": "第十次攻击双伤、一次双重出牌、永久升级、生成牌响应、减益翻倍、可出牌限制和成对格挡 Hook 的内部引用/计数均与原版一致；臂铠第一张防御翻倍为 10，第二张正常获得 5，最终格挡为 15。",
+    "observed": "runId eddeca24b4544e918299e4b4bb2a401b Passed，11/11 场景；臂铠两张防御最终为 15 格挡，镜像状态保持 VAMBRACE/1。首次扩展夹具把同批前项遗留的 28 格挡算进固定预期而得到实际 43，隔离初始格挡后通过；该次失败属于夹具状态串联。",
+    "evidence": "coverage/unattended/relic-card-hooks-audit-part-2-329.json；runId eddeca24b4544e918299e4b4bb2a401b；游戏 0.111.0 对应遗物、CardPlay、Power 与格挡源码；验证日期 2026-08-28。"
+  },
+  "VAMBRACE-IMBUED-GLACIER-FORK-0150": {
+    "status": "Passed",
+    "level": "IssueBundleRootStateForkAndIncrementalSearchRegression",
+    "procedure": "依据地道虫问题包恢复关键组合：缺陷机器人持有臂铠，牌组加入注能冰川，让原版在开局自动打出后启动正式搜索；另直接验证臂铠触发卡引用和本场已获格挡状态跨 Fork 保留，并启用增量/完整前缀回放核对。",
+    "expected": "注能冰川进入弃牌堆并令臂铠把 6 格挡翻倍为 12；臂铠按原版保留触发卡引用到战斗结束，但该稳定引用不得阻止搜索 Fork；正式搜索无未镜像项且增量与完整回放一致。",
+    "observed": "修复前 Fork 基线 runId 0e1c56fe922c4b4a87109dbd1c06acd0 在 Cannot fork Vambrace during card-play resolution 处失败。修复后 Fork runId 31793a0e83df4656aa0ea3b9182c4c29、组合搜索 runId a9ebb7b36f554948a8de0f658385aa34、增量搜索 runId 689793cd6343465393fdd567a4a7c41e 均 Passed；组合状态为 12 格挡、Unmirrored=0。",
+    "evidence": "coverage/unattended/tunneler-imbued-glacier-vambrace-0150.json；上述四个 runId；问题包 forensics/recent replay-state；游戏 0.111.0 Vambrace.cs；验证日期 2026-08-28。"
   },
   "RELIC-CARD-HOOKS-AUDIT-PART-1-328": {
     "status": "Passed",

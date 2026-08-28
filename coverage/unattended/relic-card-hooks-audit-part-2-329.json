@@ -70,11 +70,20 @@
       { "relicId": "VAMBRACE", "hook": "AfterModifyingBlockAmount" },
       { "relicId": "VAMBRACE", "hook": "AfterCardPlayed" }
     ],
-    "monsterId": "BigDummy", "moveId": "NOTHING", "enemyHpBefore": 999, "playerEnergyBefore": 99,
+    "monsterId": "BigDummy", "moveId": "NOTHING", "enemyHpBefore": 999,
+    "playerBlockBefore": 0, "playerEnergyBefore": 99,
     "clearAllRelicsBeforeMove": true, "relicsBeforeMove": [{ "relicId": "VAMBRACE" }],
     "clearAllPowersBeforeMove": true, "clearPlayerPilesBeforeMove": true,
-    "cardBeforeMove": { "cardId": "DEFEND_IRONCLAD", "pile": "Hand" },
-    "cardPlayChecksAfterMove": [{ "cardId": "DEFEND_IRONCLAD", "target": "None" }]
+    "cardsBeforeMove": [
+      { "cardId": "DEFEND_IRONCLAD", "pile": "Hand" },
+      { "cardId": "DEFEND_IRONCLAD", "pile": "Hand" }
+    ],
+    "cardPlayChecksAfterMove": [
+      { "cardId": "DEFEND_IRONCLAD", "target": "None" },
+      { "cardId": "DEFEND_IRONCLAD", "target": "None" }
+    ],
+    "expectedPlayerBlock": 15,
+    "expectedMirrorRelicState": ";mirrorRelics=VAMBRACE/1"
   },
   {
     "coveredRelicHooks": [{ "relicId": "VELVET_CHOKER", "hook": "ShouldPlay" }],

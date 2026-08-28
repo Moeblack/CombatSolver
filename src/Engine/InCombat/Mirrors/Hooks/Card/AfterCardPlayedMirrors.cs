@@ -408,13 +408,13 @@ internal static class AfterCardPlayedMirrors
     private static void HandleVambrace(Vambrace relic, AfterCardPlayedMirrorContext context)
     {
         var state = context.StateStore.Get(relic, () => new VambracePredictionState(relic));
-        if (context.Card.Original != state.TriggeringCard)
-            return;
-        if (context.PreviewCard.Owner == relic.Owner && !state.BlockGainedThisCombat)
+        if (context.PreviewCard.Owner != relic.Owner
+            || context.Card.Original != state.TriggeringCard
+            || state.BlockGainedThisCombat)
         {
-            state.BlockGainedThisCombat = true;
+            return;
         }
-        state.TriggeringCard = null;
+        state.BlockGainedThisCombat = true;
     }
 
     private static void HandleUnsettlingLamp(UnsettlingLamp relic, AfterCardPlayedMirrorContext context)
