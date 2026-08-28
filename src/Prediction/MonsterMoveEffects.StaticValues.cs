@@ -35,7 +35,6 @@ internal static partial class MonsterMoveEffects
             ["LouseProgenitor"] = ["CurlBlock", "GrowStrength"],
             ["Tunneler"] = ["BlockGain"],
             ["Crusher"] = ["AdaptStrengthGain"],
-            ["CubexConstruct"] = ["ChargeUpStrengthGain"],
             ["PhantasmalGardener"] = ["EnlargeStr"],
             ["Axebot"] = ["BootUpBlock", "BootUpStrGain", "RespawnCount"],
             ["Aeonglass"] = ["EbbBlock", "WitherAmount", "IncreasingIntensityBaseStrength"],
