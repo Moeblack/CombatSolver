@@ -9,7 +9,7 @@
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
 | `NATIVE-CHOICE-IMPLICIT-EMPTY-001` | 待实机验证 | 宇宙冷漠触发不可见 `CombatPile` 空请求时记录 `ImplicitEmpty`，不消耗选牌计划，自动执行不再以“计划外选择”中止；后续非空请求仍必须匹配第一个计划，其他计划外请求仍 fail-fast。 | 2026-08-28 |
-| `SLY-DISCARD-NESTED-CHOICE-0150` | 通过 | 手牌戏法给杂技上单回合 `Sly`，生存者弃掉它触发原版自动出牌与第二层弃牌。actual/simulated 有序牌堆、逐牌状态、Power、九条 RNG 与 continuation 全等；弃牌堆顺序为“被选牌先、来源卡后”。修复前同一场景在 `C[1]` 顺序处失败。runId `53d9f1e8d0fb49f49449a0f1ee7e3b00` | 2026-08-28 |
+| `SLY-DISCARD-NESTED-CHOICE-0150` | 通过 | 夹具 `coverage/unattended/sly-discard-nested-choice-0150.json`：手牌戏法给杂技上单回合 `Sly`，生存者弃掉它触发原版自动出牌与第二层弃牌。actual/simulated 有序牌堆、逐牌状态、Power、九条 RNG 与 continuation 全等；弃牌堆顺序为“被选牌先、来源卡后”。修复前同一场景在 `C[1]` 顺序处失败。runId `53d9f1e8d0fb49f49449a0f1ee7e3b00` | 2026-08-28 |
 | `AUTOPLAY-NESTED-CHOICE-UNIFIED-0150` | 通过 | 自动出牌自身选牌统一到 `OnPlayWrapper` 后复跑既有路径：横祸 `1cc142ee275c4014887c22ebde1aab09`、破灭 `b031b8597fa14b15b913a5665d2eb269`、骚动 `6fd0f669cb504db6a0020a3a22e46919`、蒸馏混沌严格差分 `07b82b4c30874093bd6c420cbf0a557d`、低语耳环 Vakuu `8cbe191b50744c4e9db0675cff86efd4`、彼岸咆哮/我无敌了 `ba68269e79794175a7a2170ed7357597`、狠揍与抉择嵌套选牌、抽牌钩子审计、手动选牌批次、Mayhem 路线，以及 `card-completion-batch-113` 全 32 项检查 `d394a8debd894e28a4795dc96022fba5`。整战场景均 `combatEnded` 且增量回放一致。 | 2026-08-28 |
 | `FAIRY-AUTOMATIC-RESCUE-FINAL2-0150` | 通过 | 1 HP 铁甲战士持瓶中仙女，手牌/抽牌堆各一张重锤；求解器不再判定仅有死亡路线，第 1 回合精灵药自动复活，第 2 回合击杀。首轮路线记录 1 瓶药，实机消耗 `FAIRY_IN_A_BOTTLE`，增量/完整回放一致，计划外重算 0。runId `bbddfcc1e1e54be2a4405e58cd7f557e` | 2026-08-28 |
 | `FAIRY-DEATH-LIFECYCLE-FINAL2-0150` | 通过 | 瓶中仙女的自动防死、消耗槽位和 30% 回复与原版完整状态严格一致，已消耗实例不会再次进入死亡监听。runId `e601bec430ea49318ef57a550d8284f8` | 2026-08-28 |
