@@ -27,6 +27,13 @@ internal static class SearchGcPolicy
     private static long _largestSearchAllocatedBytes;
     internal static int RolloverCountForTesting { get; private set; }
 
+    private enum NoGcRegionStartOutcome
+    {
+        Started,
+        InsufficientMemory,
+        RegionSizeUnsupported,
+    }
+
     internal static void ResetRolloverCountForTesting()
         => RolloverCountForTesting = 0;
 
@@ -109,10 +116,10 @@ internal static class SearchGcPolicy
                         {
                             _previousMode = GCSettings.LatencyMode;
                             _latencyModeOwned = true;
-                            _noGcRegionActive = GC.TryStartNoGCRegion(
+                            NoGcRegionStartOutcome startOutcome = TryStartNoGcRegion(
                                 noGcRegionBudgetBytes,
-                                noGcRegionLohBudgetBytes,
-                                disallowFullBlockingGC: true);
+                                noGcRegionLohBudgetBytes);
+                            _noGcRegionActive = startOutcome == NoGcRegionStartOutcome.Started;
                             _noGcRegionBudgetBytes = noGcRegionBudgetBytes;
                             _noGcRegionLohBudgetBytes = noGcRegionLohBudgetBytes;
                             if (_noGcRegionActive)
@@ -127,7 +134,9 @@ internal static class SearchGcPolicy
                             {
                                 GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
                                 Entry.Logger.Info(
-                                    $"[CombatSolver/Test] GC_LATENCY policy=no_gc_region_failed " +
+                                    $"[CombatSolver/Test] GC_LATENCY policy=no_gc_region_unavailable " +
+                                    $"reason={FormatStartOutcome(startOutcome)} " +
+                                    $"budget={noGcRegionBudgetBytes} loh_budget={noGcRegionLohBudgetBytes} " +
                                     $"fallback={GCSettings.LatencyMode}");
                             }
                             ConfigureSearchMemoryLimit(
@@ -417,7 +426,7 @@ internal static class SearchGcPolicy
         }
 
         Exception? failure = null;
-        bool restartedNoGcRegion = false;
+        NoGcRegionStartOutcome restartOutcome = NoGcRegionStartOutcome.InsufficientMemory;
         GCMemoryInfo completedCollection = default;
         long liveBefore = GC.GetTotalMemory(forceFullCollection: false);
         using Process processBefore = Process.GetCurrentProcess();
@@ -439,15 +448,14 @@ internal static class SearchGcPolicy
                 cancellationToken.ThrowIfCancellationRequested();
                 _previousMode = GCSettings.LatencyMode;
                 _latencyModeOwned = true;
-                restartedNoGcRegion = GC.TryStartNoGCRegion(
+                restartOutcome = TryStartNoGcRegion(
                     regionBudgetBytes,
-                    lohBudgetBytes,
-                    disallowFullBlockingGC: true);
-                _noGcRegionActive = restartedNoGcRegion;
+                    lohBudgetBytes);
+                _noGcRegionActive = restartOutcome == NoGcRegionStartOutcome.Started;
                 _noGcRegionAllocatedBytesAtStart = GC.GetTotalAllocatedBytes(precise: false);
                 _noGcRegionBudgetBytes = regionBudgetBytes;
                 _noGcRegionLohBudgetBytes = lohBudgetBytes;
-                if (!restartedNoGcRegion)
+                if (!_noGcRegionActive)
                     GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
                 ConfigureSearchMemoryLimit(
                     signal,
@@ -470,7 +478,7 @@ internal static class SearchGcPolicy
             Entry.Logger.Info(
                 $"[CombatSolver/Test] HEAP_RECLAIM reason=in_search_memory_checkpoint " +
                 $"mode=background_non_compacting no_gc_region_ended={endNoGcRegion} " +
-                $"no_gc_region_restarted={restartedNoGcRegion} " +
+                $"no_gc_region_restart={FormatStartOutcome(restartOutcome)} " +
                 $"elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F1} " +
                 $"gc_pause_delta_ms={(GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds:F1} " +
                 $"concurrent={completedCollection.Concurrent} compacted={completedCollection.Compacted} " +
@@ -491,6 +499,35 @@ internal static class SearchGcPolicy
         if (failure != null)
             throw failure;
     }
+
+    private static NoGcRegionStartOutcome TryStartNoGcRegion(
+        long totalSize,
+        long lohSize)
+    {
+        try
+        {
+            return GC.TryStartNoGCRegion(
+                totalSize,
+                lohSize,
+                disallowFullBlockingGC: true)
+                ? NoGcRegionStartOutcome.Started
+                : NoGcRegionStartOutcome.InsufficientMemory;
+        }
+        catch (ArgumentOutOfRangeException exception) when (exception.ParamName == "totalSize")
+        {
+            // The maximum SOH reservation is runtime-specific and has no public query API.
+            return NoGcRegionStartOutcome.RegionSizeUnsupported;
+        }
+    }
+
+    private static string FormatStartOutcome(NoGcRegionStartOutcome outcome)
+        => outcome switch
+        {
+            NoGcRegionStartOutcome.Started => "started",
+            NoGcRegionStartOutcome.InsufficientMemory => "insufficient_memory",
+            NoGcRegionStartOutcome.RegionSizeUnsupported => "region_size_unsupported",
+            _ => throw new ArgumentOutOfRangeException(nameof(outcome)),
+        };
 
     private static void RestoreLatencyModeLocked()
     {

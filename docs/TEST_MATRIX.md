@@ -4,6 +4,13 @@
 
 同一版 DLL 的场景默认复用 marker 记录的 headless 游戏进程：首条命令直接启动游戏，完成后返回主菜单等待下一条请求；后续命令只向该测试 PID 投递。测试使用独立 `APPDATA/LOCALAPPDATA`、关闭 Steam，并只在隔离设置中确认允许加载 Mod；RitsuLib 在 headless 生命周期内从创意工坊版本目录临时投影到带所有权标记的本地目录，退出时删除。发现未由 marker 管理的塔 2 进程时拒绝运行。只有重新编译需要加载新 DLL，或最后一批显式传入 `-ExitOnComplete` 时才退出游戏。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
+## 0.15.0 开发中：跨平台 No-GC 预算边界
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `TOADPOLES-WEAK-20260828-BUNDLE` | 根因确认，待 macOS 实机复测 | `0.14.11`、macOS ARM64 的两次搜索均在 `GC.TryStartNoGCRegion(6 GB, 1 GB)` 抛出 `ArgumentOutOfRangeException(totalSize)`；根快照已成功，尚未进入 Beam。当前代码只把该精确异常分类为 CLR 区域上限，其余异常保持失败 | 2026-08-28 |
+| `GC-NOGC-REGION-LIMIT-0150` | 通过（正常 No-GC 路径） | Windows headless 设置 `16 GB` No-GC 预算；本机 CLR 成功进入 No-GC，首轮 Short 搜索在 `168.7 ms / 2.20 MB` 内产出 1 个可执行动作，GC 暂停 `0 ms`，场景 Passed。runId `04450f09159d48d9bfaca0ba9ba049e0`；该结果不覆盖 macOS 的区域拒绝分支 | 2026-08-28 |
+
 ## 0.14.13 Loadout 战斗费用兼容
 
 | 场景 | 结果 | 验证内容 | 日期 |

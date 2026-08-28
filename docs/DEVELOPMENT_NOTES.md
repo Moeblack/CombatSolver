@@ -4,6 +4,12 @@
 > 本文是项目的持续记录。每次改变搜索语义、评分、模拟覆盖、性能策略、UI 或测试方式时，都应同步更新对应章节和文末变更记录。  
 > “未来构想”均不是已经实现的功能。
 
+## 0.15.0（开发中）：跨平台 No-GC 预算边界
+
+- macOS ARM64 问题包中的两次首轮搜索都在进入 worker 后、建立求解器之前失败。默认 `6 GB` 总预算和 `1 GB` LOH 预算使 `GC.TryStartNoGCRegion` 抛出 `ArgumentOutOfRangeException(totalSize)`；同一战斗的手动全自动重试在相同调用点再次失败，战斗根本身已成功捕获。
+- No-GC 启动现在明确区分成功、内存不足和当前 CLR 不支持该 SOH 区域大小三种结果。区域大小不受支持时，Runtime 使用现有 `SustainedLowLatency` 与 Beam 安全检查点回收继续搜索；参数错误、嵌套 No-GC 等其他异常仍然直接失败。首轮进入和检查点回收后的重建共用同一入口。
+- Windows headless 以 `16 GB` 预算完成首轮求解并产出可执行动作，证明正常 No-GC 路径未退化；该平台实际接受了 `16 GB` 区域，因此不能替代 macOS ARM64 对拒绝分支的实机复测。
+
 ## 0.14.13：Loadout 战斗费用兼容
 
 - 最新实机日志在创建首回合搜索根时拒绝了 Loadout 新增的 `LoadoutEveryCardFreeCombatHook`，因此界面显示“搜索初始化失败”。Legacy RNG 兼容层和 CombatSolver 本身均已成功初始化，首个错误只发生在未知 gameplay subscriber 的根快照校验。
