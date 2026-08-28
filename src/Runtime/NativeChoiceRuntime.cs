@@ -192,7 +192,8 @@ internal sealed class NativeChoiceSession : IDisposable
         Entry.Logger.Info(
             $"[CombatSolver/Test] NATIVE_CHOICE_REQUEST owner={Owner} sequence={request.Sequence} " +
             $"surface={request.Surface} visible={request.RequiresSurface} source={request.SourceId} " +
-            $"options={request.Options.Count} select={request.MinSelect}..{request.MaxSelect}");
+            $"options={request.Options.Count} select={request.MinSelect}..{request.MaxSelect} " +
+            $"manual_confirmation={request.RequireManualConfirmation}");
     }
 
     public async Task<bool> WaitForFirstVisibleSurfaceAsync(
@@ -510,7 +511,7 @@ internal static class NativeChoiceSurface
                 break;
             case NativeChoiceSurfaceKind.Hand:
             case NativeChoiceSurfaceKind.HandUpgrade:
-                await SelectHandAsync(host, surfaceLock.Surface, selected, token);
+                await SelectHandAsync(host, surfaceLock.Surface, request, selected, token);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(request.Surface), request.Surface, null);
@@ -568,6 +569,7 @@ internal static class NativeChoiceSurface
     private static async Task SelectHandAsync(
         NGame host,
         Node surface,
+        NativeChoiceRequest request,
         IReadOnlyList<CardModel> selected,
         CancellationToken token)
     {
@@ -579,6 +581,12 @@ internal static class NativeChoiceSurface
             holder.EmitSignal(NCardHolder.SignalName.Pressed, holder);
             token.ThrowIfCancellationRequested();
             await WaitMillisecondsAsync(host, MultiSelectStepMilliseconds, token);
+        }
+        if (!hand.IsInCardSelection)
+        {
+            if (request.RequireManualConfirmation)
+                throw new InvalidOperationException("原生手牌选择在手动确认前已经结束。");
+            return;
         }
         NConfirmButton confirm = hand.GetNode<NConfirmButton>("%SelectModeConfirmButton");
         if (!confirm.IsEnabled)
@@ -747,7 +755,7 @@ internal sealed class HandObservationPatch : IPatchMethod
             prefs.MinSelect,
             prefs.MaxSelect,
             options.Count > 0 && (prefs.RequireManualConfirmation || options.Count > prefs.MinSelect),
-            requireManualConfirmation: true,
+            requireManualConfirmation: prefs.RequireManualConfirmation,
             sourceId: source.Id.Entry);
     }
 }
@@ -775,7 +783,7 @@ internal sealed class HandUpgradeObservationPatch : IPatchMethod
             1,
             1,
             options.Count > 1,
-            requireManualConfirmation: true,
+            requireManualConfirmation: false,
             sourceId: source.Id.Entry);
     }
 }
