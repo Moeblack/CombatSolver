@@ -591,7 +591,12 @@ internal sealed partial class UnattendedTestRunner
         }
         ForecastMove simulatedMove = simulatedCombat.CurrentMonsterMoves()
             .Single(candidate => ReferenceEquals(candidate.Owner, enemy));
-        _ = MonsterMoveSemantics.ApplyForecastMove(simulator, simulatedCombat, simulatedMove, player.Creature);
+        _ = MonsterMoveSemantics.ApplyForecastMove(
+            simulator,
+            simulatedCombat,
+            simulatedMove,
+            player.Creature,
+            new HashSet<uint>());
         foreach (UnattendedPowerInjection injectedPowerAfterMove in check.PowersAfterMove)
             ApplySimulatedPowerInjection(simulator, simulatedCombat, combatState, player, injectedPowerAfterMove, enemy);
         if (check.CardAfterMove is { } simulatedCardAfterMove)

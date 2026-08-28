@@ -59,7 +59,7 @@ ZIP 注释：`d56f8bd461f928d59ade6ccbcbcc06e79d32e604`，仅记录为“压缩�
 ### 2.2 实机状态捕获与搜索请求
 
 1. `Entry.OnTurnStarted` 只在本地玩家回合处理；先尝试消费首回合已完成结果，然后通过 `RequestAutoSearchAfterVisualSetup` 等待至少 3 个画面帧、玩家 phase 进入 `Play`、原版 `ActionExecutor.FinishedExecutingActions`，再调用 `SolverController.RequestSearch`。
-2. 手动 `I`/`O` 等入口由 `src/Runtime/SolverInputPatch.cs` 交给 `SolverController`；UI 按钮也只调用控制器，不直接持有搜索状态。
+2. 面板操作入口只调用 `SolverController`，不直接持有搜索状态。
 3. `SolverController.RequestSearch` 在主线程：
    - `CanSolve` 校验单人、战斗进行中、本地玩家阶段和动作可用；
    - `CombatBugReportExporter.RecordCheckpoint` 保存 `search_request_*`；
@@ -753,7 +753,6 @@ CombatSolver 是《杀戮尖塔 2》单人战斗路线求解器 Mod，使用 C# 
 - `src/Runtime/Entry.cs`
   - `Entry.Initialize`：加载设置、注册 Mod 类型、订阅战斗生命周期、安装补丁、启动无人测试请求循环。
   - `Entry.OnTurnStarted` / `RequestAutoSearchAfterVisualSetup`：等待玩家阶段和原版动作队列稳定后发起搜索。
-- `src/Runtime/SolverInputPatch.cs`：实机按键入口；只负责把搜索/部署请求交给控制器。
 - `src/Runtime/InitialPlayerSetupPatches.cs`：首回合玩家设置与自动预出牌阶段的选择拦截、预测和部署。
 - `src/Runtime/SolverController.cs`
   - 主线程生命周期、搜索 generation/cancellation、跨回合续用、结果过期校验、部署、全自动、重算原因与取证检查点的唯一所有者。

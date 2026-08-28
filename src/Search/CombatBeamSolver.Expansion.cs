@@ -1215,6 +1215,7 @@ internal sealed partial class CombatBeamSolver
                             simulatedCombat,
                             move,
                             _player.Creature,
+                            processedEnemyDeaths,
                             turnStartChoices))
                     {
                         return SearchBoundaryReason.None;

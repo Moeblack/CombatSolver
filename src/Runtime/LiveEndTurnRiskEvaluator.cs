@@ -128,7 +128,8 @@ internal static class LiveEndTurnRiskEvaluator
                     simulator,
                     combat,
                     move,
-                    player.Creature))
+                    player.Creature,
+                    processedEnemyDeaths))
             {
                 break;
             }

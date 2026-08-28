@@ -25,7 +25,7 @@
 ## 1. 仓库架构与审计概述
 
 CombatSolver 是一个用于《杀戮尖塔 2》单人战斗的启发式路线求解器。其核心架构分为四层：
-1. **Hook & 驱动层** (`Entry.cs`, `SolverInputPatch.cs`, `SolverDispatcher.cs`)：捕获回合开始事件、按键输入 (`I`/`O`) 与 Godot 主线程任务分发。
+1. **Hook & 驱动层** (`Entry.cs`, `SolverDispatcher.cs`)：捕获回合开始事件、面板操作与 Godot 主线程任务分发。
 2. **状态感知与预测层** (`LiveCombatStamp.cs`, `IntentForecaster.cs`, `CorePowerSupport.cs`, `MonsterMoveEffects.cs`)：捕获战斗上下文、推演敌方意图与核心 Power 效果。
 3. **求解引擎层** (`CombatBeamSolver.cs`, `SimulatedCombatState.cs`, `CardChoiceSupport.cs`)：基于 Beam Search 在已知牌序（洗牌前）内搜索前 3~16 回合的最优出牌分支。
 4. **覆盖展示层** (`SolverOverlay.cs`)：通过 Godot `CanvasLayer` 和自定义控件树展示出牌路线、战损预估与计算详情。

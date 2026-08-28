@@ -13,6 +13,7 @@ internal static class MonsterMoveSemantics
         SimulatedCombatState combat,
         ForecastMove move,
         Creature player,
+        ISet<uint> processedEnemyDeaths,
         IReadOnlyList<PlanCardChoice>? plannedChoices = null)
     {
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(player);
@@ -41,8 +42,15 @@ internal static class MonsterMoveSemantics
                 .ToHashSet();
             if (results.Any(result => result.UnblockedDamage > 0 && !petOwners.Contains(result.Receiver)))
                 suckTriggeredHits++;
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                combat,
+                combat.KnownEnemies,
+                processedEnemyDeaths);
             if (simulatedPlayer.IsDead)
                 return true;
+            if (simulator.State.GetCreature(move.Owner).IsDead)
+                break;
         }
 
         if (consumedVigor)
