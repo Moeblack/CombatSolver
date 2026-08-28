@@ -384,6 +384,13 @@ internal static class HookMirrors
             context.Cost = ModifyEnergyCostInCombatMirrors.InvokeLate(listener, context);
         }
 
+        if (!card.Preview.IsCanonical
+            && simulator.State.CombatState is ICombatPredictionPlayerCardRules rules
+            && rules.AreCardsFree(card.Preview.Owner))
+        {
+            context.Cost = 0m;
+        }
+
         return context.Cost;
     }
 

@@ -14,9 +14,12 @@ internal sealed class PredictionModHookSubscriberCapture
     private const string BaseLibMaxHandSizeInterfaceName = "BaseLib.Hooks.IMaxHandSizeModifier";
     private const string LoadoutMaxHandSizeModifierTypeName =
         "Loadout.Services.TildeKey.LoadoutMaxHandSizeModifier";
+    private const string LoadoutEveryCardFreeCombatHookTypeName =
+        "Loadout.Services.TildeKey.LoadoutEveryCardFreeCombatHook";
     private static readonly HashSet<string> KnownPreRootSubscriberTypeNames =
     [
         LoadoutMaxHandSizeModifierTypeName,
+        LoadoutEveryCardFreeCombatHookTypeName,
         "Loadout.Services.TildeKey.LoadoutKillAllMonstersCombatHook",
         "Loadout.Services.PowerGiver.PowerGiverCombatStartHook",
     ];
@@ -24,17 +27,20 @@ internal sealed class PredictionModHookSubscriberCapture
     public AbstractModel[] RunSubscribers { get; }
     public AbstractModel[] CombatSubscribers { get; }
     public IReadOnlyDictionary<Player, int> MaxHandSizes { get; }
+    public IReadOnlySet<Player> EveryCardFreePlayers { get; }
     public bool HasBaseLibCardModifiers { get; }
 
     private PredictionModHookSubscriberCapture(
         AbstractModel[] runSubscribers,
         AbstractModel[] combatSubscribers,
         IReadOnlyDictionary<Player, int> maxHandSizes,
+        IReadOnlySet<Player> everyCardFreePlayers,
         bool hasBaseLibCardModifiers)
     {
         RunSubscribers = runSubscribers;
         CombatSubscribers = combatSubscribers;
         MaxHandSizes = maxHandSizes;
+        EveryCardFreePlayers = everyCardFreePlayers;
         HasBaseLibCardModifiers = hasBaseLibCardModifiers;
     }
 
@@ -89,10 +95,15 @@ internal sealed class PredictionModHookSubscriberCapture
             maxHandSizes.Add(player, maxHandSize);
         }
 
+        IReadOnlySet<Player> everyCardFreePlayers = CaptureEveryCardFreePlayers(
+            combatSubscribers,
+            combat.Players);
+
         return new PredictionModHookSubscriberCapture(
             runSubscribers,
             combatSubscribers,
             maxHandSizes,
+            everyCardFreePlayers,
             hasBaseLibCardModifiers);
     }
 
@@ -102,6 +113,45 @@ internal sealed class PredictionModHookSubscriberCapture
     {
         foreach (CardModel card in cards)
             PredictionModModelSupport.AppendCardAttachedListeners(card, listeners);
+    }
+
+    private static IReadOnlySet<Player> CaptureEveryCardFreePlayers(
+        IReadOnlyList<AbstractModel> combatSubscribers,
+        IReadOnlyList<Player> players)
+    {
+        AbstractModel? hook = combatSubscribers.SingleOrDefault(subscriber =>
+            subscriber.GetType().FullName == LoadoutEveryCardFreeCombatHookTypeName);
+        if (hook is null)
+            return new HashSet<Player>();
+
+        HashSet<Player> result = [];
+        foreach (Player player in players)
+        {
+            CardModel probe = player.PlayerCombatState?.AllCards
+                .FirstOrDefault(card => !card.IsCanonical)
+                ?? throw new PredictionUnsupportedException(
+                    $"Cannot capture Loadout every-card-free state for player {player.NetId} without a combat card.");
+            const decimal originalCost = 1m;
+            bool modified = hook.TryModifyEnergyCostInCombatLate(
+                probe,
+                originalCost,
+                out decimal modifiedCost);
+            if (modified)
+            {
+                if (modifiedCost != 0m)
+                {
+                    throw new PredictionUnsupportedException(
+                        $"Loadout every-card-free hook returned unsupported cost {modifiedCost}.");
+                }
+                result.Add(player);
+            }
+            else if (modifiedCost != originalCost)
+            {
+                throw new PredictionUnsupportedException(
+                    $"Loadout every-card-free hook changed an inactive cost to {modifiedCost}.");
+            }
+        }
+        return result;
     }
 
     private static void ValidateSubscriber(

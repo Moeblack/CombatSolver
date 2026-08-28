@@ -36,7 +36,7 @@ internal sealed partial class SimulatedCombatState
       ICombatPredictionCardEventSink, ICombatPredictionEffectSink, ICombatPredictionRosterSink,
       ICombatPredictionCreatureSemantics, ICombatPredictionMonsterStateSink,
       ICombatPredictionCardExecutionSink, ICombatPredictionPendingChoiceState,
-      ICombatPredictionRunSnapshot, ICombatPredictionPlayerLimits,
+      ICombatPredictionRunSnapshot, ICombatPredictionPlayerLimits, ICombatPredictionPlayerCardRules,
       ICombatPredictionStateOwner, ICombatPredictionRootCaptureBoundary,
       ICombatPredictionRootMaterializable, IPredictionForkBoundary
 {
@@ -1334,6 +1334,9 @@ internal sealed partial class SimulatedCombatState
 
     int ICombatPredictionPlayerLimits.GetPotionSlotCount(Player player)
         => PotionSlotCount(player);
+
+    bool ICombatPredictionPlayerCardRules.AreCardsFree(Player player)
+        => _modHookSubscribers.EveryCardFreePlayers.Contains(player);
 
     void ICombatPredictionStateOwner.AttachPredictionState(CombatPredictionState predictionState)
     {

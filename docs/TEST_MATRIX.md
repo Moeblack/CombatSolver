@@ -1,8 +1,14 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.14.12`、塔 2 `0.111.0`、RitsuLib 实测 `0.5.14`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
+> 基线：CombatSolver `0.14.13`、塔 2 `0.111.0`、RitsuLib 实测 `0.5.14`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
 
 同一版 DLL 的场景默认复用 marker 记录的 headless 游戏进程：首条命令直接启动游戏，完成后返回主菜单等待下一条请求；后续命令只向该测试 PID 投递。测试使用独立 `APPDATA/LOCALAPPDATA`、关闭 Steam，并只在隔离设置中确认允许加载 Mod；RitsuLib 在 headless 生命周期内从创意工坊版本目录临时投影到带所有权标记的本地目录，退出时删除。发现未由 marker 管理的塔 2 进程时拒绝运行。只有重新编译需要加载新 DLL，或最后一批显式传入 `-ExitOnComplete` 时才退出游戏。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
+
+## 0.14.13 Loadout 战斗费用兼容
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `LOADOUT-EVERY-CARD-FREE-ROOT-1413` | 目标路径通过，完整断言受限 | 投影实际 Loadout `0.4.10` 与 BaseLib `3.4.5` 后进入小啃兽战斗。第一轮成功创建并 Fork 根快照，未再出现 `LoadoutEveryCardFreeCombatHook` 的 `SEARCH_SETUP_FAILURE`；随后旧测试把 ModHelper 运行级 subscriber 误算进原版前缀，runId `7c5c868146194a05a7d038d93c31feb3` 在外围计数断言失败。修正断言后的第二轮在 Loadout 的 headless 战斗房间资源预载处超时，未进入战斗断言，不记为完整通过 | 2026-08-28 |
 
 ## 0.14.12 同族小队压缩连锁
 

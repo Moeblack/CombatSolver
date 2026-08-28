@@ -29,6 +29,11 @@ internal interface ICombatPredictionPlayerLimits
     int GetPotionSlotCount(MegaCrit.Sts2.Core.Entities.Players.Player player);
 }
 
+internal interface ICombatPredictionPlayerCardRules
+{
+    bool AreCardsFree(MegaCrit.Sts2.Core.Entities.Players.Player player);
+}
+
 internal interface ICombatPredictionStateOwner
 {
     void AttachPredictionState(

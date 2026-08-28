@@ -3,8 +3,10 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Singleton;
+using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Rooms;
+using MegaCrit.Sts2.Core.Runs;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 
@@ -27,6 +29,25 @@ internal sealed partial class UnattendedTestRunner
         AbstractModel[] liveCombatListeners = combat.IterateHookListeners().ToArray();
         AbstractModel[] liveRunListeners = combat.RunState.IterateHookListeners(combat).ToArray();
         int liveRunOnlyListenerCount = liveRunListeners.Length - liveCombatListeners.Length;
+        RunState concreteRunState = combat.RunState as RunState
+            ?? throw new InvalidOperationException("根快照测试要求具体 RunState。");
+        int liveRunSubscriberCount = ModHelper.IterateAllRunStateSubscribers(concreteRunState).Count();
+        int liveStandardRunOnlyListenerCount = liveRunOnlyListenerCount - liveRunSubscriberCount;
+        if (liveStandardRunOnlyListenerCount < 0)
+            throw new InvalidOperationException("运行级监听器前缀短于 ModHelper subscriber 后缀。");
+        AbstractModel? loadoutEveryCardFreeHook = liveCombatListeners.SingleOrDefault(listener =>
+            listener.GetType().FullName == "Loadout.Services.TildeKey.LoadoutEveryCardFreeCombatHook");
+        bool liveEveryCardFree = false;
+        if (loadoutEveryCardFreeHook is not null)
+        {
+            CardModel probe = playerState.AllCards.First(card => !card.IsCanonical);
+            liveEveryCardFree = loadoutEveryCardFreeHook.TryModifyEnergyCostInCombatLate(
+                probe,
+                1m,
+                out decimal modifiedCost);
+            if (modifiedCost != (liveEveryCardFree ? 0m : 1m))
+                throw new InvalidOperationException("Loadout 全卡免费 hook 返回了未知费用语义。");
+        }
         CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
 
         bool workerCaptureRejected = await Task.Run(() =>
@@ -69,6 +90,10 @@ internal sealed partial class UnattendedTestRunner
                     $"根快照在实机状态变化后回读了能量：captured={capturedEnergy} predicted={predictedPlayer.Energy}。");
             }
             SimulatedCombatState predictedCombat = (SimulatedCombatState)fork.State.CombatState;
+            bool capturedEveryCardFree =
+                ((ICombatPredictionPlayerCardRules)predictedCombat).AreCardsFree(player);
+            if (capturedEveryCardFree != liveEveryCardFree)
+                throw new InvalidOperationException("根快照没有保留 Loadout 全卡免费状态。");
             int capturedMaxHandSize = ((ICombatPredictionPlayerLimits)predictedCombat).GetMaxHandSize(player);
             if (capturedMaxHandSize != CardPile.MaxCardsInHand)
             {
@@ -118,15 +143,15 @@ internal sealed partial class UnattendedTestRunner
             {
                 throw new InvalidOperationException("根快照没有保留捕获时的运行级标量或 RNG 状态。");
             }
-            if (predictedCombat.RootRunHookListenerCount != liveRunOnlyListenerCount)
+            if (predictedCombat.RootRunHookListenerCount != liveStandardRunOnlyListenerCount)
             {
                 throw new InvalidOperationException(
                     $"运行级监听器前缀数量不一致：captured={predictedCombat.RootRunHookListenerCount} " +
-                    $"live={liveRunOnlyListenerCount}。");
+                    $"live={liveStandardRunOnlyListenerCount}。");
             }
             IReadOnlyList<AbstractModel> predictedRunListeners =
                 ((ICombatPredictionHookListenerSource)predictedCombat).RunHookListeners;
-            for (int index = 0; index < liveRunOnlyListenerCount; index++)
+            for (int index = 0; index < liveStandardRunOnlyListenerCount; index++)
             {
                 AbstractModel liveListener = liveRunListeners[index];
                 if (liveListener is not (CardModel or EnchantmentModel))
