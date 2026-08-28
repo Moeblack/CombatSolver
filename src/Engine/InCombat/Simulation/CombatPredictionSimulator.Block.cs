@@ -10,6 +10,8 @@ namespace CombatSolver.Engine.InCombat.Simulation;
 
 internal sealed partial class CombatPredictionSimulator
 {
+    private readonly Dictionary<CardPlay, decimal> _blockGainedByCardPlay = [];
+
     /// <summary>
     /// Mirrors <see cref="CreatureCmd.GainBlock(Creature, BlockVar, CardPlay?, bool)"/>.
     /// Convenience overload for when a <see cref="BlockVar"/> is supplied and the block source is not a card play.
@@ -69,6 +71,12 @@ internal sealed partial class CombatPredictionSimulator
             return 0m;
         }
 
+        if (cardPlay != null)
+        {
+            _blockGainedByCardPlay[cardPlay] =
+                _blockGainedByCardPlay.GetValueOrDefault(cardPlay) + modifiedBlock;
+        }
+
         State.GetCreature(creature).GainBlock(modifiedBlock);
 
         // Vanilla records BlockGained history before AfterBlockGained. Preview does not mutate
@@ -76,5 +84,12 @@ internal sealed partial class CombatPredictionSimulator
         // known block-triggered state changes can be mirrored or marked as risk.
         HookMirrors.AfterBlockGained(this, creature, modifiedBlock, props, cardSource);
         return modifiedBlock;
+    }
+
+    private decimal TakeBlockGained(CardPlay cardPlay)
+    {
+        decimal amount = _blockGainedByCardPlay.GetValueOrDefault(cardPlay);
+        _blockGainedByCardPlay.Remove(cardPlay);
+        return amount;
     }
 }

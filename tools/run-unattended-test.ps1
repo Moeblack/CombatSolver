@@ -129,6 +129,7 @@ param(
     [string]$ExpectedInitialTurnStartChoiceStateExcludes = "",
     [int]$ExpectedInitialSetupChoiceCountAtLeast = -1,
     [string]$ExpectedInitialSetupChoiceSourceId = "",
+    [string]$ExpectedInitialSetupChoiceTextStartsWith = "",
     [switch]$StopAfterInitialSetupAssertion,
     [switch]$StopAfterInitialSolverResultAssertion,
     [switch]$ExpectedFullAutoPausedAtDeathTurn,
@@ -421,6 +422,7 @@ $request = [ordered]@{
     expectedInitialTurnStartChoiceStateExcludes = if ([string]::IsNullOrWhiteSpace($ExpectedInitialTurnStartChoiceStateExcludes)) { $null } else { $ExpectedInitialTurnStartChoiceStateExcludes }
     expectedInitialSetupChoiceCountAtLeast = if ($ExpectedInitialSetupChoiceCountAtLeast -ge 0) { $ExpectedInitialSetupChoiceCountAtLeast } else { $null }
     expectedInitialSetupChoiceSourceId = if ([string]::IsNullOrWhiteSpace($ExpectedInitialSetupChoiceSourceId)) { $null } else { $ExpectedInitialSetupChoiceSourceId }
+    expectedInitialSetupChoiceTextStartsWith = if ([string]::IsNullOrWhiteSpace($ExpectedInitialSetupChoiceTextStartsWith)) { $null } else { $ExpectedInitialSetupChoiceTextStartsWith }
     stopAfterInitialSetupAssertion = $StopAfterInitialSetupAssertion.IsPresent
     stopAfterInitialSolverResultAssertion = $StopAfterInitialSolverResultAssertion.IsPresent
     expectedFullAutoPausedAtDeathTurn = $ExpectedFullAutoPausedAtDeathTurn.IsPresent

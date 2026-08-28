@@ -3,7 +3,6 @@ using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models;
-using MegaCrit.Sts2.Core.Models.Afflictions;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
@@ -78,8 +77,6 @@ internal sealed partial class SimulatedCombatState
         if (gainedBlock)
             (_blockCardsPlayedThisTurn ??= [])[owner] = GetBlockCardsPlayedThisTurn(owner) + 1;
 
-        if (card.Preview.Affliction is Ringing)
-            (_ringingCardPlayed ??= []).Add(card.Preview.Owner);
         foreach (Creature creature in Creatures)
         {
             SlowPower? slow = GetPower<SlowPower>(creature);

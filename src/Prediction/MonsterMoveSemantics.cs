@@ -1,3 +1,4 @@
+using MegaCrit.Sts2.Core.Commands.Builders;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Powers;
@@ -19,8 +20,13 @@ internal static class MonsterMoveSemantics
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(player);
         MonsterMoveEffects.ApplyBeforeAttack(simulator, combat, move, player);
         bool fullyBlockedAttack = false;
-        int suckTriggeredHits = 0;
-        bool consumedVigor = move.AttackHits.Count > 0 && combat.GetAmount<VigorPower>(move.Owner) > 0;
+        bool playerDied = false;
+        AttackCommand? attackContext = move.AttackHits.Count > 0
+            ? new AttackCommand(0m)
+                .FromMonster(move.Owner.Monster
+                    ?? throw new InvalidOperationException("预测攻击的所有者不是怪物。"))
+                .WithHitCount(0)
+            : null;
         foreach (ForecastAttackHit hit in move.AttackHits)
         {
             int baseDamage = combat.AdjustMonsterMoveDamage(move.Owner, move.Move.Id, hit.BaseDamage);
@@ -30,41 +36,36 @@ internal static class MonsterMoveSemantics
                 move.Owner,
                 player,
                 baseDamage);
+            simulator.AddAttackContextHit(attackContext!, results);
             foreach (DamageResult result in results)
             {
                 if (ReferenceEquals(result.Receiver, player) && result.WasFullyBlocked)
                     fullyBlockedAttack = true;
             }
-            HashSet<Creature> petOwners = results
-                .Where(result => result.Receiver.IsPet)
-                .Select(result => result.Receiver.PetOwner?.Creature)
-                .OfType<Creature>()
-                .ToHashSet();
-            if (results.Any(result => result.UnblockedDamage > 0 && !petOwners.Contains(result.Receiver)))
-                suckTriggeredHits++;
             CorePowerSupport.ApplyEnemyDeathPowers(
                 simulator,
                 combat,
                 combat.KnownEnemies,
                 processedEnemyDeaths);
             if (simulatedPlayer.IsDead)
-                return true;
+            {
+                playerDied = true;
+                break;
+            }
             if (simulator.State.GetCreature(move.Owner).IsDead)
                 break;
         }
 
-        if (consumedVigor)
-            combat.SetAmount<VigorPower>(move.Owner, 0);
+        if (attackContext != null)
+            simulator.EndAttackContext(attackContext);
+        if (playerDied)
+            return true;
         if (fullyBlockedAttack && combat.GetAmount<ImbalancedPower>(move.Owner) > 0)
         {
             if (move.Owner.Monster is BowlbugRock)
                 combat.ForceStunnedMove(move.Owner, "HEADBUTT_MOVE");
             combat.StunNextMove(move.Owner);
         }
-        int suck = combat.GetAmount<SuckPower>(move.Owner);
-        if (suck > 0 && suckTriggeredHits > 0)
-            combat.Apply<StrengthPower>(move.Owner, suck * suckTriggeredHits, move.Owner);
-
         MonsterMoveEffects.Apply(simulator, combat, move, player, plannedChoices);
         simulator.SynchronizePowerAmountPredictionStates();
         PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, combat);
@@ -80,7 +81,7 @@ internal static class MonsterMoveSemantics
         Creature player,
         int baseDamage)
     {
-        Creature? osty = player.Player?.Osty;
+        Creature? osty = player.Player is { } owner ? simulator.State.GetOsty(owner) : null;
         int? suppressedDieForYou = null;
         if (osty != null
             && simulator.State.GetCreature(osty).IsDead

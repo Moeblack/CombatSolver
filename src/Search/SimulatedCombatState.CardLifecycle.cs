@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Powers;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
@@ -16,6 +17,7 @@ internal sealed partial class SimulatedCombatState
 {
     private List<PowerModel>? _addedPowerInstances;
     private Dictionary<NightmarePower, PredictedCard>? _nightmareSelections;
+    private ForkableDictionary<Player, Creature>? _simulatedOsties;
     private ForkableDictionary<Creature, int>? _simulatedOstyMaxHp;
     private HashSet<PredictedCard>? _returnToHandNextTurn;
     private ForkableDictionary<Creature, int>? _cardsPlayedThisTurn;
@@ -56,18 +58,34 @@ internal sealed partial class SimulatedCombatState
     {
         if (amount <= 0)
             return;
-        Creature osty = player.Osty
-            ?? throw new InvalidOperationException("召唤奥斯蒂时，玩家没有可供模拟的奥斯蒂实例。");
+        Creature? existingOsty = GetOsty(player);
+        bool created = existingOsty == null;
+        Creature osty;
+        if (created)
+        {
+            Osty model = (Osty)ModelDb.Monster<Osty>().ToMutable();
+            osty = CreatePredictedMonster(simulator, model, player.Creature.Side, slot: null);
+            osty.PetOwner = player;
+            AddPredictedMonster(osty);
+            (_simulatedOsties ??= [])[player] = osty;
+            Apply<DieForYouPower>(osty, 1);
+        }
+        else
+        {
+            osty = existingOsty!;
+        }
         SimCreatureState state = simulator.State.GetCreature(osty);
         int currentMax = _simulatedOstyMaxHp?.GetValueOrDefault(osty) ?? state.MaxHp;
-        if (state.IsAlive)
+        if (!created && state.IsAlive)
         {
             currentMax += amount;
+            state.SetMaxHp(currentMax);
             state.CurrentHp = Math.Min(currentMax, state.CurrentHp + amount);
         }
         else
         {
             currentMax = amount;
+            state.SetMaxHp(currentMax);
             state.CurrentHp = amount;
         }
         (_simulatedOstyMaxHp ??= [])[osty] = currentMax;
@@ -75,7 +93,7 @@ internal sealed partial class SimulatedCombatState
 
     public void HealOsty(CombatPredictionSimulator simulator, Player player, int amount)
     {
-        Creature osty = player.Osty
+        Creature osty = GetOsty(player)
             ?? throw new InvalidOperationException("治疗奥斯蒂时，玩家没有可供模拟的奥斯蒂实例。");
         SimCreatureState state = simulator.State.GetCreature(osty);
         int maxHp = _simulatedOstyMaxHp?.GetValueOrDefault(osty) ?? state.MaxHp;
@@ -84,7 +102,7 @@ internal sealed partial class SimulatedCombatState
 
     public int GetOstyMaxHp(CombatPredictionSimulator simulator, Player player)
     {
-        Creature? osty = player.Osty;
+        Creature? osty = GetOsty(player);
         if (osty == null)
             return 0;
         return _simulatedOstyMaxHp?.GetValueOrDefault(osty)
@@ -93,12 +111,15 @@ internal sealed partial class SimulatedCombatState
 
     public bool IsOstyHittable(CombatPredictionSimulator simulator, Player player)
     {
-        Creature? osty = player.Osty;
+        Creature? osty = GetOsty(player);
         if (osty == null)
             return false;
         SimCreatureState state = simulator.State.GetCreature(osty);
         return state.IsAlive && (_rootDeadCreatures.Contains(osty) || simulator.State.IsHittable(osty));
     }
+
+    public Creature? GetOsty(Player player)
+        => _simulatedOsties?.GetValueOrDefault(player) ?? player.Osty;
 
     public void RecordCardLifecycle(CombatPredictionSimulator simulator, PredictedCard card)
     {
@@ -131,12 +152,19 @@ internal sealed partial class SimulatedCombatState
     IDisposable ICombatPredictionCardExecutionSink.BeginCardExecutionScope()
         => BeginCardExecutionScope();
 
+    void ICombatPredictionCardExecutionSink.RecordCardPlayStarted(PredictedCard card)
+    {
+        Creature owner = card.Preview.Owner.Creature;
+        (_cardPlaysStartedThisTurn ??= [])[owner] = GetCardPlaysStartedThisTurn(owner) + 1;
+    }
+
     void ICombatPredictionCardExecutionSink.ApplyCardPlayEffects(
         CombatPredictionSimulator simulator,
         PredictedCard card,
         CardPlay cardPlay,
         Creature? target,
         int ownerBlockBefore,
+        decimal cardBlockGained,
         int historyEntryStart)
     {
         ISet<uint> processedEnemyDeaths = _activeCardExecutionDeaths ?? new HashSet<uint>();
@@ -147,6 +175,7 @@ internal sealed partial class SimulatedCombatState
             cardPlay,
             target,
             ownerBlockBefore,
+            cardBlockGained,
             historyEntryStart,
             processedEnemyDeaths);
         CorePowerSupport.ApplyEnemyDeathPowers(
@@ -158,23 +187,21 @@ internal sealed partial class SimulatedCombatState
 
     void ICombatPredictionCardExecutionSink.CompleteCardPlayEffects(
         CombatPredictionSimulator simulator,
+        PredictedCard card,
+        int ownerBlockBefore,
         int historyEntryStart)
     {
         TriggeredPowerSupport.CompensateHistorySince(simulator, this, historyEntryStart);
         simulator.SynchronizePowerAmountPredictionStates();
-    }
-
-    void ICombatPredictionCardExecutionSink.CompleteCardExecution(
-        CombatPredictionSimulator simulator,
-        PredictedCard card,
-        Creature? target,
-        int ownerBlockBefore,
-        int historyEntryStart)
-    {
-        ISet<uint> processedEnemyDeaths = _activeCardExecutionDeaths ?? new HashSet<uint>();
         int ownerBlockAfter = simulator.State.GetCreature(card.Preview.Owner.Creature).Block;
         RecordCardPlayed(card, ownerBlockAfter > ownerBlockBefore);
         RecordCardLifecycle(simulator, card);
+    }
+
+    void ICombatPredictionCardExecutionSink.CompleteCardExecution(
+        CombatPredictionSimulator simulator)
+    {
+        ISet<uint> processedEnemyDeaths = _activeCardExecutionDeaths ?? new HashSet<uint>();
         CorePowerSupport.ApplyEnemyDeathPowers(
             simulator,
             this,
@@ -396,6 +423,17 @@ internal sealed partial class SimulatedCombatState
             entry.HappenedThisTurn(this)
             && entry.CardPlay.Player.Creature == owner);
         (_cardsPlayedThisTurn ??= [])[owner] = value;
+        return value;
+    }
+
+    public int GetCardPlaysStartedThisTurn(Creature owner)
+    {
+        if (_cardPlaysStartedThisTurn?.TryGetValue(owner, out int value) == true)
+            return value;
+        value = _rootHistory.CardPlaysStarted.Count(entry =>
+            entry.HappenedThisTurn(this)
+            && entry.CardPlay.Player.Creature == owner);
+        (_cardPlaysStartedThisTurn ??= [])[owner] = value;
         return value;
     }
 

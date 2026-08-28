@@ -75,7 +75,7 @@ internal sealed partial class SimulatedCombatState
             case Stomp stomp:
                 stomp.EnergyCost.AddThisTurn(-GetAttacksPlayedThisTurn(owner));
                 break;
-            case Flatten flatten when preview.Owner.Osty is { } osty
+            case Flatten flatten when simulator.State.GetOsty(preview.Owner) is { } osty
                                       && GetCreatureAttacksThisTurn(osty) > 0:
                 flatten.EnergyCost.SetThisTurn(0);
                 break;

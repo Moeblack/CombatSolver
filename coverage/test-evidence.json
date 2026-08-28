@@ -1,4 +1,52 @@
 {
+  "RINGING-HAVOC-AUTOPLAY-0160": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationNestedAutoPlayAndBranchCardPlayStartedState",
+    "procedure": "让仪式兽执行 BEAST_CRY_MOVE，为破灭、手牌防御和抽牌堆顶重振施加昏眩；随后原生与模拟都把破灭作为本回合第一张牌打出，并比较嵌套自动出牌后的完整状态。",
+    "expected": "破灭可以作为第一张牌结算；破灭翻出的重振因本回合已有 CardPlayStarted 而不能结算，防御留在手牌、玩家保持 0 格挡，重振按破灭的强制消耗结果进入消耗堆。",
+    "observed": "修复前 runId c24277b02b414dc08fdcb59fc7cec21e 首个差异为模拟 5 格挡、实机 0 格挡；最终 runId bbc71ec201d34e16a114e2a1769ceb52 Passed，完成 CeremonialBeast:BEAST_CRY_MOVE 严格差分及牌堆断言。既有生命周期夹具更新逐实例状态键后，runId 0b73e8ca09374b0dbb27e41f6f021ec9 完成两条 CeremonialBeast:BEAST_CRY_MOVE 并 Passed。",
+    "evidence": "src/Engine/InCombat/Mirrors/Hooks/Card/ShouldPlayMirrors.cs；src/Search/SimulatedCombatState.CardLifecycle.cs；coverage/unattended/ringing-havoc-autoplay-0160.json；coverage/unattended/monster-moves-batch-029-ringing.json；上述 runId；验证日期 2026-08-28。"
+  },
+  "HEADBUTT-EMPTY-DISCARD-0160": {
+    "status": "Passed",
+    "level": "HeadlessNativeEmptyChoiceFullAutoCrossTurnReuse",
+    "procedure": "清空玩家全部牌堆，仅把头槌放入手牌；全自动实际打出头槌，使原生 CombatPile 选择会话在弃牌堆为空时返回 0 个选项，并继续到下一回合。",
+    "expected": "0 选项、0..0 的原生选牌会话作为空选择完成，不要求计划卡牌，不中止部署；第 2 回合复用且计划外重算为 0。",
+    "observed": "runId 53d9a793c14040d790183727ab0a88cd Passed；完成 Reuse:Turn=2 和 UnexpectedReplans:0。",
+    "evidence": "src/Runtime/NativeChoiceRuntime.cs；coverage/unattended/headbutt-empty-discard-0160-cards.json；上述 runId；验证日期 2026-08-28。"
+  },
+  "COSMIC-INDIFFERENCE-EMPTY-DISCARD-0160": {
+    "status": "Passed",
+    "level": "HeadlessNativeEmptyChoiceFullAutoCrossTurnReuse",
+    "procedure": "清空玩家全部牌堆，仅把宇宙冷漠放入手牌；全自动实际打出宇宙冷漠，使原生 CombatPile 选择会话在弃牌堆为空时返回 0 个选项，并继续到下一回合。",
+    "expected": "宇宙冷漠正常获得格挡，空弃牌堆选择作为空选择完成；第 2 回合复用且计划外重算为 0。",
+    "observed": "runId b09e6ef038604469b73680803c6916e7 Passed；完成 Reuse:Turn=2 和 UnexpectedReplans:0。",
+    "evidence": "src/Runtime/NativeChoiceRuntime.cs；coverage/unattended/cosmic-indifference-empty-discard-0160-cards.json；上述 runId；验证日期 2026-08-28。"
+  },
+  "TRIGGERED-SHUFFLE-CHOICE-ORDER-0160": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationNestedChoiceOrderAndPackageRootSearch",
+    "procedure": "分别注入战略选择与早有准备、升级杂技；两张牌都在空抽牌堆时触发洗牌，使用同一张打击依次完成战略选择和卡牌自身选择，比较原生/模拟完整状态。随后以千足虫和永世沙漏问题包的战前存档、种子、怪物生命及首行动重建初始搜索。",
+    "expected": "抽牌触发的战略选择先形成并完成分支，随后恢复同一张牌的 OnPlay 并请求卡牌自身选择；两个选择不得同时占用 pending 槽，最终牌堆、Power、RNG 与实机一致，问题包战前根能够返回搜索候选。",
+    "observed": "双场景严格差分 runId 8da0adbda1484b8f8131cadd30e60d2c Passed。千足虫战前根 runId 967571405a5c4a78851c5310fcdd303a 与永世沙漏战前根 runId d85101a57dcc4d4d910a2e159e02e6c0 均 Passed，没有再次出现 0.15.0 包内的双 pending 搜索动作回放失败；重搜路线不作为旧分支逐动作回放。",
+    "evidence": "src/Engine/InCombat/Simulation/CombatPredictionSimulator.Card.cs；src/Search/CombatBeamSolver.Expansion.cs；src/Prediction/TurnStartChoiceSupport.cs；coverage/unattended/triggered-shuffle-choice-order-0160.json；两个问题包的日志、战前存档与上述 runId；验证日期 2026-08-28。"
+  },
+  "POCKETWATCH-GLAM-REPLAY-0160": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationReplayAndCrossTurnRelicState",
+    "procedure": "注入怀表与带华彩的升级后空翻，补足四张抽牌，原生和模拟各自打出一次后空翻动作并推进到下一玩家回合；比较两次 CardPlay、牌堆、抽牌和怀表私有计数。另以知识恶魔问题包的战前存档尝试跑到原第 2 回合续用点。",
+    "expected": "华彩令后空翻 PlayCount=2；路线仍为一个动作，但所有逐次出牌生命周期均执行两次，进入第 2 回合后怀表保存 2 次出牌且原生/模拟完整状态一致。",
+    "observed": "定向 runId c82c4fcbadda41dc96df6d65cf0e0d63 Passed，完成第 2 回合并得到 POCKETWATCH/0/2。问题包 0.15.0 日志的首个差异为 predicted 15 / actual 16；当前源码的 Custom runId a9e6d858955a455c90782a035d67c1ba 与 Low runId 9f9832bbee9645a5b48652f49859ba51 分别在 180 秒和 120 秒上限内未完成首搜，均未到续用断言，不记通过。",
+    "evidence": "coverage/unattended/pocketwatch-glam-replay-0160.json；知识恶魔问题包 replay-state 与 replan-audit；提交 8479ee5；上述 runId；验证日期 2026-08-28。"
+  },
+  "CARD-UPGRADE-STABLE-SHUFFLE-0160": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationShuffleFullCombatAndIncrementalReplay",
+    "procedure": "定向夹具让武装只升级两张同名防御中的一张，再按升级/普通顺序进入弃牌堆并触发洗牌，比较原生与模拟的手牌、牌堆及 RNG；随后从啃咬者问题包战前存档重建，分别运行完整自动战斗与增量/完整前缀回放核对。",
+    "expected": "预测卡牌按分支中的当前升级等级参与原版稳定洗牌排序；同一 RNG 下普通牌与升级牌的位置必须和原生完全一致；完整战斗不得因此计划外重算，增量分叉必须等价于完整前缀回放。",
+    "observed": "修复前定向 runId 1718b01532d94f34b65acc79a246482a 在第 2 回合稳定得到 hand[0] expected DEFEND_IRONCLAD+0 / actual DEFEND_IRONCLAD+1；修复后 runId 854065893bc742c5ac04e3d6f59e8cdf 严格差分通过。啃咬者完整自动 runId ddebe062128845f9a3f73fbb6992e3ff 第 5 回合结束且 UnexpectedReplans=0；增量 runId 0c32515cb2944570a6a748febf928737 覆盖 12 回合、3 次洗牌并通过完整前缀核对。",
+    "evidence": "src/Engine/Common/PredictedCard.cs；coverage/unattended/card-upgrade-stable-shuffle-0160.json；啃咬者问题包战前存档；上述 runId；验证日期 2026-08-28。"
+  },
   "NATIVE-CHOICE-SURFACES-553": {
     "status": "Passed",
     "level": "HeadlessNativeSurfaceLifecycleOrderExactTurnSetupActionDeploymentAndStrictDifferential",

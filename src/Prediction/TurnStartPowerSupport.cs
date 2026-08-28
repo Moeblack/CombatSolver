@@ -341,7 +341,9 @@ internal static class TurnStartPowerSupport
                 continue;
             }
             simulator.Kill(target, force: true);
-            if (target.Player?.Osty is { } osty && simulator.State.GetCreature(osty).IsAlive)
+            if (target.Player is { } player
+                && simulator.State.GetOsty(player) is { } osty
+                && simulator.State.GetCreature(osty).IsAlive)
                 simulator.Kill(osty, force: true);
         }
     }

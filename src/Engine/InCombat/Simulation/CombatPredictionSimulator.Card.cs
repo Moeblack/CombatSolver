@@ -139,7 +139,6 @@ internal sealed partial class CombatPredictionSimulator
     public void ManualPlay(PredictedCard card, Creature? target, out PredictionTraceFrame frame)
     {
         int historyEntryStart = History.Entries.Count;
-        int ownerBlockBefore = State.GetCreature(card.Preview.Owner.Creature).Block;
         var resources = SpendResources(card, isAutoPlay: false);
         OnPlayWrapper(card, target, isAutoPlay: false, resources, out frame);
         if (History.Entries.Skip(historyEntryStart)
@@ -148,7 +147,7 @@ internal sealed partial class CombatPredictionSimulator
             && State.CombatState is not ICombatPredictionPendingChoiceState { HasPendingChoice: true }
             && State.CombatState is ICombatPredictionCardExecutionSink sink)
         {
-            sink.CompleteCardExecution(this, card, target, ownerBlockBefore, historyEntryStart);
+            sink.CompleteCardExecution(this);
         }
     }
 
@@ -332,8 +331,11 @@ internal sealed partial class CombatPredictionSimulator
 
             HookMirrors.BeforeCardPlayed(this, card, cardPlay);
             History.CardPlayStarted(card, cardPlay);
+            if (State.CombatState is ICombatPredictionCardExecutionSink startedSink)
+                startedSink.RecordCardPlayStarted(card);
 
             CardOnPlayMirrors.Invoke(this, card, cardPlay);
+            decimal cardBlockGained = TakeBlockGained(cardPlay);
 
             if (State.CombatState is ICombatPredictionCardExecutionSink sink)
             {
@@ -343,8 +345,13 @@ internal sealed partial class CombatPredictionSimulator
                     cardPlay,
                     target,
                     ownerBlockBeforePlay,
+                    cardBlockGained,
                     playHistoryEntryStart);
             }
+
+            // OnPlay can suspend on a triggered choice before the card's own selector opens.
+            if (State.CombatState is ICombatPredictionPendingChoiceState { HasPendingChoice: true })
+                return;
 
             if (!isAutoPlay
                 && State.CombatState is ICombatPredictionManualCardChoiceSink choiceSink
@@ -388,7 +395,13 @@ internal sealed partial class CombatPredictionSimulator
                 card.HasKeyword(State, CardKeyword.Ethereal));
             HookMirrors.AfterCardPlayed(this, card, cardPlay);
             if (State.CombatState is ICombatPredictionCardExecutionSink completionSink)
-                completionSink.CompleteCardPlayEffects(this, completionHistoryEntryStart);
+            {
+                completionSink.CompleteCardPlayEffects(
+                    this,
+                    card,
+                    ownerBlockBeforePlay,
+                    completionHistoryEntryStart);
+            }
 
             if (ownerCreature.IsDead)
             {

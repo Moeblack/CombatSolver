@@ -65,8 +65,8 @@ internal static class SolverWeights
     public const int EliteSoldHpThreshold = 10;
     public const int BossSoldHpThreshold = 15;
     public const int PotionMinimumHpSaved = 9;
-    // This is only a scoring/display estimate. Search depth is bounded by the active time and node budgets,
-    // not by a fixed number of turns or shuffles.
+    // This is the minimum cross-turn no-progress horizon and the UI projection horizon. It is not a
+    // total turn cap: every new historical combat improvement restarts the no-progress window.
     public const int SetupValueHorizonTurns = 16;
     public const int IncrementalVerificationMaxTurns = 32;
     public const int UiTurnRows = SetupValueHorizonTurns;

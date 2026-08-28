@@ -97,13 +97,18 @@ internal sealed record SolverOverlaySnapshot(
 
     private static SolverOverlayTurnSnapshot CaptureTurn(SolverResult result, int turn)
     {
-        IReadOnlyList<string> turnStartChoices = result.BestNode.Actions
+        IEnumerable<PlanCardChoice> initialSetupChoices = turn == result.StartTurnNumber && !result.WasReused
+            ? result.TurnSetupChoices
+            : [];
+        IEnumerable<PlanCardChoice> continuedTurnChoices = result.BestNode.Actions
             .FirstOrDefault(action => action.Turn == turn - 1 && action.TurnStartChoices is { Count: > 0 })
             ?.TurnStartChoices
-            ?.Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
-            .Select(FormatTurnStartChoice)
-            .ToArray()
             ?? [];
+        IReadOnlyList<string> turnStartChoices = initialSetupChoices
+            .Concat(continuedTurnChoices)
+            .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
+            .Select(FormatTurnStartChoice)
+            .ToArray();
         SolverOverlayActionSnapshot[] actions = result.BestNode.Actions
             .Select((action, actionIndex) => (Action: action, Index: actionIndex))
             .Where(item => item.Action.Turn == turn && item.Action.IsExecutable)
@@ -174,6 +179,7 @@ internal sealed record SolverOverlaySnapshot(
             "TYRANNY_POWER" => "暴政",
             "ENTROPY_POWER" => "熵",
             "TOASTY_MITTENS" => "烤手套",
+            "CHOICES_PARADOX" => "选择悖论",
             _ => choice.SourceId,
         };
         string effect = choice.Effect switch
@@ -181,6 +187,7 @@ internal sealed record SolverOverlaySnapshot(
             PlanChoiceEffect.Discard => "弃",
             PlanChoiceEffect.Exhaust => "耗尽",
             PlanChoiceEffect.Transform => "变换",
+            PlanChoiceEffect.GenerateToHand => "选择",
             _ => choice.Effect.ToString(),
         };
         return $"{source}：{effect} {string.Join('、', choice.Cards.Select(card => card.Title))}";
@@ -254,6 +261,7 @@ internal sealed record SolverOverlaySnapshot(
         SearchBoundaryReason.UnsupportedEffect => "未镜像死亡效果",
         SearchBoundaryReason.DynamicResolution => "真实结算后重搜",
         SearchBoundaryReason.PendingChoice => "展开选牌",
+        SearchBoundaryReason.EventDefeat => "事件挑战失败",
         SearchBoundaryReason.NodeLimit => "节点上限",
         SearchBoundaryReason.TurnLimit => "回合上限",
         SearchBoundaryReason.TimeLimit => "时间预算",

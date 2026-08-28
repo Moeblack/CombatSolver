@@ -1446,9 +1446,10 @@ internal sealed partial class UnattendedTestRunner
             ? new TurnStartChoiceCursor(null)
             : TurnStartChoiceCursor.ForAutomaticPolicy(request =>
             {
-                CardChoiceSpec spec = request.Spec
-                    ?? throw new InvalidOperationException(
-                        $"测试动作选牌 {request.SourceId}/{request.Effect} 缺少候选定义。");
+                CardChoiceSpec spec = TurnStartChoiceSupport.BuildSpec(
+                    simulator,
+                    card.Preview.Owner,
+                    request);
                 foreach (string excludedCardId in expectedExcludedChoiceCardIds ?? [])
                 {
                     if (spec.Options.Any(option => option.Preview.Id.Entry.Equals(

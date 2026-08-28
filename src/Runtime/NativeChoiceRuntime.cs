@@ -307,6 +307,26 @@ internal sealed class NativeChoiceSession : IDisposable
         int planIndex = 0;
         await foreach (NativeChoiceRequest request in _requests.Reader.ReadAllAsync(token))
         {
+            if (request.Options.Count == 0
+                && request.MinSelect == 0
+                && request.MaxSelect == 0)
+            {
+                bool consumedEmptyPlan = planIndex < plans.Count
+                    && plans[planIndex].Cards.Count == 0;
+                if (consumedEmptyPlan)
+                {
+                    planIndex++;
+                    if (planIndex == plans.Count)
+                        _allPlansConsumed.TrySetResult();
+                }
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] NATIVE_CHOICE_NO_OP owner={Owner} sequence={request.Sequence} " +
+                    $"surface={request.Surface} source={request.SourceId} " +
+                    $"consumed_empty_plan={consumedEmptyPlan}");
+                NativeChoiceRuntime.RecordTrace(this, request, "NoOp");
+                continue;
+            }
+
             if (planIndex >= plans.Count)
             {
                 throw new InvalidOperationException(

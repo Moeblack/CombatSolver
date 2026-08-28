@@ -36,9 +36,9 @@ internal sealed partial class SimulatedCombatState
             _energySpentThisTurn = _energySpentThisTurn?.Fork(),
             _starsGainedThisTurn = _starsGainedThisTurn?.Fork(),
             _nonHandDrawsThisTurn = _nonHandDrawsThisTurn?.Fork(),
+            _cardPlaysStartedThisTurn = _cardPlaysStartedThisTurn?.Fork(),
             _enemiesIntendingAttack = _enemiesIntendingAttack?.Fork(),
             _hasPredictedEnemyIntents = _hasPredictedEnemyIntents,
-            _ringingCardPlayed = _ringingCardPlayed?.Fork(),
             _playerTurnNumbers = _playerTurnNumbers?.Fork(),
             _knowledgeDemonCurseCounters = _knowledgeDemonCurseCounters?.Fork(),
             _monsterAiStates = _monsterAiStates?.Fork(),
@@ -54,8 +54,10 @@ internal sealed partial class SimulatedCombatState
             _nextCreatureId = _nextCreatureId,
             _roundNumber = _roundNumber,
             _currentSide = _currentSide,
+            _battlewornDummyTimedOut = _battlewornDummyTimedOut,
             _rootMaterialized = _rootMaterialized,
             _statefulRelicStates = _statefulRelicStates?.Fork(),
+            _simulatedOsties = _simulatedOsties?.Fork(),
             _simulatedOstyMaxHp = _simulatedOstyMaxHp?.Fork(),
             _cardsPlayedThisTurn = _cardsPlayedThisTurn?.Fork(),
             _fetchCardsPlayedThisTurn = _fetchCardsPlayedThisTurn?.Fork(),
@@ -71,6 +73,14 @@ internal sealed partial class SimulatedCombatState
 
         if (_addedPowerInstances is not null)
             fork._addedPowerInstances = _addedPowerInstances.Select(power => ForkPower(power, context)).ToList();
+        if (_rootMultiInstancePowerClones is not null)
+        {
+            fork._rootMultiInstancePowerClones = new(
+                _rootMultiInstancePowerClones.Count,
+                ReferenceEqualityComparer.Instance);
+            foreach ((PowerModel source, PowerModel clone) in _rootMultiInstancePowerClones)
+                fork._rootMultiInstancePowerClones.Add(source, context.RemapOrSelf(clone));
+        }
         if (_powers is not null)
         {
             fork._powers = new Dictionary<(MegaCrit.Sts2.Core.Entities.Creatures.Creature Owner, Type Type), PowerModel>(

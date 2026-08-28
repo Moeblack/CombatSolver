@@ -281,7 +281,7 @@ internal static class ModifyDamageMirrors
     {
         if (!context.Props.IsPoweredAttack() ||
             context.CardSource is null ||
-            context.Dealer != relic.Owner.Creature && context.Dealer != relic.Owner.Osty)
+            context.Dealer != relic.Owner.Creature && context.Dealer != context.State.GetOsty(relic.Owner))
         {
             return 1;
         }

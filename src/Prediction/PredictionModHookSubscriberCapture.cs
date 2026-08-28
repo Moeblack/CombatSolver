@@ -159,19 +159,24 @@ internal sealed class PredictionModHookSubscriberCapture
         string scope)
     {
         Type type = subscriber.GetType();
+        var mod = AssemblyInfo.ModForType(type, out bool isBaseGame);
         if (PredictionModModelSupport.IsBaseLibCardModifier(subscriber)
             || KnownPreRootSubscriberTypeNames.Contains(type.FullName ?? string.Empty)
-            || IsNonGameplayMod(type))
+            || (!isBaseGame && mod?.manifest?.affectsGameplay is false))
         {
             return;
         }
+        if (!isBaseGame
+            && mod?.manifest?.id is { Length: > 0 } modId
+            && !string.Equals(modId, Entry.ModId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IncompatibleGameplayModException(
+                modId,
+                mod.manifest.name ?? string.Empty,
+                type.FullName ?? type.Name,
+                scope);
+        }
         throw new PredictionUnsupportedException(
             $"Unsupported gameplay ModHelper {scope} subscriber {type.FullName}.");
-    }
-
-    private static bool IsNonGameplayMod(Type type)
-    {
-        var mod = AssemblyInfo.ModForType(type, out bool isBaseGame);
-        return !isBaseGame && mod?.manifest?.affectsGameplay is false;
     }
 }

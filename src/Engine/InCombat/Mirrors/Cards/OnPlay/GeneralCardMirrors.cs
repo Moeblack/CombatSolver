@@ -62,7 +62,7 @@ internal static class GeneralCardMirrors
 
         if (card.Tags.Contains(CardTag.OstyAttack))
         {
-            if (card.Owner.Osty is not { } osty || !context.State.GetCreature(osty).IsAlive)
+            if (context.State.GetOsty(card.Owner) is not { } osty || !context.State.GetCreature(osty).IsAlive)
             {
                 return;
             }

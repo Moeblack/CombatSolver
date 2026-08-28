@@ -48,13 +48,13 @@ internal static class CardDrawCardMirrors
 
     public static void FetchOnPlay(Fetch card, CardOnPlayMirrorContext context)
     {
-        if (card.Owner.Osty is not { } osty || context.State.GetCreature(osty).IsDead)
+        if (context.State.GetOsty(card.Owner) is not { } osty || context.State.GetCreature(osty).IsDead)
         {
             return;
         }
 
         DamageCmd.Attack(card.DynamicVars.OstyDamage.BaseValue)
-            .FromOsty(card.Owner.Osty, card, context.CardPlay)
+            .FromOsty(osty, card, context.CardPlay)
             .Targeting(context.Target)
             .Simulate(context.Simulator);
 

@@ -9,6 +9,6 @@
       "target": "CheckedEnemy",
       "amount": 1
     },
-    "expectedSearchBoundary": "DynamicResolution"
+    "expectedSearchBoundary": "EventDefeat"
   }
 ]

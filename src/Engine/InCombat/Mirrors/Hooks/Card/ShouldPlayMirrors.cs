@@ -35,6 +35,7 @@ internal static class ShouldPlayMirrors
         var registry = new Registry(ShouldPlay);
 
         registry.Register<ChainsOfBindingPower>(HandleChainsOfBindingPower);
+        registry.Register<RingingPower>(HandleRingingPower);
         registry.Register<SlothPower>(HandleSlothPower);
 
         registry.Register<VelvetChoker>(HandleVelvetChoker);
@@ -56,6 +57,19 @@ internal static class ShouldPlayMirrors
         return context.Card.Preview.Owner.Creature != power.Owner ||
             context.StateStore.Get(power, () => new CounterPredictionState(power._cardsPlayedThisTurn)).Value <
             power.Amount;
+    }
+
+    private static bool HandleRingingPower(RingingPower power, ShouldPlayMirrorContext context)
+    {
+        if (context.Card.Preview.Owner.Creature != power.Owner
+            || context.Card.Preview.Affliction is not Ringing)
+        {
+            return true;
+        }
+
+        SimulatedCombatState combat = context.CombatState as SimulatedCombatState
+            ?? throw new InvalidOperationException("昏眩出牌限制缺少分支出牌历史。");
+        return combat.GetCardPlaysStartedThisTurn(power.Owner) == 0;
     }
 
     private static bool HandleVelvetChoker(VelvetChoker relic, ShouldPlayMirrorContext context)

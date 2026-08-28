@@ -116,7 +116,7 @@ internal static class BespokeCardMirrors
 
     public static void SacrificeOnPlay(Sacrifice card, CardOnPlayMirrorContext context)
     {
-        if (card.Owner.Osty is not { } osty || !context.State.GetCreature(osty).IsAlive)
+        if (context.State.GetOsty(card.Owner) is not { } osty || !context.State.GetCreature(osty).IsAlive)
             return;
         int block = context.State.GetCreature(osty).MaxHp * 3;
         context.Simulator.Kill(osty, force: true);

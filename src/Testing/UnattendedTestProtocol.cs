@@ -117,6 +117,7 @@ internal sealed class UnattendedTestRequest
     public string? ExpectedInitialTurnStartChoiceStateExcludes { get; init; }
     public int? ExpectedInitialSetupChoiceCountAtLeast { get; init; }
     public string? ExpectedInitialSetupChoiceSourceId { get; init; }
+    public string? ExpectedInitialSetupChoiceTextStartsWith { get; init; }
     public bool StopAfterInitialSetupAssertion { get; init; }
     public bool StopAfterInitialSolverResultAssertion { get; init; }
     public bool ExpectedFullAutoPausedAtDeathTurn { get; init; }

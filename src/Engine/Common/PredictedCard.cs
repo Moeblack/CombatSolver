@@ -137,6 +137,6 @@ internal sealed class PredictedCard : IComparable<PredictedCard>
 
     public int CompareTo(PredictedCard? other)
     {
-        return _original.CompareTo(other?.Original);
+        return Preview.CompareTo(other?.Preview);
     }
 }

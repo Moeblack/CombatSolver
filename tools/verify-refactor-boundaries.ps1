@@ -105,10 +105,6 @@ $forkBoundaryChecks = @(
         Text = "Cannot fork Pen Nib"
     },
     @{
-        Path = Join-Path $repositoryRoot "src\Engine\InCombat\Mirrors\Hooks\Card\CardPlayHookPredictionStates.cs"
-        Text = "Cannot fork Vambrace"
-    },
-    @{
         Path = Join-Path $repositoryRoot "src\Engine\InCombat\Mirrors\Hooks\Card\AfterCardPlayedMirrors.cs"
         Text = "Cannot fork Curl Up"
     }
@@ -116,6 +112,16 @@ $forkBoundaryChecks = @(
 foreach ($check in $forkBoundaryChecks) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing Fork boundary '$($check.Text)'")
+    }
+}
+
+$cardPlayPredictionStatePath = Join-Path $repositoryRoot "src\Engine\InCombat\Mirrors\Hooks\Card\CardPlayHookPredictionStates.cs"
+foreach ($stableVambraceState in @(
+    "internal sealed class VambracePredictionState(Vambrace relic) : IPredictionStateForkable",
+    "public CardModel? TriggeringCard { get; set; } = relic._triggeringCard;",
+    "public bool BlockGainedThisCombat { get; set; } = relic._blockGainedThisCombat;")) {
+    if (-not (Select-String -LiteralPath $cardPlayPredictionStatePath -SimpleMatch $stableVambraceState -Quiet)) {
+        $violations.Add("${cardPlayPredictionStatePath}: missing stable Vambrace state '$stableVambraceState'")
     }
 }
 

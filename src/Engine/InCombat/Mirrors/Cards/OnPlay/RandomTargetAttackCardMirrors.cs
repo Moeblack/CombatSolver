@@ -40,7 +40,7 @@ internal static class RandomTargetAttackCardMirrors
 
     public static void SweepingGazeOnPlay(SweepingGaze card, CardOnPlayMirrorContext context)
     {
-        if (card.Owner.Osty is { } osty && context.State.GetCreature(osty).IsAlive)
+        if (context.State.GetOsty(card.Owner) is { } osty && context.State.GetCreature(osty).IsAlive)
         {
             DamageCmd.Attack(card.DynamicVars.OstyDamage.BaseValue)
                 .FromOsty(osty, card, context.CardPlay)

@@ -118,6 +118,11 @@ internal sealed class CombatPredictionState
         return state;
     }
 
+    public Creature? GetOsty(Player player)
+        => CombatState is ICombatPredictionPetState pets
+            ? pets.GetOsty(player)
+            : player.Osty;
+
     public bool IsHittable(Creature creature)
     {
         if (_removedCreatures.Contains(creature) || !GetCreature(creature).IsAlive)
