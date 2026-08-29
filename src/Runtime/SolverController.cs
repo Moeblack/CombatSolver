@@ -1312,7 +1312,9 @@ internal static class SolverController
                     && (_stopFullAutoOnDeathTurn || _stopFullAutoOnWorseRecalculation))
                 {
                     await UnattendedTestRunner.ApplyScheduledPreEndTurnDriftAsync(state, turn);
-                    LiveEndTurnRiskProjection liveRisk = LiveEndTurnRiskEvaluator.Evaluate(state);
+                    LiveEndTurnRiskProjection liveRisk = LiveEndTurnRiskEvaluator.Evaluate(
+                        state,
+                        plannedEndTurn.TurnStartChoices);
                     int plannedHpLoss = result.HpLostByTurn.GetValueOrDefault(turn);
                     bool worsened = liveRisk.HpLost > plannedHpLoss;
                     if ((_stopFullAutoOnDeathTurn && liveRisk.PlayerDead)

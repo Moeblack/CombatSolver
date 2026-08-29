@@ -279,6 +279,9 @@ internal sealed class UnattendedMonsterMoveCheck
     public UnattendedCardPlayCheck[] CardPlayChecksAfterMove { get; init; } = [];
     public UnattendedCardPlayCheck[] CardPlayChecksAfterPlayerSideTurnEnd { get; init; } = [];
     public UnattendedCardPlayCheck[] CardPlayChecksAfterPlayerSetup { get; init; } = [];
+    public string? LiveEndTurnRiskCardId { get; init; }
+    public string LiveEndTurnRiskChoiceSourceId { get; init; } = string.Empty;
+    public string[] LiveEndTurnRiskChoiceCardIds { get; init; } = [];
     public UnattendedPowerInjection? PowerBeforeMove { get; init; }
     public UnattendedPowerInjection[] PowersBeforeMove { get; init; } = [];
     public UnattendedPowerInjection[] PowersAfterMove { get; init; } = [];
@@ -323,6 +326,8 @@ internal sealed class UnattendedCardPlayCheck
     public bool UseChoice { get; init; }
     public string[] ChoiceCardIds { get; init; } = [];
     public string[] ExpectedExcludedChoiceCardIds { get; init; } = [];
+    public string? ExpectedCardIdAfterPlay { get; init; }
+    public string? ExpectedCardPileAfterPlay { get; init; }
 }
 
 internal sealed class UnattendedPowerInjection

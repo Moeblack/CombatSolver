@@ -18,11 +18,34 @@ internal readonly record struct LiveEndTurnRiskProjection(
 
 internal static class LiveEndTurnRiskEvaluator
 {
-    public static LiveEndTurnRiskProjection Evaluate(CombatState state)
+    public static LiveEndTurnRiskProjection Evaluate(
+        CombatState state,
+        IReadOnlyList<PlanCardChoice>? turnStartChoices)
     {
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("结束回合复核找不到本地玩家。");
         SimulatedCombatState combat = new(state);
+        PlanCardChoice[] roundChoices = turnStartChoices?
+            .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
+            .ToArray() ?? [];
+        combat.BeginActionChoices(roundChoices);
+        try
+        {
+            LiveEndTurnRiskProjection projection = Evaluate(player, combat);
+            if (combat.HasPendingChoice)
+                throw new InvalidOperationException("结束回合复核产生了路线未提供的选牌。");
+            return projection;
+        }
+        finally
+        {
+            combat.EndActionChoices();
+        }
+    }
+
+    private static LiveEndTurnRiskProjection Evaluate(
+        Player player,
+        SimulatedCombatState combat)
+    {
         CombatPredictionSimulator simulator = new(combat);
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(player.Creature);
         int hpBefore = simulatedPlayer.CurrentHp;

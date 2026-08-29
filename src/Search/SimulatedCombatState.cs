@@ -516,14 +516,14 @@ internal sealed partial class SimulatedCombatState
     {
         if (amount == 0)
             return;
-        T canonical = ModelDb.Power<T>();
-        amount = ModifyPowerAmountForRelics(canonical, target, amount, applier);
-        if (canonical.GetTypeForAmount(amount) == MegaCrit.Sts2.Core.Entities.Powers.PowerType.Debuff
+        T incoming = CreatePowerForApplication<T>(target, target, applier);
+        amount = ModifyPowerAmountForRelics(incoming, target, amount, applier);
+        if (incoming.GetTypeForAmount(amount) == MegaCrit.Sts2.Core.Entities.Powers.PowerType.Debuff
             && ConsumeArtifact(target))
         {
             return;
         }
-        PowerModel simulated = GetOrCreatePower(target, canonical, applier);
+        PowerModel simulated = GetOrCreatePower(target, incoming, applier);
         int previousAmount = simulated._amount;
         simulated._amount = Math.Clamp(simulated._amount + amount, -999_999_999, 999_999_999);
         InvalidateHookListeners();
@@ -726,13 +726,13 @@ internal sealed partial class SimulatedCombatState
     {
         if (amount == 0)
             return;
-        T canonical = ModelDb.Power<T>();
-        if (canonical.GetTypeForAmount(amount) == MegaCrit.Sts2.Core.Entities.Powers.PowerType.Debuff
+        T incoming = CreatePowerForApplication<T>(owner, target, applier);
+        if (incoming.GetTypeForAmount(amount) == MegaCrit.Sts2.Core.Entities.Powers.PowerType.Debuff
             && ConsumeArtifact(target))
         {
             return;
         }
-        PowerModel simulated = GetOrCreatePower(owner, canonical, applier);
+        PowerModel simulated = GetOrCreatePower(owner, incoming, applier);
         simulated._target = target;
         simulated._amount = Math.Clamp(simulated._amount + amount, -999_999_999, 999_999_999);
         InvalidateHookListeners();
@@ -784,7 +784,18 @@ internal sealed partial class SimulatedCombatState
     public void ResetTenderCardsPlayed(Creature owner)
         => (_tenderCardsPlayed ??= [])[owner] = 0;
 
-    private PowerModel GetOrCreatePower<T>(Creature target, T canonical, Creature? applier)
+    private static T CreatePowerForApplication<T>(Creature owner, Creature target, Creature? applier)
+        where T : PowerModel
+    {
+        T incoming = PredictionUtils.CloneModelForSimulation(ModelDb.Power<T>());
+        incoming._owner = owner;
+        incoming._applier = applier;
+        incoming._target = target;
+        incoming._amount = 0;
+        return incoming;
+    }
+
+    private PowerModel GetOrCreatePower<T>(Creature target, T prototype, Creature? applier)
         where T : PowerModel
     {
         (Creature, Type) key = (target, typeof(T));
@@ -794,7 +805,7 @@ internal sealed partial class SimulatedCombatState
         T? existingPower = _rootCreatures.Contains(target) ? null : target.GetPower<T>();
         simulated = existingPower != null
             ? PredictionUtils.CloneModelForSimulation(existingPower)
-            : canonical.ToMutable();
+            : PredictionUtils.CloneModelForSimulation(prototype);
         simulated._owner = target;
         simulated._applier = existingPower?.Applier ?? applier;
         simulated._target = target;
