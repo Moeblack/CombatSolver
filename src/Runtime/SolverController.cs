@@ -211,7 +211,12 @@ internal static class SolverController
             $"[CombatSolver/Test] TURN_SETUP_RESULT_ACCEPTED turn={player.PlayerCombatState.TurnNumber}");
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
         if (_combat.FullAutoEnabled)
-            TaskHelper.RunSafely(StartFullAutoAfterTurnSetupAsync(host, state, result));
+        {
+            Task fullAutoTask = StartFullAutoAfterTurnSetupAsync(host, state, result);
+            if (UnattendedAsyncActivityTracker.IsRequestActive)
+                fullAutoTask = UnattendedAsyncActivityTracker.Track(fullAutoTask);
+            TaskHelper.RunSafely(fullAutoTask);
+        }
         return true;
     }
 
@@ -511,7 +516,7 @@ internal static class SolverController
                 settings.DeepProfile));
 
             setupStage = "worker_schedule";
-            Task.Run(() =>
+            Task<SolverResult> solveTask = Task.Run(() =>
             {
                 Entry.Logger.Info($"[CombatSolver/Test] SEARCH_WORKER_START generation={generation} thread={System.Environment.CurrentManagedThreadId} main_thread={NGame.IsMainThread()}");
                 Thread worker = Thread.CurrentThread;
@@ -535,9 +540,40 @@ internal static class SolverController
                 {
                     worker.Priority = previousPriority;
                 }
-            }, token).ContinueWith(task =>
+            }, token);
+            if (!UnattendedAsyncActivityTracker.IsRequestActive)
             {
-                SolverDispatcher.Post(() => CompleteSearch(host, search, task));
+                // Preserve the production continuation path exactly. The extra lifecycle
+                // ownership is needed only while a reusable unattended request is active.
+                solveTask.ContinueWith(task =>
+                {
+                    SolverDispatcher.Post(() => CompleteSearch(host, search, task));
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                return;
+            }
+
+            IDisposable? unattendedActivity = UnattendedAsyncActivityTracker.BeginActivity();
+            solveTask.ContinueWith(task =>
+            {
+                try
+                {
+                    SolverDispatcher.Post(() =>
+                    {
+                        try
+                        {
+                            CompleteSearch(host, search, task);
+                        }
+                        finally
+                        {
+                            unattendedActivity?.Dispose();
+                        }
+                    });
+                }
+                catch
+                {
+                    unattendedActivity?.Dispose();
+                    throw;
+                }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
         catch (Exception ex)
@@ -842,7 +878,11 @@ internal static class SolverController
         LastSearchFailureForTesting = null;
         BattleDamageTracker.Reset();
         SolverOverlay.Hide();
-        TaskHelper.RunSafely(SearchGcPolicy.ReclaimIfPendingAsync(reason));
+        // The unattended protocol performs one reclaim only after the game and every tracked
+        // callback are quiescent. Starting a fire-and-forget reclaim here would make the 0.18
+        // serialized reclaim chain request a second collection when the protocol joins it.
+        if (!UnattendedAsyncActivityTracker.IsRequestActive)
+            TaskHelper.RunSafely(SearchGcPolicy.ReclaimIfPendingAsync(reason));
         if (hadState)
             Entry.Logger.Info($"[CombatSolver/Test] RESET reason={reason}");
     }
@@ -1136,13 +1176,16 @@ internal static class SolverController
             action.Turn == result.StartTurnNumber && action.IsExecutable);
         SolverSettingsSnapshot deploymentSettings = SolverSettings.Capture();
         SolverOverlay.ShowDeploying(host, result.StartTurnNumber, actionCount);
-        TaskHelper.RunSafely(DeployCurrentTurn(
+        Task deploymentTask = DeployCurrentTurn(
             host,
             state,
             result,
             deploymentSettings,
             deployment,
-            deployment.Cancellation.Token));
+            deployment.Cancellation.Token);
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            deploymentTask = UnattendedAsyncActivityTracker.Track(deploymentTask);
+        TaskHelper.RunSafely(deploymentTask);
     }
 
     private static async Task DeployCurrentTurn(

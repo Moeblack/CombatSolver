@@ -79,6 +79,8 @@ internal sealed partial class UnattendedTestRunner
             || _request.ExpectedInitialOnlyDeathRoutesFound.HasValue
             || _request.ExpectedInitialCombatEndedTurn.HasValue
             || _request.ExpectedInitialDeathTurn.HasValue
+            || _request.ExpectedInitialDeathTurnAtLeast.HasValue
+            || _request.ExpectedInitialFinalEnemyHpAtMost.HasValue
             || _request.ExpectedInitialActEndingBoss.HasValue
             || _request.ExpectedFullAutoPausedAtDeathTurn
             || _request.ExpectedInitialSetupChoiceCountAtLeast.HasValue
@@ -392,6 +394,19 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException(
                 $"首轮预计死亡回合为 {result.DeathTurn?.ToString() ?? "-"}，预期为 {expectedDeathTurn}。");
+        }
+        if (_request.ExpectedInitialDeathTurnAtLeast is { } minimumDeathTurn
+            && result.DeathTurn is { } actualDeathTurn
+            && actualDeathTurn < minimumDeathTurn)
+        {
+            throw new InvalidOperationException(
+                $"首轮预计死亡回合为 {actualDeathTurn}，早于预期下限 {minimumDeathTurn}。");
+        }
+        if (_request.ExpectedInitialFinalEnemyHpAtMost is { } maximumFinalEnemyHp
+            && result.Snapshot.EnemyHp > maximumFinalEnemyHp)
+        {
+            throw new InvalidOperationException(
+                $"首轮路线终局敌方总生命为 {result.Snapshot.EnemyHp}，超过预期上限 {maximumFinalEnemyHp}。");
         }
         if (_request.ExpectedInitialActEndingBoss is { } expectedActEndingBoss
             && result.IsActEndingBoss != expectedActEndingBoss)

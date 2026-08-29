@@ -185,6 +185,8 @@ internal static class PlayerTurnSetupCoordinator
         }
 
         task = RunSetupAsync(manager, turnState, player, choiceContext, combat, replayChoices);
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            task = UnattendedAsyncActivityTracker.Track(task);
         return true;
     }
 
@@ -205,6 +207,8 @@ internal static class PlayerTurnSetupCoordinator
             return false;
         }
         task = RunAutoPrePlayAsync(manager, turnState, choiceContext, setupTask, player, active);
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            task = UnattendedAsyncActivityTracker.Track(task);
         return true;
     }
 

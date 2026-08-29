@@ -3,6 +3,6 @@
     "monsterId": "BigDummy",
     "moveId": "NOTHING",
     "clearPlayerHandBeforeMove": true,
-    "expectedSearchBoundary": "DynamicResolution"
+    "expectedSearchBoundary": "None"
   }
 ]

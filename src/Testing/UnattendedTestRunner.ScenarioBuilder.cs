@@ -83,7 +83,6 @@ internal sealed partial class UnattendedTestRunner
 
             runner.SetStage("enter_encounter");
             EncounterModel mutableEncounter = encounter.ToMutable();
-            mutableEncounter.DebugRandomizeRng();
             await RunManager.Instance.EnterRoomDebug(
                 RoomType.Monster,
                 MapPointType.Unassigned,

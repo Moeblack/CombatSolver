@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Models.Monsters;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.ValueProps;
+using CombatSolver.Engine.InCombat.Mirrors;
 using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
@@ -27,6 +28,8 @@ internal static class MonsterMoveSemantics
                     ?? throw new InvalidOperationException("预测攻击的所有者不是怪物。"))
                 .WithHitCount(0)
             : null;
+        if (attackContext != null && combat.GetAmount<VigorPower>(move.Owner) > 0)
+            HookMirrors.BeforeAttack(simulator, attackContext);
         foreach (ForecastAttackHit hit in move.AttackHits)
         {
             int baseDamage = combat.AdjustMonsterMoveDamage(move.Owner, move.Move.Id, hit.BaseDamage);
@@ -66,7 +69,23 @@ internal static class MonsterMoveSemantics
                 combat.ForceStunnedMove(move.Owner, "HEADBUTT_MOVE");
             combat.StunNextMove(move.Owner);
         }
-        MonsterMoveEffects.Apply(simulator, combat, move, player, plannedChoices);
+        MonsterMoveEffects.Apply(
+            simulator,
+            combat,
+            move,
+            player,
+            out bool killedOwner,
+            plannedChoices);
+        if (killedOwner
+            && move.Owner.CombatId is uint moveOwnerCombatId
+            && !processedEnemyDeaths.Contains(moveOwnerCombatId))
+        {
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                combat,
+                combat.KnownEnemies,
+                processedEnemyDeaths);
+        }
         simulator.SynchronizePowerAmountPredictionStates();
         PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, combat);
         combat.NormalizeAeonglassWithers(simulator);

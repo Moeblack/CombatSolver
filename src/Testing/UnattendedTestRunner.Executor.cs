@@ -260,6 +260,28 @@ internal sealed partial class UnattendedTestRunner
 
             runner.SetStage("wait_combat_end");
             bool expectedReuseObserved = !request.ExpectedReusedTurn.HasValue;
+            bool ObserveExpectedReuse()
+            {
+                SolverResult? latestResult = SolverController.LastCompletedResultForTesting;
+                int? observedReusedTurn = SolverController.LastReusedTurnForTesting
+                    ?? (latestResult?.WasReused == true
+                        ? latestResult.StartTurnNumber
+                        : null);
+                if (observedReusedTurn != request.ExpectedReusedTurn)
+                    return false;
+                int observedProjectedBattleHpLost =
+                    SolverController.LastReusedProjectedBattleHpLostForTesting
+                    ?? latestResult?.ProjectedBattleHpLost
+                    ?? throw new InvalidOperationException("复用测试没有记录整场预计战损。");
+                if (request.ExpectedReusedProjectedBattleHpLost is { } expectedReusedLoss
+                    && observedProjectedBattleHpLost != expectedReusedLoss)
+                {
+                    throw new InvalidOperationException(
+                        $"第 {observedReusedTurn} 回合复用路线预计整场掉血 " +
+                        $"{observedProjectedBattleHpLost}，预期为 {expectedReusedLoss}。");
+                }
+                return true;
+            }
             bool stoppedAfterExpectedReuse = false;
             bool stoppedAfterExpectedPower = false;
             bool stoppedAfterDeathTurnPause = false;
@@ -299,31 +321,11 @@ internal sealed partial class UnattendedTestRunner
                     runner._completedChecks.Add($"UnexpectedReplanWarning:{maximumUnexpectedReplans}");
                     break;
                 }
-                SolverResult? latestResult = SolverController.LastCompletedResultForTesting;
-                int? observedReusedTurn = SolverController.LastReusedTurnForTesting
-                    ?? (latestResult?.WasReused == true
-                        ? latestResult.StartTurnNumber
-                        : null);
-                if (request.ExpectedReusedTurn.HasValue
-                    && observedReusedTurn == request.ExpectedReusedTurn)
-                {
-                    int observedProjectedBattleHpLost =
-                        SolverController.LastReusedProjectedBattleHpLostForTesting
-                        ?? latestResult?.ProjectedBattleHpLost
-                        ?? throw new InvalidOperationException("复用测试没有记录整场预计战损。");
-                    if (request.ExpectedReusedProjectedBattleHpLost is { } expectedReusedLoss
-                        && observedProjectedBattleHpLost != expectedReusedLoss)
-                    {
-                        throw new InvalidOperationException(
-                            $"第 {observedReusedTurn} 回合复用路线预计整场掉血 " +
-                            $"{observedProjectedBattleHpLost}，预期为 {expectedReusedLoss}。");
-                    }
-                    expectedReuseObserved = true;
-                }
+                if (!expectedReuseObserved)
+                    expectedReuseObserved = ObserveExpectedReuse();
                 if (request.StopAfterExpectedReuse && expectedReuseObserved)
                 {
                     stoppedAfterExpectedReuse = true;
-                    runner._completedChecks.Add($"Reuse:Turn={request.ExpectedReusedTurn}");
                     break;
                 }
                 if (request.StopAfterExpectedPlayerPower && expectedPlayerPowerObserved)
@@ -408,6 +410,10 @@ internal sealed partial class UnattendedTestRunner
                 runner.EnsureWithinDeadline();
                 await runner.NextFrameAsync();
             }
+            if (!expectedReuseObserved)
+                expectedReuseObserved = ObserveExpectedReuse();
+            if (expectedReuseObserved && request.ExpectedReusedTurn.HasValue)
+                runner._completedChecks.Add($"Reuse:Turn={request.ExpectedReusedTurn}");
             if (request.AssertDeploymentSpeedRestored
                 && fastModeBeforeDeployment is { } expectedFastMode)
             {

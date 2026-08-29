@@ -26,6 +26,15 @@ internal sealed record BranchMonsterStaticSnapshot(
     IReadOnlyDictionary<string, int> StaticIntValues,
     int TestSubjectBaseMultiClawCount)
 {
+    [ThreadStatic]
+    private static int _allowUnreachableConditionalsForTesting;
+
+    internal static IDisposable AllowUnreachableConditionalsForTesting()
+    {
+        _allowUnreachableConditionalsForTesting++;
+        return new UnreachableConditionalScope();
+    }
+
     public static BranchMonsterStaticSnapshot Capture(MonsterModel monster)
     {
         MonsterMoveStateMachine machine = monster.MoveStateMachine
@@ -51,9 +60,20 @@ internal sealed record BranchMonsterStaticSnapshot(
             }
             else if (state is ConditionalBranchState conditional)
             {
-                conditionals.Add(
-                    conditional.Id,
-                    conditional.GetNextState(monster.Creature, new Rng(0)));
+                try
+                {
+                    conditionals.Add(
+                        conditional.Id,
+                        conditional.GetNextState(monster.Creature, new Rng(0)));
+                }
+                catch (InvalidOperationException ex) when (
+                    _allowUnreachableConditionalsForTesting > 0
+                    && ex.Message == "No valid next state found.")
+                {
+                    // Monster differential fixtures can combine creatures from unrelated
+                    // encounters. Leave such an artificial branch unresolved; execution still
+                    // fails explicitly if the tested path actually reaches it.
+                }
             }
         }
         int baseMultiClawCount = monster.GetType().Name == "TestSubject"
@@ -65,6 +85,21 @@ internal sealed record BranchMonsterStaticSnapshot(
             conditionals,
             MonsterMoveEffects.CaptureStaticIntValues(monster),
             baseMultiClawCount);
+    }
+
+    private sealed class UnreachableConditionalScope : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+            _disposed = true;
+            if (_allowUnreachableConditionalsForTesting <= 0)
+                throw new InvalidOperationException("怪物条件分支测试作用域计数下溢。");
+            _allowUnreachableConditionalsForTesting--;
+        }
     }
 }
 

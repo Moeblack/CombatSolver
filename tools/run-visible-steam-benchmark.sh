@@ -7,7 +7,8 @@ Usage: tools/run-visible-steam-benchmark.sh [options]
 
 Options:
   --timeout-seconds SECONDS
-  --verify-baselib-card-modifier-boundary
+  --verify-base-lib-card-modifier-boundary
+  --verify-baselib-card-modifier-boundary  Deprecated compatibility alias
   --steam-root DIRECTORY
   --steam-command FILE
   --game-root DIRECTORY
@@ -50,7 +51,7 @@ while (($# > 0)); do
             timeout_seconds="${1#*=}"
             shift
             ;;
-        --verify-baselib-card-modifier-boundary)
+        --verify-base-lib-card-modifier-boundary|--verify-baselib-card-modifier-boundary)
             verify_baselib_card_modifier_boundary=true
             shift
             ;;

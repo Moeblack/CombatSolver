@@ -209,6 +209,17 @@ src/Engine/InCombat/Mirrors/Hooks/Card/CardPlayHookPredictionStates.cs	Cannot fo
 src/Engine/InCombat/Mirrors/Hooks/Card/AfterCardPlayedMirrors.cs	Cannot fork Curl Up
 EOF
 
+search_gc_policy_path="$repository_root/src/Runtime/SearchGcPolicy.cs"
+for gc_chain_rule in \
+    'return WaitForReclaimChainAsync(_reclaimTask)' \
+    'failure == null && _reclaimRequired'; do
+    require_fixed "$search_gc_policy_path" "$gc_chain_rule" 'missing serialized reclaim-chain rule'
+done
+forbid_fixed \
+    "$search_gc_policy_path" \
+    'ReclaimAfterActiveCheckpointAsync' \
+    'recursive reclaim handoff returned:'
+
 card_play_prediction_state_path="$repository_root/src/Engine/InCombat/Mirrors/Hooks/Card/CardPlayHookPredictionStates.cs"
 for stable_vambrace_state in \
     'internal sealed class VambracePredictionState(Vambrace relic) : IPredictionStateForkable' \
@@ -244,6 +255,13 @@ EOF
 for runtime_path in "${runtime_files[@]}"; do
     [[ "$runtime_path" == "$native_choice_runtime_path" ]] && continue
     forbid_fixed "$runtime_path" 'CardSelectCmd.PushSelector' 'production runtime bypasses native choice UI:'
+done
+
+card_targeting_path="$repository_root/src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardTargeting.cs"
+for targeting_rule in \
+    'Shiv when combat.GetAmount<FanOfKnivesPower>' \
+    'SovereignBlade when combat.GetAmount<SeekingEdgePower>'; do
+    require_fixed "$card_targeting_path" "$targeting_rule" 'missing simulated card targeting rule'
 done
 
 expected_beam_files=(
@@ -292,6 +310,11 @@ CombatBeamSolver.Terminal.cs	private List<SearchNode> AnnotateTurnOutcomes(List<
 CombatBeamSolver.StateEvaluation.cs	private SimulationSnapshot Snapshot(
 EOF
 
+require_fixed \
+    "$search_root/CombatBeamSolver.Expansion.cs" \
+    'repeatedAutoPlayBranchQuota' \
+    'repeated auto-play choices are missing their per-action branch quota:'
+
 beam_entry_path="$search_root/CombatBeamSolver.cs"
 forbid_fixed "$beam_entry_path" 'public SolverResult Solve()' 'Solve returned to the entry/field declaration file:'
 beam_retention_facade_path="$search_root/CombatBeamSolver.Retention.cs"
@@ -328,6 +351,8 @@ src/Search/SimulatedCombatState.cs	Live combat state can only be captured on the
 src/Search/SimulatedCombatState.cs	PredictionUtils.CreateRelic(relic, player)
 src/Search/SimulatedCombatState.cs	RunRngSet.FromSave(_runRngSnapshot)
 src/Prediction/RelicPredictionStateSupport.cs	CaptureRootState(
+src/Prediction/PowerPredictionStateSupport.cs	HardenedShellPredictionState(original)
+src/Search/SimulatedCombatState.cs	PowerPredictionStateSupport.CaptureRootState(simulator, mutable, power)
 src/Testing/UnattendedTestRunner.CombatRootSnapshot.cs	workerLiveConstructorRejected
 src/Engine/InCombat/Simulation/CombatPredictionSimulator.cs	ICombatPredictionRootMaterializable materializable
 src/Search/SimulatedCombatState.cs	.Select(PredictionUtils.CloneModelForSimulation)
@@ -338,8 +363,11 @@ src/Search/SimulatedCombatState.cs	MultiplayerScalingRunStateField.SetValue(deta
 src/Engine/InCombat/Mirrors/Hooks/Block/ModifyBlockMultiplicativeMirrors.cs	registry.Register<MultiplayerScalingModel>(HandleMultiplayerScaling)
 src/Prediction/PredictionModHookSubscriberCapture.cs	ModHelper.IterateAllRunStateSubscribers(runState)
 src/Engine/Common/PredictionUtils.cs	PredictionModModelSupport.CloneCardAttachedModels(source, clone)
-src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardPile.cs	limits.GetMaxHandSize(owner)
+src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardPile.cs	int maxHandSize = GetMaxHandSize(player)
+src/Engine/InCombat/Simulation/CombatPredictionSimulator.CardPile.cs	limits.GetMaxHandSize(player)
 src/Search/SimulatedCombatState.cs	.Take(standardCombatListenerCount)
+src/Search/SimulatedCombatState.cs	UpdatePowerListenerOrder(
+src/Search/SimulatedCombatState.Fork.cs	fork._powerListenerOrder =
 src/Engine/Common/PredictionModModelSupport.cs	ConditionalWeakTable<CardModel, object> BaseLibModifierCards
 src/Search/SimulatedCombatState.PowerRelics.cs	(_powerCardSources ??= []).Add(card)
 src/Search/SimulatedCombatState.cs	and not OrbModel

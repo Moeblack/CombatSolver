@@ -6,10 +6,14 @@
 
 ## 未发布：跨平台原生测试与无人复用提速
 
-- 五个仓库 PowerShell 工具继续作为 Windows 原生入口，并新增同名 Linux Bash 入口；构建、简中本地化读取、无人测试、可见 Steam 基准和结构门禁在两端均可使用本平台脚本。PowerShell 使用 PascalCase 参数，Bash 使用 GNU 风格长参数，两者都直接实现对应流程而不互相包装；协议或门禁变化需同步维护。项目与 CoverageCatalog 的默认依赖路径改为 Windows/Linux 条件路径，仍可用 `SteamRoot` 或 `local.props` 覆盖。
+- 六组仓库 PowerShell/Bash 同名工具分别作为 Windows 与 Linux 原生入口；构建、简中本地化读取、单项无人测试、完整无人矩阵、可见 Steam 基准和结构门禁均可使用本平台脚本。PowerShell 使用 PascalCase 参数，Bash 使用 GNU 风格长参数，两者直接实现对应流程而不互相包装；协议、矩阵或门禁变化需同步维护。项目与 CoverageCatalog 的默认依赖路径改为 Windows/Linux 条件路径，仍可用 `SteamRoot` 或 `local.props` 覆盖。
 - Linux 无人启动器使用独立 XDG 数据目录、关闭 Steam，并清空 `DISPLAY/WAYLAND_DISPLAY`。原生日志确认 `Rendering device name: N/A (headless)`、显存 `0B`，因此无人功能与搜索回归不受 XRDP 软件渲染影响；可见帧性能仍必须在正常 GPU 会话中验收。
-- 同一版 Mod 的请求默认复用一个游戏进程；Linux Bash 启动器默认请求 `Instant`，Windows PowerShell 启动器可用 `-HeadlessFastModeForTest Instant` 选择相同行为，完成后共享 runner 会恢复原设置。同一 Linux PID `66703` 的对照中，两个 `Normal` 请求分别为 `7098.0 ms`、`7064.5 ms`，`Instant` 为 `2917.7 ms`，本机稳定节省约 `4.16 s / 59%`。
-- Linux Bash 启动器的 marker 现在核对进程启动时刻、精确无头环境和 Mod DLL/manifest SHA-256；陈旧 marker 不会取得可见游戏所有权，重编译后自动停止旧无头进程并加载新程序集。两端共享 runner 在失败且请求退出时也以进程码 `1` 清理，不再额外等待 30 秒；Linux 定向失败回归约 `510 ms` 返回。
+- 单项启动器未请求退出时会保留游戏进程，供后续身份兼容的请求复用；完整矩阵则始终遵守文档中的有界生命周期组。Linux Bash 启动器默认请求 `Instant`，Windows PowerShell 启动器可用 `-HeadlessFastModeForTest Instant` 选择相同行为，完成后共享 runner 会恢复原设置。同一 Linux PID `66703` 的对照中，两个 `Normal` 请求分别为 `7098.0 ms`、`7064.5 ms`，`Instant` 为 `2917.7 ms`，本机稳定节省约 `4.16 s / 59%`。
+- Windows 与 Linux 无人启动器都只复用由本启动器 marker 管理且身份精确匹配的进程：核对可执行文件、进程启动身份、隔离数据路径及当前 Mod DLL/manifest SHA-256；Linux 还从 `/proc` 核对无头环境。陈旧 marker 只丢弃、不终止未取得所有权的进程；Mod 指纹变化时只停止身份匹配的旧无头进程。任何 Failed、协议/ready 超时或启动器中断都会把该进程判为不可复用并同步清理。
+- 可复用请求收到 Passed 后不会立即投递下一项：共享 runner 仅在无人协议请求作用域内追踪异步搜索、部署、回合准备与原生选牌任务；待其归零、游戏回到主菜单且 Run/Combat、动作队列、选牌、Search/Deploy 均空闲，连续两帧稳定后完成一次待处理回收，再稳定两帧，才原子写入带 `runId` 的 ready ACK。两端启动器只在收到 schema、`runId` 和 held 状态均匹配的 ACK 后返回成功；生产流程和 `ExitOnComplete` 请求不启用该追踪。
+- 新增 `run-headless-matrix.ps1/.sh`：启动首项前先精确清理上一次命令留下的 managed marker 进程，再按文档声明的 `KeepGameOpen / ExitOnComplete` 边界执行；同组请求只有收到上述安全 ACK 后才复用 PID，失败时销毁进程，缺失外部夹具而跳过的退出项也会执行边界清理，并把最终 cleanup/exit 计入矩阵墙钟。矩阵不再删除跨组退出边界：探索性无界复用虽把墙钟降至 `907.416 s`，却暴露一项旧的遭遇随机输入和一次 Godot 主菜单 PackedScene 原生崩溃，不能作为安全发布模式。
+- 无人场景不再调用游戏仅供调试控制台使用的 `EncounterModel.DebugRandomizeRng()`。该 API 会用当前 UTC 整秒覆盖请求的固定 seed，使相同 `SLIMES_WEAK` 命令在 `LeafSlimeM / TwigSlimeM` 之间漂移；现在恢复游戏正式的 `run seed + floor + encounter ID` 确定性遭遇 RNG，严格 `SoldHp=0` 断言保持不变。
+- Linux canonical 全量矩阵按文档原始生命周期运行 `228` 条命令：`225/225` 个可运行用例通过，`3` 个外部存档夹具缺失而跳过；期间 `52` 次精确冷启动、`173` 次安全复用，含最终清理的墙钟为 `1,787.606 s`（`29:47.606`）。这是全通过的发布边界基线，不与旧启动器那次包含 `20` 个失败且跨退出/失败边界复用进程的 `19:31.625` 作速度回归对比。
 - Linux 同一 PID 连续通过严格差分 `RINGING-HAVOC-AUTOPLAY-0160-FINAL`（`74da3eefb1e841219c5721323dad83d6`）、跨回合 `HEADBUTT-EMPTY-DISCARD-0160`（`dbd5cf92f61043b28d38978aa8307a6e`）、跨角色 `COSMIC-INDIFFERENCE-EMPTY-DISCARD-0160`（`8605ff494b604c019323e222f5247314`）和完整精灵药自动战斗（`261c9007073d40709a5f388d698063e9`）；最后一条退出后进程、marker 与临时 RitsuLib 投影均已清理。
 
 ## 0.18.0：集中修复批次
@@ -23,7 +27,7 @@
 - 原生选牌会话现在按会话身份结束。敌方回合选择完成后即使下一回合的选牌页面已在同一帧建立，旧会话仍能正常退出，新页面继续由最新会话接管，不再因异步恢复顺序抛出“没有位于活动栈顶”。
 - 单实例 Power 的监听顺序现在随真实生命周期变化：Power 归零时退出监听序列，再次施加时作为新实例排到当前序列末尾。知识恶魔长线中，第 1 回合移除、第 11 回合重新施加的既定事项不再错误排到光谱偏移之前；第 12 回合随机生成牌、选中牌和抽牌顺序与实机一致。完整问题包打到第 12 回合结束并保持计划外重算 `0`，runId `bdf89c2bf77341ee8da1c7f68b2d2161`。
 - 战斗根现在把 Power 的运行时内部状态同步到预测实例。鬼祟珊瑚群第 2 回合开始时会保留本回合已经受到的 `9` 点伤害，搜索不再多算 `3` 点可造成伤害；原问题包全自动在第 5 回合结束，计划外重算 `0`，runId `b126492a542c4c3d85bc47f0bffe0b1c`。
-- 情感芯片触发后会把“上个玩家回合失去过生命”的记录保留到当前回合结束，再按原版时序滚动到下一回合。原问题包全自动在第 5 回合结束，额外触发充能球造成的两次计划外重算归零，runId `e265c0a6887f48ea892c2e5489236721`。
+- 情感芯片触发后会把“上个玩家回合失去过生命”的记录保留到当前回合结束，再按原版时序滚动到下一回合。佩尔之眼等在敌方回合之前直接开始的额外玩家回合也会滚动该历史，但只在情感芯片仍处于活跃遗物区时生效。原问题包全自动在第 5 回合结束，额外触发充能球造成的两次计划外重算归零，runId `e265c0a6887f48ea892c2e5489236721`。
 - 搜索中的目标类型现在读取分支 Power 状态。打出刀扇后生成的小刀会按全体攻击规划、结算和部署，不再携带单体目标；永世沙漏问题包完整自动执行到第 7 回合，计划外重算 `0`，runId `e825a7e0fe244d5b8be45086c3f3d7ef`。
 - 战斗内存回收改为串行请求链。搜索等待正在执行的回收时只等待当前链；战斗重置在回收期间追加的请求由回收任务自身接续，下一次搜索不会与等待者互相制造新的 `before_next_search` 回收。实验体问题包修复前会约每 `275 ms` 回收一次直至超时，修复后只完成一次 No-GC 滚动回收并正常返回路线。
 - 回响形态现在按原版的“已开始出牌系列”决定重放。骚动开始结算后，它自动打出的集中打击能立即看到外层系列，不再被回响形态错误重放；重放自身的后续段不重复增加系列计数。最小原生/预测严格差分 runId `06550cd755b246c7b044865469541422` 通过；实验体原问题包完整自动执行到第 8 回合，计划外重算 `0`，runId `913d3393e919438fbf2d7635ce318b2b`。
@@ -802,7 +806,7 @@ Beam 中间排序与最终选择分离。稳健预设把 `1 HP` 约视为 `3` �
 - `src/Testing/`：原版游戏进程中的一次性无人测试协议、场景执行器与进度隔离补丁。
 - `src/UI/`：Godot 覆盖层 UI。
 - `docs/`：持续开发笔记与外部审计材料。
-- `tools/run-unattended-test.ps1`：直接启动使用独立用户目录、关闭 Steam 的 `--headless` 游戏进程，并等待同一 `runId` 的结构化结果；检测到玩家进程时拒绝启动。
+- `tools/run-unattended-test.ps1/.sh`：Windows/Linux 原生入口，直接启动使用独立用户目录、关闭 Steam 的 `--headless` 游戏进程，并等待同一 `runId` 的结构化结果与 ready ACK；检测到未取得所有权的玩家进程时拒绝启动。`tools/run-headless-matrix.ps1/.sh` 在此安全边界上执行文档全量矩阵。
 - `tools/CoverageCatalog/` 与 `coverage/`：稳定编号的战斗钩子目录、分类和完整性检查。
 - `local.props.example`：本机依赖路径配置示例；真实 `local.props` 不进入版本控制。
 
@@ -906,18 +910,18 @@ Beam 中间排序与最终选择分离。稳健预设把 `1 HP` 约视为 `3` �
 
 ## 9. 原版规则验证与无人闭环
 
-- 开发流程通过 `tools/run-unattended-test.ps1` 直接启动塔 2 自带的 `--headless` 进程；它仍运行原版游戏程序集和动作队列，不是自建 CLI 或重写规则。
-- 无人进程使用 `%LOCALAPPDATA%/CombatSolver/headless-runtime` 下的独立 `APPDATA/LOCALAPPDATA`，通过 `--force-steam=off` 避免 Steam 会话，并在隔离设置中显式允许 Mod 加载，绕过无界面的首次 Mod 警告确认。由于关闭 Steam 后游戏不扫描创意工坊，启动器只在 headless 生命周期内把当前游戏版本的 RitsuLib 投影到带所有权标记的本地临时目录，进程退出后删除；不会复制 RF 或其他创意工坊 Mod。脚本只复用 marker 明确记录的测试 PID；发现任何其他塔 2 进程时立即拒绝启动，不与玩家进程并发。
+- 开发流程通过 Windows `tools/run-unattended-test.ps1` 或 Linux `tools/run-unattended-test.sh` 直接启动塔 2 自带的 `--headless` 进程；它仍运行原版游戏程序集和动作队列，不是自建 CLI 或重写规则。
+- Windows 无人进程使用 `%LOCALAPPDATA%/CombatSolver/headless-runtime`，Linux 使用 `XDG_STATE_HOME/XDG_DATA_HOME/XDG_CONFIG_HOME`下的隔离目录；两者均通过 `--force-steam=off` 避免 Steam 会话，并在隔离设置中显式允许 Mod 加载，绕过无界面的首次 Mod 警告确认。由于关闭 Steam 后游戏不扫描创意工坊，启动器只在 headless 生命周期内把当前游戏版本的 RitsuLib 投影到带所有权标记的本地临时目录，进程确认退出后才删除；不会复制 RF 或其他创意工坊 Mod。脚本只复用 marker 明确记且可同时核对可执行文件、启动身份、隔离路径和 Mod 指纹的进程；无法证明 marker 陈旧时保留 marker/依赖并拒绝继续，发现任何未取得所有权的塔 2 进程也立即拒绝启动。
 - 一次性请求先写入同目录临时文件，再原子发布为 `user://combat_solver_test_request.json`，避免游戏读取半写入或被占用的请求。Mod 建立 `shouldSave:false` 的单人跑局，进入指定遭遇，通过原版 `CreatureCmd`、`CardPileCmd` 和动作队列注入状态，再调用求解器全自动。
-- 测试结果写入 `user://combat_solver_test_result.json`，必须以同一 `runId` 匹配；成功场景会清理跑局并回到主菜单，默认保留进程供下一场复用，只有最后一场显式要求时才退出。
+- 测试结果写入 `user://combat_solver_test_result.json`，必须以同一 `runId` 匹配。成功场景清理跑局并回到主菜单；需复用时，runner 必须等到请求异步活动归零、战斗状态稳定和待处理回收完成，再写入同一 `runId` 的 ready ACK。两端启动器只在该 ACK 校验通过后返回；成功且带退出选项的请求会确认进程退出，任何 Failed、静默/ACK 超时或启动器中断都会清理已取得所有权的进程。
 - 无人测试期间跳过原版 `UpdateProgressAfterCombatWon`，避免把测试遭遇和击杀写入玩家进度。首轮验证在加入隔离前已经把一次毛绒伏地虫胜利写入当前 Modded Profile；这次历史修改无法在没有事前快照的情况下可靠回滚。
 - 独立 headless 档案第一次进战斗时，原版“战斗基础”教学会创建缺少场景字段的无窗口节点并在 `NCombatRulesFtue.Start()` 空引用。无人请求活动期间将该纯 UI 教学的 `Create()` 直接返回空，与游戏自身的 `TestMode` 路径一致；普通玩家进程不受影响。
 - `SMOKE-001` 和隔离后的 `SMOKE-002` 已在塔 2 `0.111.0`、RitsuLib `0.5.13`、RandomForeseer `0.13.7` 的可见游戏进程中通过：铁甲战士进入 `FUZZY_WURM_CRAWLER_WEAK`，敌人设为 `1 HP`，手牌注入 `STRIKE_IRONCLAD`，求解器搜索并真实自动打出打击结束战斗。
 - `MONSTER-WATERFALL-001` 已通过两次，第二次带严格断言：给 `1 HP` 瀑布巨兽注入 `SteamEruptionPower:10`，求解器第一回合预测第二回合结束；实际依次执行 `ABOUT_TO_BLOW_MOVE`、`EXPLODE_MOVE` 并在第 `2` 回合结束，第二回合路线通过完整状态文本以 `0` 个新展开节点复用。
 - Godot 在进程退出时仍报告 `RID/resources still in use at exit`；第二轮已消除首轮的重复搜索、脚本注册错误和第三方 UI 清理错误，退出资源统计暂不作为场景失败条件。
-- 不对构建产物进行哈希验证；搜索内部允许使用双 64 位状态指纹。
+- 两端启动器在发布和复用 marker 时都校验当前 Mod DLL 与 manifest 的 SHA-256；搜索内部允许使用双 64 位状态指纹。
 - 每批实现先通过 Release 编译，再运行相关无人场景；无法自动表达的 UI、交互和长线策略仍进入人工待测清单。
-- 同一版 DLL 中能共享场景的验证项必须合并为一次 headless 游戏进程和一份批量请求；项目之间重置必要战斗状态，不退出游戏。只有重新编译后需要让游戏重新加载 Mod 时才重启进程。
+- 同一版 DLL 中能共享场景的验证项必须合并为一份批量请求，或由 `run-headless-matrix.ps1/.sh` 在每个 ready ACK 后安全复用同一进程；项目之间重置必要战斗状态。失败后不复用未知状态，DLL/manifest 指纹变化也必须重启进程。
 - 全自动场景可以在注入前清空当前手牌，并在战斗进行中锁存指定牌的真实完成记录；不能在战后历史已经清理后再推断该牌是否实际打出。
 - 适配批次默认按同一机制族聚合约 `20` 个以上覆盖目录条目；只有真实依赖或测试隔离要求才拆成更小批次，避免每批只关闭少量条目。
 - 版本号必须同时更新项目、Mod 清单和 `INIT` 日志。
@@ -935,6 +939,8 @@ Beam 中间排序与最终选择分离。稳健预设把 `1 HP` 约视为 `3` �
 - 已复现并修复的错误：在下面追加一条简短记录，写清原因，而不只写“已修复”。
 
 ## 11. 变更记录
+
+- `未发布`：保留 Windows PowerShell 工具并补齐六组同名 Linux Bash 入口，新增隔离 XDG 无人环境、双端进程身份/Mod 指纹校验、请求作用域异步静默与 ready ACK。矩阵启动器在文档声明的生命周期组内证明状态干净后复用进程，保留跨组进程隔离；无人遭遇恢复正式确定性 RNG。Linux canonical 全量 `225/225` 可运行用例通过、`3` 项外部夹具跳过，用时 `29:47.606`。
 
 - `0.13.8`：补齐 `ShrinkPower.AfterApplied` 的施加者名称状态，并把已实现的缩小施加者死亡移除语义登记为运行时补偿。缩小甲虫受控战斗第 `2-5` 回合全部精确复用，非预期重算与未补偿项均为 `0`。
 

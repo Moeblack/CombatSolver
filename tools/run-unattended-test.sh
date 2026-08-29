@@ -144,6 +144,8 @@ done
 add_option expected-initial-only-death-routes-found -1 int tri_bool
 add_option expected-initial-combat-ended-turn 0 int positive_int
 add_option expected-initial-death-turn 0 int positive_int
+add_option expected-initial-death-turn-at-least 0 int positive_int
+add_option expected-initial-final-enemy-hp-at-most -1 int nonnegative_int
 add_option expected-initial-act-ending-boss -1 int tri_bool
 add_option expected-initial-planned-choice-card-id "" string optional_string
 add_option expected-initial-turn-start-choice-turn 0 int positive_int
@@ -384,6 +386,7 @@ headless_log_path="$headless_root/godot-headless.log"
 launcher_log_path="$headless_root/launcher.log"
 request_path="$data_dir/combat_solver_test_request.json"
 result_path="$data_dir/combat_solver_test_result.json"
+ready_path="$data_dir/combat_solver_test_ready.json"
 lock_path="$headless_root/launcher.lock"
 
 [[ -x "$game_executable" ]] || runtime_error "game executable not found or not executable: $game_executable"
@@ -701,12 +704,16 @@ assert_dependency_path() {
         "refusing to manage a headless dependency outside the game mods directory: $dependency_full"
 }
 
+dependency_created_here=0
 install_headless_dependency() {
     assert_dependency_path
     if [[ -d "$headless_dependency_dir" ]]; then
         [[ -f "$headless_dependency_marker" ]] || runtime_error \
             "headless dependency target exists without its ownership marker: $headless_dependency_dir"
+        dependency_created_here=1
         rm -rf -- "$headless_dependency_dir"
+    else
+        dependency_created_here=1
     fi
     mkdir -p -- "$headless_dependency_dir"
     cp -f -- "$ritsu_variant_dll" "$headless_dependency_dir/STS2-RitsuLib.dll"
@@ -716,10 +723,21 @@ install_headless_dependency() {
 
 remove_headless_dependency() {
     assert_dependency_path
-    [[ -d "$headless_dependency_dir" ]] || return 0
+    if [[ ! -d "$headless_dependency_dir" ]]; then
+        dependency_created_here=0
+        return 0
+    fi
     [[ -f "$headless_dependency_marker" ]] || runtime_error \
         "refusing to remove a headless dependency without its ownership marker: $headless_dependency_dir"
     rm -rf -- "$headless_dependency_dir"
+    dependency_created_here=0
+}
+
+remove_directly_created_headless_dependency() {
+    assert_dependency_path
+    ((dependency_created_here == 1)) || return 0
+    [[ ! -d "$headless_dependency_dir" ]] || rm -rf -- "$headless_dependency_dir"
+    dependency_created_here=0
 }
 
 process_is_alive() {
@@ -750,6 +768,40 @@ process_start_time_ticks() {
     ((${#stat_fields[@]} >= 20)) || return 1
     [[ "${stat_fields[19]}" =~ ^[0-9]+$ ]] || return 1
     printf '%s\n' "${stat_fields[19]}"
+}
+
+# Return 0 while the exact PID/start-time identity is still alive, 1 once that
+# identity has exited (or the PID has been reused), and 2 when /proc cannot be
+# inspected conclusively. Cleanup must never treat the indeterminate state as
+# proof that the process released the temporary dependency.
+process_start_identity_state() {
+    local pid="$1" expected_start_time="$2" stat_line process_state current_start_time
+    local -a stat_fields=()
+    [[ -d "/proc/$pid" ]] || return 1
+    [[ -r "/proc/$pid/stat" ]] || return 2
+    IFS= read -r stat_line <"/proc/$pid/stat" || return 2
+    stat_line="${stat_line##*) }"
+    process_state="${stat_line%% *}"
+    [[ "$process_state" != Z ]] || return 1
+    read -r -a stat_fields <<<"$stat_line"
+    ((${#stat_fields[@]} >= 20)) || return 2
+    current_start_time="${stat_fields[19]}"
+    [[ "$current_start_time" =~ ^[0-9]+$ ]] || return 2
+    [[ "$current_start_time" == "$expected_start_time" ]] || return 1
+    return 0
+}
+
+snapshot_live_game_pids() {
+    local output_name="$1" pgrep_output="" pgrep_status=0
+    local -n output_ref="$output_name"
+    output_ref=()
+    if pgrep_output="$(pgrep -x SlayTheSpire2 2>/dev/null)"; then
+        mapfile -t output_ref <<<"$pgrep_output"
+        return 0
+    else
+        pgrep_status=$?
+    fi
+    ((pgrep_status == 1)) || return "$pgrep_status"
 }
 
 process_has_expected_headless_environment() {
@@ -785,16 +837,46 @@ remove_process_marker_for_identity() {
 }
 
 launched_here=0
+owned_cleanup_active=0
 stop_test_process_and_remove_dependency() {
-    local pid="$1" start_time="$2" stop_deadline
-    if process_matches_headless_identity "$pid" "$start_time"; then
+    local pid="$1" start_time="$2" stop_deadline identity_status
+    if [[ ! "$pid" =~ ^[0-9]+$ || ! "$start_time" =~ ^[0-9]+$ ]]; then
+        runtime_error \
+            "claimed headless process lacks a usable PID/start-time identity; preserving marker and dependency"
+    fi
+    if ! process_matches_headless_identity "$pid" "$start_time"; then
+        identity_status=0
+        process_start_identity_state "$pid" "$start_time" || identity_status=$?
+        if ((identity_status != 1)); then
+            runtime_error \
+                "claimed headless process identity became indeterminate; preserving marker and dependency: pid=$pid"
+        fi
+    else
         kill -TERM "$pid" 2>/dev/null || true
         stop_deadline=$((SECONDS + 10))
-        while process_matches_headless_identity "$pid" "$start_time" && ((SECONDS < stop_deadline)); do
+        while ((SECONDS < stop_deadline)); do
+            identity_status=0
+            process_start_identity_state "$pid" "$start_time" || identity_status=$?
+            ((identity_status != 1)) || break
             sleep 0.1
         done
-        if process_matches_headless_identity "$pid" "$start_time"; then
+        identity_status=0
+        process_start_identity_state "$pid" "$start_time" || identity_status=$?
+        if ((identity_status == 0)); then
             kill -KILL "$pid" 2>/dev/null || true
+            stop_deadline=$((SECONDS + 10))
+            while ((SECONDS < stop_deadline)); do
+                identity_status=0
+                process_start_identity_state "$pid" "$start_time" || identity_status=$?
+                ((identity_status != 1)) || break
+                sleep 0.1
+            done
+            identity_status=0
+            process_start_identity_state "$pid" "$start_time" || identity_status=$?
+        fi
+        if ((identity_status != 1)); then
+            runtime_error \
+                "claimed headless process did not conclusively exit; preserving marker and dependency: pid=$pid"
         fi
     fi
     if ((launched_here == 1)); then
@@ -802,6 +884,62 @@ stop_test_process_and_remove_dependency() {
     fi
     remove_process_marker_for_identity "$pid" "$start_time"
     remove_headless_dependency
+    owned_cleanup_active=0
+}
+
+stop_direct_child_and_remove_dependency() {
+    local pid="$1" start_time="$2" stop_deadline
+    [[ "$pid" =~ ^[0-9]+$ ]] || runtime_error \
+        "directly owned headless process lacks a usable PID; preserving the dependency"
+
+    if process_is_alive "$pid"; then
+        kill -TERM "$pid" 2>/dev/null || true
+        stop_deadline=$((SECONDS + 10))
+        while process_is_alive "$pid" && ((SECONDS < stop_deadline)); do
+            sleep 0.1
+        done
+        if process_is_alive "$pid"; then
+            kill -KILL "$pid" 2>/dev/null || true
+            stop_deadline=$((SECONDS + 10))
+            while process_is_alive "$pid" && ((SECONDS < stop_deadline)); do
+                sleep 0.1
+            done
+        fi
+    fi
+    if process_is_alive "$pid"; then
+        runtime_error \
+            "directly owned headless process did not exit; preserving marker and dependency: pid=$pid"
+    fi
+    wait "$pid" 2>/dev/null || true
+    if [[ "$start_time" =~ ^[0-9]+$ ]]; then
+        remove_process_marker_for_identity "$pid" "$start_time"
+    fi
+    remove_headless_dependency
+    owned_cleanup_active=0
+}
+
+cleanup_owned_launcher() {
+    local original_status=$?
+    trap - EXIT INT TERM HUP
+    if ((owned_cleanup_active == 1)); then
+        if ((launched_here == 1)) && [[ "$process_pid" =~ ^[0-9]+$ ]]; then
+            stop_direct_child_and_remove_dependency "$process_pid" "$process_identity_start_time"
+        elif [[ "$process_pid" =~ ^[0-9]+$ ]]; then
+            stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+        else
+            remove_directly_created_headless_dependency
+            owned_cleanup_active=0
+        fi
+    fi
+    exit "$original_status"
+}
+
+arm_owned_cleanup() {
+    owned_cleanup_active=1
+    trap cleanup_owned_launcher EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    trap 'exit 129' HUP
 }
 
 combat_solver_dll_sha256="$(sha256sum -- "$combat_solver_dll")"
@@ -824,20 +962,43 @@ if [[ -f "$process_marker_path" ]]; then
         && process_matches_headless_identity "$marker_pid" "$marker_start_time"; then
         process_pid="$marker_pid"
         process_identity_start_time="$marker_start_time"
+        arm_owned_cleanup
         if [[ "$marker_dll_sha256" != "$combat_solver_dll_sha256" \
             || "$marker_manifest_sha256" != "$combat_solver_manifest_sha256" ]]; then
             echo "UNATTENDED_RESTART reason=mod_changed pid=$process_pid" >&2
             stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
             process_pid=""
             process_identity_start_time=""
+        elif [[ -f "$ready_path" ]] \
+            && [[ "$(jq -r '.held // false' "$ready_path" 2>/dev/null)" == true ]]; then
+            # A held protocol host has returned from its request loop and cannot be reused.
+            # Restarting also recovers if its launcher was killed before the release marker.
+            echo "UNATTENDED_RESTART reason=abandoned_held_process pid=$process_pid" >&2
+            stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+            process_pid=""
+            process_identity_start_time=""
         fi
     else
-        echo "run-unattended-test.sh: discarding stale or unowned process marker: $process_marker_path" >&2
+        marker_live_game_pids=()
+        snapshot_live_game_pids marker_live_game_pids || runtime_error \
+            "could not enumerate game processes while validating the existing marker; marker and dependency were preserved"
+        live_marker_processes=()
+        for candidate_pid in "${marker_live_game_pids[@]}"; do
+            process_is_alive "$candidate_pid" || continue
+            live_marker_processes+=("$candidate_pid")
+        done
+        if ((${#live_marker_processes[@]} > 0)); then
+            runtime_error \
+                "could not safely discard an invalid headless marker while SlayTheSpire2 is alive; marker and dependency were preserved: pid=$(IFS=,; echo "${live_marker_processes[*]}")"
+        fi
+        echo "run-unattended-test.sh: discarding stale process marker: $process_marker_path" >&2
         rm -f -- "$process_marker_path"
     fi
 fi
 
-mapfile -t game_pids < <(pgrep -x SlayTheSpire2 2>/dev/null || true)
+game_pids=()
+snapshot_live_game_pids game_pids || runtime_error \
+    "could not enumerate SlayTheSpire2 processes; marker and dependency were preserved"
 other_pids=()
 for candidate_pid in "${game_pids[@]}"; do
     process_is_alive "$candidate_pid" || continue
@@ -849,6 +1010,7 @@ fi
 
 # Publish only after every process-safety check. An already-running protocol
 # host may consume the request as soon as the rename becomes visible.
+rm -f -- "$ready_path"
 request_temp="$(mktemp --tmpdir="$data_dir" ".combat_solver_test_request.$run_id.XXXXXX")"
 printf '%s\n' "$request" >"$request_temp"
 mv -f -- "$request_temp" "$request_path"
@@ -858,7 +1020,15 @@ started_seconds=$SECONDS
 if [[ -n "$process_pid" ]]; then
     reused_process=1
 else
+    launch_cancel_status=0
+    trap 'launch_cancel_status=130' INT
+    trap 'launch_cancel_status=143' TERM
+    trap 'launch_cancel_status=129' HUP
+    owned_cleanup_active=1
+    trap cleanup_owned_launcher EXIT
     install_headless_dependency
+    ((launch_cancel_status == 0)) || exit "$launch_cancel_status"
+    launched_here=1
     (
         exec {launcher_lock_fd}>&-
         cd -- "$game_root"
@@ -877,13 +1047,13 @@ else
                 --log-file "$headless_log_path"
     ) </dev/null >>"$launcher_log_path" 2>&1 &
     process_pid=$!
-    launched_here=1
+    arm_owned_cleanup
+    ((launch_cancel_status == 0)) || exit "$launch_cancel_status"
     sleep 0.25
     process_identity_start_time="$(process_start_time_ticks "$process_pid" 2>/dev/null || true)"
     if [[ -z "$process_identity_start_time" ]] \
         || ! process_matches_headless_identity "$process_pid" "$process_identity_start_time"; then
-        wait "$process_pid" 2>/dev/null || true
-        remove_headless_dependency
+        stop_direct_child_and_remove_dependency "$process_pid" "$process_identity_start_time"
         runtime_error "headless SlayTheSpire2 did not remain running; log=$headless_log_path"
     fi
     process_marker_temp="$(mktemp --tmpdir="$headless_root" .process.json.XXXXXX)"
@@ -916,20 +1086,48 @@ else
     echo "UNATTENDED_STARTED run_id=$run_id pid=$process_pid"
 fi
 
-deadline=$((started_seconds + option_value[timeout-seconds] + 45))
-while ((SECONDS < deadline)); do
+result_deadline=$((started_seconds + option_value[timeout-seconds] + 45))
+while ((SECONDS < result_deadline)); do
     if [[ -f "$result_path" ]] && result="$(jq -c '.' "$result_path" 2>/dev/null)"; then
         result_run_id="$(jq -r '.runId // empty' <<<"$result")"
         if [[ "$result_run_id" == "$run_id" ]]; then
             jq '.' <<<"$result"
             result_status="$(jq -r '.status // empty' <<<"$result")"
+            if [[ "$result_status" != Passed ]]; then
+                stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+                exit 1
+            fi
+            ready_deadline=$((SECONDS + 120))
             if ((option_value[hold-after-initial-search] == 1)) && [[ "$result_status" == Passed ]]; then
+                held_ready=0
+                while ((SECONDS < ready_deadline)); do
+                    if [[ -f "$ready_path" ]] \
+                        && jq -e --arg runId "$run_id" \
+                            '.schemaVersion == 1 and .runId == $runId and .held == true' \
+                            "$ready_path" >/dev/null 2>&1; then
+                        held_ready=1
+                        break
+                    fi
+                    if ! process_matches_headless_identity "$process_pid" "$process_identity_start_time"; then
+                        stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+                        runtime_error "held test process exited before reaching quiescence; run_id=$run_id"
+                    fi
+                    sleep 0.1
+                done
+                if ((held_ready == 0)); then
+                    stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+                    runtime_error "held test did not reach quiescence before timeout; run_id=$run_id"
+                fi
                 echo "UNATTENDED_HELD run_id=$run_id pid=$process_pid release=$hold_release_path"
                 while process_matches_headless_identity "$process_pid" "$process_identity_start_time" \
                     && [[ ! -f "$hold_release_path" ]]; do
                     sleep 0.5
                 done
-                [[ ! -f "$hold_release_path" ]] || rm -f -- "$hold_release_path"
+                if [[ ! -f "$hold_release_path" ]]; then
+                    stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+                    runtime_error "held test process exited before the release marker was written; run_id=$run_id"
+                fi
+                rm -f -- "$hold_release_path"
                 stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
                 exit 0
             fi
@@ -940,9 +1138,26 @@ while ((SECONDS < deadline)); do
                     sleep 0.1
                 done
                 stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+                exit 0
             fi
-            [[ "$result_status" == Passed ]] && exit 0
-            exit 1
+            while ((SECONDS < ready_deadline)); do
+                if [[ -f "$ready_path" ]] \
+                    && jq -e --arg runId "$run_id" \
+                        '.schemaVersion == 1 and .runId == $runId and .held == false' \
+                        "$ready_path" >/dev/null 2>&1; then
+                    echo "UNATTENDED_READY run_id=$run_id pid=$process_pid"
+                    dependency_created_here=0
+                    owned_cleanup_active=0
+                    exit 0
+                fi
+                if ! process_matches_headless_identity "$process_pid" "$process_identity_start_time"; then
+                    stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+                    runtime_error "test passed but its process exited before becoming reusable; run_id=$run_id"
+                fi
+                sleep 0.1
+            done
+            stop_test_process_and_remove_dependency "$process_pid" "$process_identity_start_time"
+            runtime_error "test passed but did not become reusable before timeout; run_id=$run_id"
         fi
     fi
     if ! process_matches_headless_identity "$process_pid" "$process_identity_start_time"; then

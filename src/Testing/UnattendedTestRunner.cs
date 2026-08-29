@@ -37,6 +37,13 @@ namespace CombatSolver;
 
 internal sealed partial class UnattendedTestRunner
 {
+    private enum RunCompletion
+    {
+        Passed,
+        InitialSearchHeld,
+        Failed,
+    }
+
     private static readonly ProtocolHost Host = new();
 
     public static bool IsActive => Host.IsActive;
@@ -86,7 +93,7 @@ internal sealed partial class UnattendedTestRunner
     internal static Task ApplyScheduledPreEndTurnDriftAsync(CombatState state, int turn)
         => Host.ApplyScheduledPreEndTurnDriftAsync(state, turn);
 
-    private async Task RunAsync()
+    private async Task<RunCompletion> RunAsync()
     {
         CombatState? combatState = null;
         int startedTurn = 0;
@@ -115,7 +122,7 @@ internal sealed partial class UnattendedTestRunner
                     $"stage=initial_search_held elapsed_ms={_stopwatch.Elapsed.TotalMilliseconds:F1} " +
                     $"managed_heap_bytes={heldMemory.ManagedHeapBytes} fragmented_bytes={heldMemory.ManagedFragmentedBytes} " +
                     $"working_set_bytes={heldMemory.WorkingSetBytes} private_bytes={heldMemory.PrivateMemoryBytes}");
-                return;
+                return RunCompletion.InitialSearchHeld;
             }
             _assertions.AssertAfterExecution(scenario, outcome);
 
@@ -147,6 +154,7 @@ internal sealed partial class UnattendedTestRunner
                 outcome.FinishedTurn);
             Entry.Logger.Info($"[CombatSolver/Unattended] PASSED run_id={_request.RunId} scenario={_request.ScenarioId} elapsed_ms={_stopwatch.Elapsed.TotalMilliseconds:F1}");
             await ExitIfRequestedAsync(0);
+            return RunCompletion.Passed;
         }
         catch (Exception ex)
         {
@@ -175,6 +183,7 @@ internal sealed partial class UnattendedTestRunner
             {
                 await ExitIfRequestedAsync(1);
             }
+            return RunCompletion.Failed;
         }
         finally
         {
@@ -571,8 +580,13 @@ internal sealed partial class UnattendedTestRunner
             await InjectCardAsync(combatState, player, injectedBeforeMove);
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         }
-        SimulatedCombatState simulatedCombat = new(combatState);
-        CombatPredictionSimulator simulator = new(simulatedCombat);
+        SimulatedCombatState simulatedCombat;
+        CombatPredictionSimulator simulator;
+        using (BranchMonsterStaticSnapshot.AllowUnreachableConditionalsForTesting())
+        {
+            simulatedCombat = new SimulatedCombatState(combatState);
+            simulator = new CombatPredictionSimulator(simulatedCombat);
+        }
         int simulatedRoundHistoryEntryStart = simulator.History.Entries.Count;
         AssertDerivedPowerHooks(combatState, simulatedCombat, player, enemy, check);
         MoveStateSnapshot before = CaptureActual(combatState, player, enemy);
@@ -655,6 +669,8 @@ internal sealed partial class UnattendedTestRunner
                 AssertSimulatedCardPileAfterPlay(simulator, player, playCheck);
             }
         }
+        int simulatedPlayerBlockAfterMoveActions =
+            simulator.State.GetCreature(player.Creature).Block;
         if (check.TriggerPlayerSideTurnEndAfterMove)
             CorePowerSupport.TriggerPlayerSideTurnEndEffects(simulator, simulatedCombat, [player.Creature]);
         foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksAfterPlayerSideTurnEnd)
@@ -782,11 +798,20 @@ internal sealed partial class UnattendedTestRunner
                 new HashSet<uint>());
         }
         if (check.TriggerPlayerSetupAfterMove)
+        {
+            if (!check.TriggerEnemySideTurnStartAfterMove)
+            {
+                simulatedCombat.RecordRelicRoundDamage(
+                    simulator,
+                    player,
+                    simulatedRoundHistoryEntryStart);
+            }
             TriggerSimulatedPlayerSetup(
                 simulator,
                 simulatedCombat,
                 player,
                 check.PlayerSetupChoiceCardIds);
+        }
         if (check.TriggerAutoPrePlayAfterPlayerSetup)
         {
             IReadOnlyList<PlanCardChoice> plannedChoices = BuildAutoPrePlayChoices(
@@ -854,6 +879,8 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException(
                 $"{monster.Id.Entry}.{move.Id} 模拟待跳过行动={simulatedCombat.WillSkipNextMove(enemy)}，预期 {expectedSkip}。");
         }
+        PlayerSetupDerivedHookSnapshot simulatedPlayerSetupHooks =
+            CaptureSimulatedDerivedHooksAfterPlayerSetup(simulatedCombat, player, check);
 
         foreach (UnattendedCardPlayCheck playCheck in check.CardPlayChecksBeforeMove)
         {
@@ -923,6 +950,17 @@ internal sealed partial class UnattendedTestRunner
             {
                 await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
                 AssertActualCardPileAfterPlay(player, playCheck);
+            }
+        }
+        if (check.ExpectedPlayerBlockAfterMoveActions is { } expectedBlockAfterMoveActions)
+        {
+            int actualBlockAfterMoveActions = player.Creature.Block;
+            if (simulatedPlayerBlockAfterMoveActions != expectedBlockAfterMoveActions
+                || actualBlockAfterMoveActions != expectedBlockAfterMoveActions)
+            {
+                throw new InvalidOperationException(
+                    $"{monster.Id.Entry}.{move.Id} 行动后格挡实机={actualBlockAfterMoveActions}、" +
+                    $"模拟={simulatedPlayerBlockAfterMoveActions}，预期 {expectedBlockAfterMoveActions}。");
             }
         }
         if (check.TriggerPlayerSideTurnEndAfterMove)
@@ -996,7 +1034,11 @@ internal sealed partial class UnattendedTestRunner
             if (playable)
                 await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         }
-        AssertDerivedHooksAfterPlayerSetup(combatState, simulatedCombat, player, check);
+        AssertDerivedHooksAfterPlayerSetup(
+            combatState,
+            player,
+            check,
+            simulatedPlayerSetupHooks);
         if (check.ExpectedMirrorRelicState is { } expectedMirrorRelics)
         {
             StringBuilder liveRelics = new();
@@ -1274,11 +1316,69 @@ internal sealed partial class UnattendedTestRunner
             $"[CombatSolver/Unattended] DERIVED_HOOK hook={hook} actual={actual} simulated={simulated} expected={expected}");
     }
 
-    private static void AssertDerivedHooksAfterPlayerSetup(
-        CombatState actualCombat,
+    private readonly record struct PlayerSetupDerivedHookSnapshot(
+        int? ModifiedHandDraw,
+        int? RawModifiedHandDraw,
+        string? HandDrawModifiers,
+        int? ModifiedMaxEnergy,
+        bool? ShouldFlush,
+        bool? ShouldPlayerResetEnergy,
+        string? StatefulRelicState);
+
+    private static PlayerSetupDerivedHookSnapshot CaptureSimulatedDerivedHooksAfterPlayerSetup(
         SimulatedCombatState simulatedCombat,
         Player player,
         UnattendedMonsterMoveCheck check)
+    {
+        int? modifiedHandDraw = null;
+        int? rawModifiedHandDraw = null;
+        string? handDrawModifiers = null;
+        if (check.ExpectedModifiedHandDrawAfterPlayerSetup is not null)
+        {
+            rawModifiedHandDraw = (int)Hook.ModifyHandDraw(
+                simulatedCombat,
+                player,
+                CombatManager.baseHandDrawCount,
+                out IEnumerable<AbstractModel> modifiers);
+            handDrawModifiers = string.Join(',', modifiers.Select(static model => model.Id.Entry));
+            modifiedHandDraw = PersistentPowerSupport.GetModifiedHandDraw(
+                simulatedCombat,
+                player,
+                CombatManager.baseHandDrawCount);
+        }
+
+        int? modifiedMaxEnergy = check.ExpectedModifiedMaxEnergyAfterPlayerSetup is null
+            ? null
+            : PersistentPowerSupport.GetModifiedMaxEnergy(simulatedCombat, player);
+        bool? shouldFlush = check.ExpectedShouldFlushAfterPlayerSetup is null
+            ? null
+            : PersistentRelicSupport.ShouldFlush(simulatedCombat, player);
+        bool? shouldPlayerResetEnergy = check.ExpectedShouldPlayerResetEnergyAfterPlayerSetup is null
+            ? null
+            : PersistentRelicSupport.ShouldPlayerResetEnergy(simulatedCombat, player);
+        string? statefulRelicState = null;
+        if (check.ExpectedStatefulRelicStateAfterPlayerSetup is not null)
+        {
+            StringBuilder simulated = new();
+            simulatedCombat.AppendPredictedStatefulRelics(simulated, player);
+            statefulRelicState = simulated.ToString();
+        }
+
+        return new PlayerSetupDerivedHookSnapshot(
+            modifiedHandDraw,
+            rawModifiedHandDraw,
+            handDrawModifiers,
+            modifiedMaxEnergy,
+            shouldFlush,
+            shouldPlayerResetEnergy,
+            statefulRelicState);
+    }
+
+    private static void AssertDerivedHooksAfterPlayerSetup(
+        CombatState actualCombat,
+        Player player,
+        UnattendedMonsterMoveCheck check,
+        PlayerSetupDerivedHookSnapshot simulatedHooks)
     {
         if (check.ExpectedModifiedHandDrawAfterPlayerSetup is { } expectedDraw)
         {
@@ -1287,49 +1387,49 @@ internal sealed partial class UnattendedTestRunner
                 player,
                 CombatManager.baseHandDrawCount,
                 out IEnumerable<AbstractModel> actualModifiers);
-            int rawSimulated = (int)Hook.ModifyHandDraw(
-                simulatedCombat,
-                player,
-                CombatManager.baseHandDrawCount,
-                out IEnumerable<AbstractModel> simulatedModifiers);
-            int simulated = PersistentPowerSupport.GetModifiedHandDraw(
-                simulatedCombat,
-                player,
-                CombatManager.baseHandDrawCount);
+            int rawSimulated = simulatedHooks.RawModifiedHandDraw
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的原始抽牌 Hook 快照。");
+            int simulated = simulatedHooks.ModifiedHandDraw
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的抽牌 Hook 快照。");
+            string simulatedModifiers = simulatedHooks.HandDrawModifiers
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的抽牌修改器快照。");
             Entry.Logger.Info(
                 $"[CombatSolver/Unattended] DERIVED_HOOK_TRACE hook=ModifyHandDrawAfterPlayerSetup " +
                 $"actual_modifiers={string.Join(',', actualModifiers.Select(static model => model.Id.Entry))} " +
-                $"simulated_raw={rawSimulated} simulated_modifiers={string.Join(',', simulatedModifiers.Select(static model => model.Id.Entry))}");
+                $"simulated_raw={rawSimulated} simulated_modifiers={simulatedModifiers}");
             AssertDerivedHookValue("ModifyHandDrawAfterPlayerSetup", actual, simulated, expectedDraw);
         }
         if (check.ExpectedModifiedMaxEnergyAfterPlayerSetup is { } expectedEnergy)
         {
             int actual = (int)Hook.ModifyMaxEnergy(actualCombat, player, player.MaxEnergy);
-            int simulated = PersistentPowerSupport.GetModifiedMaxEnergy(simulatedCombat, player);
+            int simulated = simulatedHooks.ModifiedMaxEnergy
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的最大能量 Hook 快照。");
             AssertDerivedHookValue("ModifyMaxEnergyAfterPlayerSetup", actual, simulated, expectedEnergy);
         }
         if (check.ExpectedShouldFlushAfterPlayerSetup is { } expectedFlush)
         {
             bool actual = Hook.ShouldFlush(actualCombat, player);
-            bool simulated = PersistentRelicSupport.ShouldFlush(simulatedCombat, player);
+            bool simulated = simulatedHooks.ShouldFlush
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的弃牌 Hook 快照。");
             AssertDerivedHookValue("ShouldFlushAfterPlayerSetup", actual, simulated, expectedFlush);
         }
         if (check.ExpectedShouldPlayerResetEnergyAfterPlayerSetup is { } expectedReset)
         {
             bool actual = Hook.ShouldPlayerResetEnergy(actualCombat, player);
-            bool simulated = PersistentRelicSupport.ShouldPlayerResetEnergy(simulatedCombat, player);
+            bool simulated = simulatedHooks.ShouldPlayerResetEnergy
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的能量重置 Hook 快照。");
             AssertDerivedHookValue("ShouldPlayerResetEnergyAfterPlayerSetup", actual, simulated, expectedReset);
         }
         if (check.ExpectedStatefulRelicStateAfterPlayerSetup is { } expectedRelics)
         {
             StringBuilder actual = new();
             SimulatedCombatState.AppendLiveStatefulRelics(actual, player);
-            StringBuilder simulated = new();
-            simulatedCombat.AppendPredictedStatefulRelics(simulated, player);
+            string simulated = simulatedHooks.StatefulRelicState
+                ?? throw new InvalidOperationException("缺少模拟玩家回合准备后的有状态遗物快照。");
             AssertDerivedHookValue(
                 "StatefulRelicStateAfterPlayerSetup",
                 actual.ToString(),
-                simulated.ToString(),
+                simulated,
                 expectedRelics);
         }
     }

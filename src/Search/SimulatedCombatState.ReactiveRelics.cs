@@ -12,14 +12,22 @@ namespace CombatSolver;
 
 internal sealed partial class SimulatedCombatState
 {
-    public bool PrepareExtraPlayerTurn(CombatPredictionSimulator simulator, Player player)
+    public bool PrepareExtraPlayerTurn(
+        CombatPredictionSimulator simulator,
+        Player player,
+        out bool hasActiveEmotionChip)
     {
         bool extraTurn = GetAmount<AmbergrisPower>(player.Creature) > 0;
-        foreach (PaelsEye relic in RelicsOf(player).OfType<PaelsEye>().Where(static relic => !relic.IsMelted))
+        hasActiveEmotionChip = false;
+        foreach (RelicModel relic in RelicsOf(player))
         {
-            if (!ShouldTriggerPaelsEye(relic))
+            if (relic.IsMelted)
                 continue;
-            TriggerPaelsEye(simulator, player, relic);
+            if (relic is EmotionChip)
+                hasActiveEmotionChip = true;
+            if (relic is not PaelsEye paelsEye || !ShouldTriggerPaelsEye(paelsEye))
+                continue;
+            TriggerPaelsEye(simulator, player, paelsEye);
             extraTurn = true;
         }
         return extraTurn;
