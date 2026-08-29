@@ -516,6 +516,10 @@ internal sealed partial class CombatBeamSolver
         if (!choices.Contains(null))
             probeSnapshot.ReleaseSimulator();
 
+        int repeatedAutoPlayBranchQuota = choiceSpec?.Effect == PlanChoiceEffect.AutoPlayRepeated
+            ? Math.Max(1, _profile.MaxHandChoiceBranchesPerAction / Math.Max(1, choices.Count))
+            : int.MaxValue;
+
         foreach (PlanCardChoice? choice in choices)
         {
             if (unregisteredPendingChoice)
@@ -537,7 +541,11 @@ internal sealed partial class CombatBeamSolver
                 childSnapshot = replayedChoice;
             }
             foreach ((PlanAction finalAction, SimulationSnapshot finalSnapshot) in
-                     ResolveRoundChoiceBranches(node, resolvedAction, childSnapshot))
+                     ResolveRoundChoiceBranches(
+                         node,
+                         resolvedAction,
+                         childSnapshot,
+                         maxFinalBranches: repeatedAutoPlayBranchQuota))
             {
                 yield return (finalAction, finalSnapshot);
             }
@@ -582,7 +590,8 @@ internal sealed partial class CombatBeamSolver
         SearchNode node,
         PlanAction action,
         SimulationSnapshot snapshot,
-        CardChoiceSpec? unresolvedPrimaryChoice = null)
+        CardChoiceSpec? unresolvedPrimaryChoice = null,
+        int maxFinalBranches = int.MaxValue)
     {
         if (snapshot.BoundaryReason != SearchBoundaryReason.PendingChoice)
         {
@@ -596,8 +605,9 @@ internal sealed partial class CombatBeamSolver
             IReadOnlyList<PlanCardChoice> branches = KnowledgeDemonChoiceSupport.BuildChoices(
                 knowledgeRequest,
                 displayNames);
-            _run.ChoiceBranchesEvaluated += branches.Count;
+            _run.ChoiceBranchesEvaluated += Math.Min(branches.Count, maxFinalBranches);
             snapshot.ReleaseSimulator();
+            int yielded = 0;
             foreach (PlanCardChoice branch in branches)
             {
                 IReadOnlyList<PlanCardChoice> existing = action.TurnStartChoices ?? [];
@@ -614,9 +624,12 @@ internal sealed partial class CombatBeamSolver
                              node,
                              resolvedAction,
                              resolvedSnapshot,
-                             unresolvedPrimaryChoice))
+                             unresolvedPrimaryChoice,
+                             maxFinalBranches - yielded))
                 {
                     yield return (finalAction, finalSnapshot);
+                    if (++yielded >= maxFinalBranches)
+                        yield break;
                 }
             }
             yield break;
@@ -631,8 +644,9 @@ internal sealed partial class CombatBeamSolver
                 displayNames,
                 _profile.MaxPileChoiceBranchesPerAction,
                 _profile.MaxHandChoiceBranchesPerAction);
-            _run.ChoiceBranchesEvaluated += branches.Count;
+            _run.ChoiceBranchesEvaluated += Math.Min(branches.Count, maxFinalBranches);
             snapshot.ReleaseSimulator();
+            int yielded = 0;
             foreach (PlanCardChoice branch in branches)
             {
                 bool turnResolution = action.Kind == PlanActionKind.EndTurn
@@ -683,9 +697,12 @@ internal sealed partial class CombatBeamSolver
                              node,
                              resolvedAction,
                              resolvedSnapshot,
-                             unresolvedPrimaryChoice))
+                             unresolvedPrimaryChoice,
+                             maxFinalBranches - yielded))
                 {
                     yield return (finalAction, finalSnapshot);
+                    if (++yielded >= maxFinalBranches)
+                        yield break;
                 }
             }
             yield break;
