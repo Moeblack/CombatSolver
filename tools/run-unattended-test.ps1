@@ -161,6 +161,8 @@ param(
     [string]$DeploymentFastModeForTest = "",
     [ValidateSet("", "Low", "Medium", "High", "VeryHigh", "Custom")]
     [string]$PerformancePresetForTest = "",
+    [int]$ShortMaxCardBranchesPerNodeForTest = -1,
+    [int]$DeepMaxCardBranchesPerNodeForTest = -1,
     [ValidateSet("", "Disabled", "Smart", "RequireAtLeastOne")]
     [string]$PotionPolicyForTest = "",
     [ValidateSet("", "PreserveResources", "LetEscape")]
@@ -457,6 +459,8 @@ $request = [ordered]@{
     expectedPlayerDeath = $ExpectedPlayerDeath.IsPresent
     deploymentFastModeForTest = if ([string]::IsNullOrWhiteSpace($DeploymentFastModeForTest)) { $null } else { $DeploymentFastModeForTest }
     performancePresetForTest = if ([string]::IsNullOrWhiteSpace($PerformancePresetForTest)) { $null } else { $PerformancePresetForTest }
+    shortMaxCardBranchesPerNodeForTest = if ($ShortMaxCardBranchesPerNodeForTest -gt 0) { $ShortMaxCardBranchesPerNodeForTest } else { $null }
+    deepMaxCardBranchesPerNodeForTest = if ($DeepMaxCardBranchesPerNodeForTest -gt 0) { $DeepMaxCardBranchesPerNodeForTest } else { $null }
     potionPolicyForTest = if ([string]::IsNullOrWhiteSpace($PotionPolicyForTest)) { $null } else { $PotionPolicyForTest }
     theftPolicyForTest = if ([string]::IsNullOrWhiteSpace($TheftPolicyForTest)) { $null } else { $TheftPolicyForTest }
     noGcRegionBudgetGigabytesForTest = if ($NoGcRegionBudgetGigabytesForTest -gt 0) { $NoGcRegionBudgetGigabytesForTest } else { $null }

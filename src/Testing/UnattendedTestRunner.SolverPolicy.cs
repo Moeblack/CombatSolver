@@ -158,14 +158,19 @@ internal sealed partial class UnattendedTestRunner
                 .Select(trace => trace.Order)
                 .DefaultIfEmpty(long.MaxValue)
                 .Min();
+            long planReady = traces.Where(trace => trace.Stage == "PlanReady")
+                .Select(trace => trace.Order)
+                .DefaultIfEmpty(long.MaxValue)
+                .Min();
             long selected = traces.Where(trace => trace.Stage == "Selected")
                 .Select(trace => trace.Order)
                 .DefaultIfEmpty(long.MaxValue)
                 .Min();
-            if (!(visible < searchStarted && searchStarted < selected))
+            if (!(visible < searchStarted && searchStarted < planReady && planReady < selected))
             {
                 throw new InvalidOperationException(
-                    $"回合准备选牌事件顺序错误：visible={visible}, search={searchStarted}, selected={selected}。 ");
+                    $"回合准备选牌事件顺序错误：visible={visible}, search={searchStarted}, " +
+                    $"plan_ready={planReady}, selected={selected}。 ");
             }
             _completedChecks.Add("TurnSetupNativeChoiceOrder");
         }

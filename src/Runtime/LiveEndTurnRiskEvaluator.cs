@@ -26,9 +26,10 @@ internal static class LiveEndTurnRiskEvaluator
             ?? throw new InvalidOperationException("结束回合复核找不到本地玩家。");
         SimulatedCombatState combat = new(state);
         PlanCardChoice[] roundChoices = turnStartChoices?
-            .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
+            .Where(choice => choice.Timing is PlanChoiceTiming.PlayerTurnEnd or PlanChoiceTiming.EnemyTurn)
             .ToArray() ?? [];
         combat.BeginActionChoices(roundChoices);
+        combat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnEnd);
         try
         {
             LiveEndTurnRiskProjection projection = Evaluate(player, combat);
@@ -93,6 +94,7 @@ internal static class LiveEndTurnRiskEvaluator
             return BuildProjection(hpBefore, simulatedPlayer, []);
 
         combat.CurrentSide = CombatSide.Enemy;
+        combat.SetActionChoiceTiming(PlanChoiceTiming.EnemyTurn);
         combat.SnapshotPowerAmountsAtTurnStart(combat.Enemies);
         TurnStartRelicSupport.TriggerBeforeSideTurnStart(simulator, combat, combat.Enemies);
         TurnStartPowerSupport.TriggerBeforeSideTurnStart(simulator, combat, combat.Enemies);

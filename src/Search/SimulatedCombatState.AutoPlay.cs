@@ -168,7 +168,14 @@ internal sealed partial class SimulatedCombatState
         PlanChoiceEffect effect = spec?.Effect ?? emptyChoice!.Effect;
         PileType pile = spec?.SourcePile ?? emptyChoice!.SourcePile;
         int count = spec?.MinCount ?? emptyChoice!.Cards.Count;
-        TurnStartChoiceRequest request = new(sourceId, effect, pile, count, spec, contextId);
+        TurnStartChoiceRequest request = new(
+            sourceId,
+            effect,
+            pile,
+            count,
+            spec,
+            contextId,
+            ActiveActionChoiceTiming);
         if (!choices.TryTake(request, out PlanCardChoice? choice))
         {
             SetPendingTurnStartChoice(request);

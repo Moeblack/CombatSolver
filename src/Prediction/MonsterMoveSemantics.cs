@@ -22,10 +22,11 @@ internal static class MonsterMoveSemantics
         bool fullyBlockedAttack = false;
         bool playerDied = false;
         AttackCommand? attackContext = move.AttackHits.Count > 0
-            ? new AttackCommand(0m)
-                .FromMonster(move.Owner.Monster
-                    ?? throw new InvalidOperationException("预测攻击的所有者不是怪物。"))
-                .WithHitCount(0)
+            ? simulator.BeginAttackContext(
+                new AttackCommand(0m)
+                    .FromMonster(move.Owner.Monster
+                        ?? throw new InvalidOperationException("预测攻击的所有者不是怪物。"))
+                    .WithHitCount(0))
             : null;
         foreach (ForecastAttackHit hit in move.AttackHits)
         {

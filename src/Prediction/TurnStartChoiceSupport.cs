@@ -13,7 +13,8 @@ internal sealed record TurnStartChoiceRequest(
     PileType SourcePile,
     int Count,
     CardChoiceSpec? Spec = null,
-    string ContextId = "");
+    string ContextId = "",
+    PlanChoiceTiming Timing = PlanChoiceTiming.Action);
 
 internal sealed class InvalidPlannedChoiceBranchException(string message)
     : InvalidOperationException(message);
@@ -99,7 +100,8 @@ internal sealed class TurnStartChoiceCursor(IReadOnlyList<PlanCardChoice>? choic
         => string.Equals(choice.SourceId, request.SourceId, StringComparison.Ordinal)
             && choice.Effect == request.Effect
             && choice.SourcePile == request.SourcePile
-            && string.Equals(choice.ContextId, request.ContextId, StringComparison.Ordinal);
+            && string.Equals(choice.ContextId, request.ContextId, StringComparison.Ordinal)
+            && choice.Timing == request.Timing;
 
     private void InvokeBeforeNextTake()
     {
@@ -146,7 +148,8 @@ internal static class TurnStartChoiceSupport
             PileType.None,
             1,
             spec,
-            contextId);
+            contextId,
+            combat.ActiveActionChoiceTiming);
         if (cursor == null || !cursor.TryTake(request, out PlanCardChoice? choice))
         {
             combat.SetPendingTurnStartChoice(request);
@@ -195,7 +198,8 @@ internal static class TurnStartChoiceSupport
             PileType.Hand,
             options.Count,
             spec,
-            contextId);
+            contextId,
+            combat.ActiveActionChoiceTiming);
         if (cursor == null || !cursor.TryTake(request, out PlanCardChoice? choice))
         {
             combat.SetPendingTurnStartChoice(request);
@@ -231,7 +235,12 @@ internal static class TurnStartChoiceSupport
         if (count <= 0)
             return true;
 
-        TurnStartChoiceRequest request = new(sourceId, effect, sourcePile, count);
+        TurnStartChoiceRequest request = new(
+            sourceId,
+            effect,
+            sourcePile,
+            count,
+            Timing: combat.ActiveActionChoiceTiming);
         IReadOnlyList<PredictedCard> selected;
         if (cursor == null || !cursor.TryTake(request, out PlanCardChoice? choice))
         {

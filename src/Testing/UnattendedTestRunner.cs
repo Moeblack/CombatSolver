@@ -311,11 +311,21 @@ internal sealed partial class UnattendedTestRunner
 
     private async Task<CombatState> WaitForPlayableCombatAsync()
     {
+        bool turnSetupPlanAccepted = false;
         while (true)
         {
             EnsureWithinDeadline();
             CombatState? state = CombatManager.Instance.DebugOnlyGetState();
             Player? player = state == null ? null : LocalContext.GetMe(state);
+            if (!turnSetupPlanAccepted
+                && state != null
+                && PlayerTurnSetupCoordinator.HasPendingPlannedChoice(state))
+            {
+                turnSetupPlanAccepted = PlayerTurnSetupCoordinator.TryContinuePlannedChoice(
+                    _host,
+                    state,
+                    deployAfterSetup: false);
+            }
             if (state != null
                 && CombatManager.Instance.IsInProgress
                 && state.CurrentSide == CombatSide.Player
@@ -1436,8 +1446,14 @@ internal sealed partial class UnattendedTestRunner
             check.LiveEndTurnRiskChoiceCardIds) with
         {
             SourceId = check.LiveEndTurnRiskChoiceSourceId,
+            Timing = PlanChoiceTiming.PlayerTurnEnd,
         };
-        _ = LiveEndTurnRiskEvaluator.Evaluate(combatState, [choice]);
+        PlanCardChoice futureTurnChoice = choice with
+        {
+            SourceId = "FUTURE_PLAYER_TURN",
+            Timing = PlanChoiceTiming.PlayerTurnStart,
+        };
+        _ = LiveEndTurnRiskEvaluator.Evaluate(combatState, [choice, futureTurnChoice]);
     }
 
     private static void AssertSimulatedCardPileAfterPlay(

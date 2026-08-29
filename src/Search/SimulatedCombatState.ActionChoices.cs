@@ -11,6 +11,9 @@ internal sealed partial class SimulatedCombatState :
     ICombatPredictionManualCardChoiceSink
 {
     private TurnStartChoiceCursor? _activeActionChoices;
+    private PlanChoiceTiming _activeActionChoiceTiming = PlanChoiceTiming.Action;
+
+    public PlanChoiceTiming ActiveActionChoiceTiming => _activeActionChoiceTiming;
 
     public TurnStartChoiceCursor BeginActionChoices(IReadOnlyList<PlanCardChoice>? choices)
         => BeginActionChoices(new TurnStartChoiceCursor(choices));
@@ -21,7 +24,15 @@ internal sealed partial class SimulatedCombatState :
             throw new InvalidOperationException("模拟状态已经处于动作选择结算中。");
         ClearPendingTurnStartChoice();
         _activeActionChoices = choices;
+        _activeActionChoiceTiming = PlanChoiceTiming.Action;
         return choices;
+    }
+
+    public void SetActionChoiceTiming(PlanChoiceTiming timing)
+    {
+        if (_activeActionChoices == null)
+            throw new InvalidOperationException("设置选牌阶段时没有活动的动作选择游标。");
+        _activeActionChoiceTiming = timing;
     }
 
     public void EndActionChoices()
@@ -31,6 +42,7 @@ internal sealed partial class SimulatedCombatState :
         if (PendingTurnStartChoice == null)
             cursor.AssertConsumed();
         _activeActionChoices = null;
+        _activeActionChoiceTiming = PlanChoiceTiming.Action;
     }
 
     public TurnStartChoiceCursor OverrideActionChoices(TurnStartChoiceCursor choices)
@@ -86,7 +98,8 @@ internal sealed partial class SimulatedCombatState :
             spec.Effect,
             spec.SourcePile,
             spec.MinCount,
-            spec);
+            spec,
+            Timing: _activeActionChoiceTiming);
         if (!choices.TryTake(request, out PlanCardChoice? choice))
         {
             SetPendingTurnStartChoice(request);
@@ -135,7 +148,8 @@ internal sealed partial class SimulatedCombatState :
             requiredEmptyChoice.Effect,
             requiredEmptyChoice.SourcePile,
             0,
-            emptySpec);
+            emptySpec,
+            Timing: _activeActionChoiceTiming);
         if (!choices.TryTake(request, out PlanCardChoice? plannedChoice))
         {
             SetPendingTurnStartChoice(request);

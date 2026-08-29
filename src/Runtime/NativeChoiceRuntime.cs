@@ -235,6 +235,14 @@ internal sealed class NativeChoiceSession : IDisposable
         NativeChoiceRuntime.RecordTrace(this, request, "SearchStarted");
     }
 
+    public void RecordPlanReady()
+    {
+        NativeChoiceRequest request = _firstVisibleRequest.Task.IsCompletedSuccessfully
+            ? _firstVisibleRequest.Task.Result
+            : throw new InvalidOperationException($"原生选牌会话 {Owner} 尚未显示页面。");
+        NativeChoiceRuntime.RecordTrace(this, request, "PlanReady");
+    }
+
     public void SetPlanAndStartDriving(
         NGame host,
         IReadOnlyList<PlanCardChoice> plans,
@@ -610,9 +618,12 @@ internal static class NativeChoiceSurface
         NCardGrid grid = Descendants<NCardGrid>(surface).Single();
         foreach (CardModel card in selected)
         {
-            NGridCardHolder holder = Descendants<NGridCardHolder>(surface)
-                .FirstOrDefault(candidate => ReferenceEquals(candidate.CardModel, card))
-                ?? throw new InvalidOperationException($"原生网格页面没有 {card.Id.Entry} 的卡牌节点。");
+            NGridCardHolder holder = await FindGridCardHolderAsync(
+                host,
+                grid,
+                request,
+                card,
+                token);
             grid.EmitSignal(NCardGrid.SignalName.HolderPressed, holder);
             token.ThrowIfCancellationRequested();
             await WaitMillisecondsAsync(host, MultiSelectStepMilliseconds, token);
@@ -624,6 +635,37 @@ internal static class NativeChoiceSurface
                 throw new InvalidOperationException("原生网格页面选择完成后确认按钮仍不可用。");
             confirm.EmitSignal(NClickableControl.SignalName.Released, confirm);
         }
+    }
+
+    private static async Task<NGridCardHolder> FindGridCardHolderAsync(
+        NGame host,
+        NCardGrid grid,
+        NativeChoiceRequest request,
+        CardModel card,
+        CancellationToken token)
+    {
+        NGridCardHolder? holder = grid.CurrentlyDisplayedCardHolders
+            .FirstOrDefault(candidate => ReferenceEquals(candidate.CardModel, card));
+        if (holder != null)
+            return holder;
+
+        float top = grid.Get(NCardGrid.PropertyName.ScrollLimitTop).AsSingle();
+        float bottom = grid.Get(NCardGrid.PropertyName.ScrollLimitBottom).AsSingle();
+        int sweepSteps = Math.Max(1, request.Options.Count);
+        for (int step = 1; step <= sweepSteps; step++)
+        {
+            token.ThrowIfCancellationRequested();
+            grid.SetScrollPosition(Mathf.Lerp(top, bottom, step / (float)sweepSteps));
+            grid.Call(NCardGrid.MethodName.AllocateCardHolders);
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            holder = grid.CurrentlyDisplayedCardHolders
+                .FirstOrDefault(candidate => ReferenceEquals(candidate.CardModel, card));
+            if (holder != null)
+                return holder;
+        }
+
+        throw new InvalidOperationException(
+            $"原生网格页面滚动完整个卡组后仍没有 {card.Id.Entry} 的卡牌节点。");
     }
 
     private static async Task SelectHandAsync(

@@ -214,6 +214,24 @@ internal static class SolverController
         return true;
     }
 
+    internal static void ShowTurnSetupResultPreview(NGame host, SolverResult result)
+    {
+        AssertMainThread();
+        SolverOverlay.ShowResult(
+            host,
+            SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0));
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_RESULT_PREVIEW turn={result.StartTurnNumber} " +
+            "native_choice_pending=true");
+        Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
+    }
+
+    internal static void StartDeploymentAfterTurnSetup(
+        NGame host,
+        CombatState state,
+        SolverResult result)
+        => TaskHelper.RunSafely(StartDeploymentAfterTurnSetupAsync(host, state, result));
+
     internal static bool TryGetPlannedTurnSetupChoices(
         CombatState state,
         int turn,
@@ -232,7 +250,7 @@ internal static class SolverController
         PlanAction? previousEndTurn = source.BestNode.Actions.FirstOrDefault(action =>
             action.Kind == PlanActionKind.EndTurn && action.Turn == turn - 1);
         PlanCardChoice[] planned = previousEndTurn?.TurnStartChoices?
-            .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
+            .Where(choice => choice.Timing == PlanChoiceTiming.PlayerTurnStart)
             .ToArray() ?? [];
         if (planned.Length == 0)
             return false;
@@ -306,6 +324,29 @@ internal static class SolverController
             && IsSamePlayableTurn(state, result.StartTurnNumber))
         {
             StartFullAutoDeployment(host, state, result);
+        }
+    }
+
+    private static async Task StartDeploymentAfterTurnSetupAsync(
+        NGame host,
+        CombatState state,
+        SolverResult result)
+    {
+        long deadline = System.Environment.TickCount64 + 30_000;
+        while (CombatManager.Instance.IsInProgress
+               && !CombatManager.Instance.IsOverOrEnding
+               && (_deployment != null || CombatManager.Instance.PlayerActionsDisabled))
+        {
+            if (System.Environment.TickCount64 >= deadline)
+                throw new TimeoutException("回合准备完成后 30 秒内没有进入可部署状态。");
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+        await WaitForTurnStartDeploymentDelayAsync(host, result.StartTurnNumber);
+        if (!_combat.FullAutoEnabled
+            && ReferenceEquals(_combat.LatestResult, result)
+            && IsSamePlayableTurn(state, result.StartTurnNumber))
+        {
+            StartDeployment(host, state, result);
         }
     }
 
@@ -1343,19 +1384,19 @@ internal static class SolverController
                 SolverOverlay.ShowEndTurnDeploymentStep();
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 token.ThrowIfCancellationRequested();
-                PlanCardChoice[] enemyTurnChoices = plannedEndTurn.TurnStartChoices?
-                    .Where(choice => choice.Effect == PlanChoiceEffect.ApplyKnowledgeCurse)
+                PlanCardChoice[] endTurnChoices = plannedEndTurn.TurnStartChoices?
+                    .Where(choice => choice.Timing is PlanChoiceTiming.PlayerTurnEnd or PlanChoiceTiming.EnemyTurn)
                     .ToArray() ?? [];
-                if (enemyTurnChoices.Length > 0)
+                if (endTurnChoices.Length > 0)
                 {
                     Entry.Logger.Info(
                         $"[CombatSolver/Test] DEPLOY_END_TURN_CHOICE_PLAN turn={turn} " +
-                        $"count={enemyTurnChoices.Length} sources={string.Join(',', enemyTurnChoices.Select(choice => choice.SourceId))}");
+                        $"count={endTurnChoices.Length} sources={string.Join(',', endTurnChoices.Select(choice => choice.SourceId))}");
                     using NativeChoiceSession choiceSession = NativeChoiceRuntime.Begin(
                         state,
                         player,
                         $"deployment_end_turn:{turn}");
-                    choiceSession.SetPlanAndStartDriving(host, enemyTurnChoices, token);
+                    choiceSession.SetPlanAndStartDriving(host, endTurnChoices, token);
                     CombatManager.Instance.OnEndedTurnLocally();
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, turn));
                     await choiceSession.WaitForAllPlansConsumedAsync(token);
@@ -1370,7 +1411,7 @@ internal static class SolverController
                 Entry.Logger.Info(
                     $"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} end_turn=true " +
                     $"forecast_turn_start_choices={plannedEndTurn.TurnStartChoices?.Count ?? 0} " +
-                    $"enemy_turn_choices={enemyTurnChoices.Length}");
+                    $"end_turn_choices={endTurnChoices.Length}");
                 _combat.LastSolverDeployedTurn = turn;
             }
             else

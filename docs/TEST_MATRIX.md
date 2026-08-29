@@ -4,6 +4,26 @@
 
 同一版 DLL 的场景默认复用 marker 记录的 headless 游戏进程：首条命令直接启动游戏，完成后返回主菜单等待下一条请求；后续命令只向该测试 PID 投递。测试使用独立 `APPDATA/LOCALAPPDATA`、关闭 Steam，并只在隔离设置中确认允许加载 Mod；RitsuLib 在 headless 生命周期内从创意工坊版本目录临时投影到带所有权标记的本地目录，退出时删除。发现未由 marker 管理的塔 2 进程时拒绝运行。只有重新编译需要加载新 DLL，或最后一批显式传入 `-ExitOnComplete` 时才退出游戏。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
+## 下一版本（开发中）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `MONSTER-ATTACK-VIGOR-LIFECYCLE-POST018` | 通过 | 骇鳗攻击执行完整攻击前/攻击后生命周期，活力层数与原生严格一致。runId `9994be6016f345f892c6dbc3040384e2` | 2026-08-30 |
+| `POST018-TERROR-EEL-CONTINUATION` | 通过 | 骇鳗完整自动执行到第 6 回合，跨回合计划外重算 `0`。runId `acd9c91efb7443edb5a19737d7aba92b` | 2026-08-30 |
+| `POST018-TERROR-EEL-CONTINUATION-INCREMENTAL` | 超时，不计通过 | `360s` 上限内仍停留于首回合，没有完成断言；不作为增量等价证据。runId `7c53821b28fd4f84b337b673d9507adb` | 2026-08-30 |
+| `POST018-FABRICATOR-CHOICE-AND-AI-REUSE` | 通过 | 条件行动包含自身的队友计数；暴政选择按玩家回合开始阶段接管，完整自动执行到第 9 回合且零重算。runId `766852f4a7574342959cdf9ca7e940b0` | 2026-08-30 |
+| `POST018-DECIMILLIPEDE-UPGRADE-CHOICE-DEPLOY` | 通过 | 千足虫升级选牌完成原生部署，完整自动执行到第 4 回合且零重算。runId `dc190ef3c1784f27b0d9e2ef85f49b80` | 2026-08-30 |
+| `POST018-OVICOPTER-CONTINUATION` | 通过 | 产卵飞虫完整自动执行到第 5 回合，计划外重算 `0`。runId `c8e98d81c2c24c7d9de1baeb2d67e6ce` | 2026-08-30 |
+| `POST018-BYGONE-EFFIGY-TOOLS-CHOICE` | 通过 | 必备工具选择按下一玩家回合阶段消费，完整自动执行到第 7 回合且零重算。runId `1dbadbe59d9147879d62f44d38a55cf0` | 2026-08-30 |
+| `POST018-KNOWLEDGE-ANGER-END-RISK` | 通过 | 知识恶魔敌方回合选择不再被当前结束回合复核误判为计划外；完整自动执行到第 8 回合且零重算。runId `2612caee23e14c42a274aa7567ae2251` | 2026-08-30 |
+| `POST018-SCROLLS-AUTO-CHOICE-PHASE` | 通过（邻接覆盖） | 三卷轴怪当前路线首回合结束战斗，自动执行不中止且零重算；第 2 回合必备工具由独立阶段回归覆盖。runId `a9f7d23ea7d5439c97a78ddf327d520f` | 2026-08-30 |
+| `POST018-SOUL-NEXUS-GRID-SCROLL` | 通过 | 原生 37 张卡牌网格滚动到底部并通过真实节点选择支配，完整自动执行到第 7 回合且零重算。runId `b1a13ffbde4c46a6b64825cb2a3e8049` | 2026-08-30 |
+| `POST018-OVERGROWTH-ENTROPIC-CONTINUATION` | 通过（未复现旧重算） | 从蔓生爬虫问题根完整执行到第 2 回合且零重算；旧包在搜索期间实机药水栏与 RNG 已变化，因此保留为证据不足。runId `17fb59dfc1284928912eba1644b1ead5` | 2026-08-30 |
+| `POST018-TEST-SUBJECT-LOOT-CURRENT` | 通过 | 满手后的战利品生成与后续回放完整执行到第 12 回合，计划外重算 `0`。runId `7d95638f6d6f4a058221cb3507c05187` | 2026-08-30 |
+| `POST018-AEONGLASS-CHOICE-CURRENT` | 通过 | 永世沙漏原生选牌与重新接管完整执行到第 6 回合，计划外重算 `0`；更优路线仍属暂缓项。runId `c51d8cf8f47e43ccb7e4a922361688d8` | 2026-08-30 |
+| `POST018-ENTOMANCER-CLUMSY-CONTINUATION` | 通过 | 养蜂人塞入笨拙后的牌堆和洗牌续用一致，完整自动执行到第 4 回合且零重算。runId `066e8d5e64ff4eb3a2b0b2e8c4853685` | 2026-08-30 |
+| `POST018-KNIGHTS-FAILURE-CURRENT` | 通过（入口覆盖） | 当前路线首回合结束，最终回放入口不再失败且零重算；不宣称复现旧 9 回合路线。runId `d19d34b506cd4b67a863e124293bfaf1` | 2026-08-30 |
+
 ## 0.18.0
 
 | 场景 | 结果 | 验证内容 | 日期 |

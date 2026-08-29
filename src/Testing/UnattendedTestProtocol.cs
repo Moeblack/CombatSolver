@@ -146,6 +146,8 @@ internal sealed class UnattendedTestRequest
     public bool ExpectedPlayerDeath { get; init; }
     public SolverDeploymentFastMode? DeploymentFastModeForTest { get; init; }
     public SolverPerformancePreset? PerformancePresetForTest { get; init; }
+    public int? ShortMaxCardBranchesPerNodeForTest { get; init; }
+    public int? DeepMaxCardBranchesPerNodeForTest { get; init; }
     public SolverPotionPolicy? PotionPolicyForTest { get; init; }
     public SolverTheftPolicy? TheftPolicyForTest { get; init; }
     public double? NoGcRegionBudgetGigabytesForTest { get; init; }

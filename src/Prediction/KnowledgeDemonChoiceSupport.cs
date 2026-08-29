@@ -79,7 +79,8 @@ internal static class KnowledgeDemonChoiceSupport
                 PlanChoiceEffect.ApplyKnowledgeCurse,
                 PileType.None,
                 [new PlanCardToken(cardId, 0, string.Empty, 0, 0, displayNames.Card(cardId))],
-                request.SourceId));
+                request.SourceId,
+                Timing: PlanChoiceTiming.EnemyTurn));
         }
         return choices;
     }

@@ -663,6 +663,7 @@ internal sealed partial class CombatBeamSolver
                 {
                     SourceId = request.SourceId,
                     ContextId = request.ContextId,
+                    Timing = request.Timing,
                 };
                 if (!primaryChoice)
                     next.Add(resolvedBranch);
@@ -756,6 +757,7 @@ internal sealed partial class CombatBeamSolver
             {
                 SourceId = request.SourceId,
                 ContextId = request.ContextId,
+                Timing = request.Timing,
             });
             SimulationSnapshot resolved;
             try
@@ -791,6 +793,7 @@ internal sealed partial class CombatBeamSolver
 
         TurnStartChoiceCursor cursor = new(choices);
         simulatedCombat.BeginActionChoices(cursor);
+        simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnStart);
         SearchBoundaryReason boundary;
         try
         {
@@ -1236,6 +1239,7 @@ internal sealed partial class CombatBeamSolver
             .ToArray();
         TurnStartChoiceCursor roundChoices = new(roundChoicePlans);
         simulatedCombat.BeginActionChoices(roundChoices);
+        simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnEnd);
         try
         {
         int roundHistoryEntryStart = simulator.History.Entries.Count;
@@ -1282,6 +1286,7 @@ internal sealed partial class CombatBeamSolver
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(_player.Creature);
         if (!takingExtraTurn)
         {
+            simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.EnemyTurn);
             using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundEnemyTurn);
             {
                 using SearchMeasurementScope enemyStart = _run.Performance.Measure(SearchMetricPhase.RoundEnemyStart);
@@ -1414,6 +1419,7 @@ internal sealed partial class CombatBeamSolver
         }
 
         {
+            simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnStart);
             using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundPlayerStart);
             simulatedCombat.CurrentSide = CombatSide.Player;
             if (!takingExtraTurn)

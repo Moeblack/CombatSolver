@@ -183,7 +183,7 @@ internal static class BranchMonsterAi
         if (monster == "Fabricator" && branch.Id == "fabricateBranch")
         {
             int aliveTeammates = combat.GetTeammatesOf(owner)
-                .Count(creature => creature != owner && simulator.State.GetCreature(creature).IsAlive);
+                .Count(creature => simulator.State.GetCreature(creature).IsAlive);
             return aliveTeammates < 4 ? "RAND" : "DISINTEGRATE_MOVE";
         }
         if (monster == "TestSubject" && branch.Id == "REVIVE_BRANCH")

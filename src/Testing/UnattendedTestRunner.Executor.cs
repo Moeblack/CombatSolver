@@ -494,6 +494,8 @@ internal sealed partial class UnattendedTestRunner
         {
             UnattendedTestRequest request = runner._request;
             if (!request.PerformancePresetForTest.HasValue
+                && !request.ShortMaxCardBranchesPerNodeForTest.HasValue
+                && !request.DeepMaxCardBranchesPerNodeForTest.HasValue
                 && !request.PotionPolicyForTest.HasValue
                 && !request.NoGcRegionBudgetGigabytesForTest.HasValue
                 && !request.DeploymentFastModeForTest.HasValue
@@ -513,6 +515,22 @@ internal sealed partial class UnattendedTestRunner
                 {
                     PerformancePreset = SolverPerformancePreset.Custom,
                     NoGcRegionBudgetGigabytes = noGcBudget,
+                };
+            }
+            if (request.ShortMaxCardBranchesPerNodeForTest is { } shortMaxCardBranches)
+            {
+                testSettings = testSettings with
+                {
+                    PerformancePreset = SolverPerformancePreset.Custom,
+                    ShortMaxCardBranchesPerNode = shortMaxCardBranches,
+                };
+            }
+            if (request.DeepMaxCardBranchesPerNodeForTest is { } deepMaxCardBranches)
+            {
+                testSettings = testSettings with
+                {
+                    PerformancePreset = SolverPerformancePreset.Custom,
+                    DeepMaxCardBranchesPerNode = deepMaxCardBranches,
                 };
             }
             SolverSettings.ApplyForTesting(testSettings with

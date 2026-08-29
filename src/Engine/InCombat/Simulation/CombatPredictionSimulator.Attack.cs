@@ -16,6 +16,13 @@ internal sealed partial class CombatPredictionSimulator
         var command = new AttackCommand(0m)
             .FromCard(cardSource.Preview, cardPlay)
             .TargetingAllOpponents(State.CombatState);
+        return BeginAttackContext(command);
+    }
+
+    public AttackCommand BeginAttackContext(AttackCommand command)
+    {
+        _ = command.Attacker
+            ?? throw new InvalidOperationException("Attack context must have an attacker.");
         HookMirrors.BeforeAttack(this, command);
         return command;
     }

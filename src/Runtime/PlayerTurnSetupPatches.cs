@@ -121,6 +121,8 @@ internal static class PlayerTurnSetupCoordinator
         public int SearchState;
         public bool ReplayDrivingStarted { get; set; }
         public bool DeployAfterSetup { get; set; }
+        public IReadOnlyList<PlanCardChoice>? PlannedChoices
+            => ReplayChoices ?? Result?.TurnSetupChoices;
         public TaskCompletionSource PlanReady { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
     }
@@ -215,7 +217,7 @@ internal static class PlayerTurnSetupCoordinator
         => _active is { InitialSearch: not null, Result: null, SearchState: 1 };
 
     public static bool HasPendingPlannedChoice(CombatState combat)
-        => _active is { ReplayChoices: not null } active
+        => _active is { PlannedChoices: not null } active
            && ReferenceEquals(active.Combat, combat)
            && active.Choices.IsVisibleSurfaceOpen;
 
@@ -224,7 +226,7 @@ internal static class PlayerTurnSetupCoordinator
         CombatState combat,
         bool deployAfterSetup)
     {
-        if (_active is not { ReplayChoices: not null } active
+        if (_active is not { PlannedChoices: not null } active
             || !ReferenceEquals(active.Combat, combat)
             || !active.Choices.IsVisibleSurfaceOpen)
         {
@@ -233,9 +235,14 @@ internal static class PlayerTurnSetupCoordinator
 
         active.DeployAfterSetup |= deployAfterSetup;
         StartReplayDriver(active, host);
+        string takeoverMode = deployAfterSetup
+            ? "single_step"
+            : SolverController.FullAutoEnabled
+                ? "full_auto"
+                : "route_only";
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_TAKEOVER turn={active.Player.PlayerCombatState!.TurnNumber} " +
-            $"mode={(deployAfterSetup ? "single_step" : "full_auto")} choices={active.ReplayChoices.Count}");
+            $"mode={takeoverMode} choices={active.PlannedChoices.Count}");
         return true;
     }
 
@@ -449,9 +456,12 @@ internal static class PlayerTurnSetupCoordinator
             Entry.Logger.Info(
                 $"[CombatSolver/Test] TURN_SETUP_STATE_MATCH turn={player.PlayerCombatState!.TurnNumber} " +
                 "validation=exact_state_text");
+            bool deployInitialResult = active.DeployAfterSetup;
             DisposeActive();
             if (!SolverController.ActivateTurnSetupResult(host, active.Combat, active.Result))
                 throw new InvalidOperationException("回合准备搜索结果在精确状态匹配后仍无法激活。");
+            if (deployInitialResult && !SolverController.FullAutoEnabled)
+                SolverController.StartDeploymentAfterTurnSetup(host, active.Combat, active.Result);
         }
         finally
         {
@@ -545,11 +555,14 @@ internal static class PlayerTurnSetupCoordinator
         if (result.TurnSetupChoices.Count == 0)
             throw new InvalidOperationException("原生页面已经请求选牌，但回合准备搜索没有返回计划选择。");
         active.Result = result;
-        active.Choices.SetPlanAndStartDriving(host, result.TurnSetupChoices, active.Token);
+        active.Choices.RecordPlanReady();
+        SolverController.ShowTurnSetupResultPreview(host, result);
+        active.Choices.ReleaseVisibleSurface();
         active.PlanReady.TrySetResult();
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_PLAN turn={turn} choices={result.TurnSetupChoices.Count} " +
-            $"expanded={result.ExpandedNodes} searched_turns={result.SearchedTurns}");
+            $"expanded={result.ExpandedNodes} searched_turns={result.SearchedTurns} " +
+            "awaiting_user_start=true");
     }
 
     private static bool RequiresSolverChoice(Player player)
@@ -605,7 +618,7 @@ internal static class PlayerTurnSetupCoordinator
     {
         if (active.ReplayDrivingStarted)
             return;
-        IReadOnlyList<PlanCardChoice> replayChoices = active.ReplayChoices
+        IReadOnlyList<PlanCardChoice> replayChoices = active.PlannedChoices
             ?? throw new InvalidOperationException("回合准备接管缺少既有路线选择。");
         active.ReplayDrivingStarted = true;
         active.Choices.SetPlanAndStartDriving(host, replayChoices, active.Token);

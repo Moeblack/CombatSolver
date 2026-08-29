@@ -34,6 +34,14 @@ internal enum PlanChoiceEffect
     ApplyKnowledgeCurse,
 }
 
+internal enum PlanChoiceTiming
+{
+    Action,
+    PlayerTurnEnd,
+    EnemyTurn,
+    PlayerTurnStart,
+}
+
 internal enum SearchBoundaryReason
 {
     None,
@@ -88,7 +96,8 @@ internal sealed record PlanCardChoice(
     PileType SourcePile,
     IReadOnlyList<PlanCardToken> Cards,
     string SourceId = "",
-    string ContextId = "");
+    string ContextId = "",
+    PlanChoiceTiming Timing = PlanChoiceTiming.Action);
 
 internal sealed record PredictionGap(
     string SourceId,
