@@ -145,6 +145,7 @@ internal sealed partial class SimulatedCombatState
     }
 
     private Dictionary<(Creature Owner, Type Type), PowerModel>? _powers;
+    private List<(Creature Owner, Type Type)>? _powerListenerOrder;
     private Dictionary<PowerModel, PowerModel>? _rootMultiInstancePowerClones;
     private List<PredictedCard>? _generatedCombatCards;
     private List<PredictedCard>? _registeredCombatCards;
@@ -526,6 +527,7 @@ internal sealed partial class SimulatedCombatState
         PowerModel simulated = GetOrCreatePower(target, incoming, applier);
         int previousAmount = simulated._amount;
         simulated._amount = Math.Clamp(simulated._amount + amount, -999_999_999, 999_999_999);
+        UpdatePowerListenerOrder((target, typeof(T)), previousAmount, simulated._amount);
         InvalidateHookListeners();
         int applied = simulated._amount - previousAmount;
         RecordPowerAmountChange(simulated, applied, applier);
@@ -663,14 +665,25 @@ internal sealed partial class SimulatedCombatState
             return;
         T canonical = ModelDb.Power<T>();
         PowerModel simulated = GetOrCreatePower(target, canonical, null);
+        int previousAmount = simulated._amount;
         simulated._amount = Math.Clamp(amount, -999_999_999, 999_999_999);
+        UpdatePowerListenerOrder((target, typeof(T)), previousAmount, simulated._amount);
         InvalidateHookListeners();
     }
 
     public void SetPowerAmount(PowerModel power, int amount)
     {
         PowerModel mutable = GetMutablePowerInstance(power);
+        int previousAmount = mutable._amount;
         mutable._amount = Math.Clamp(amount, -999_999_999, 999_999_999);
+        if (!_rootMultiInstancePowers.Contains(power)
+            && _addedPowerInstances?.Contains(mutable) != true)
+        {
+            UpdatePowerListenerOrder(
+                (mutable.Owner, mutable.GetType()),
+                previousAmount,
+                mutable._amount);
+        }
         InvalidateHookListeners();
     }
 
@@ -717,6 +730,7 @@ internal sealed partial class SimulatedCombatState
         simulated._target = power.Target;
         simulated._amount = power.Amount;
         (_powers ??= []).Add(key, simulated);
+        UpdatePowerListenerOrder(key, 0, simulated._amount);
         InvalidateHookListeners();
         return simulated;
     }
@@ -733,8 +747,10 @@ internal sealed partial class SimulatedCombatState
             return;
         }
         PowerModel simulated = GetOrCreatePower(owner, incoming, applier);
+        int previousAmount = simulated._amount;
         simulated._target = target;
         simulated._amount = Math.Clamp(simulated._amount + amount, -999_999_999, 999_999_999);
+        UpdatePowerListenerOrder((owner, typeof(T)), previousAmount, simulated._amount);
         InvalidateHookListeners();
     }
 
@@ -815,6 +831,22 @@ internal sealed partial class SimulatedCombatState
         (_powers ??= []).Add(key, simulated);
         InvalidateHookListeners();
         return simulated;
+    }
+
+    private void UpdatePowerListenerOrder(
+        (Creature Owner, Type Type) key,
+        int previousAmount,
+        int currentAmount)
+    {
+        if (previousAmount == 0 && currentAmount != 0)
+        {
+            _powerListenerOrder ??= [];
+            if (!_powerListenerOrder.Contains(key))
+                _powerListenerOrder.Add(key);
+            return;
+        }
+        if (previousAmount != 0 && currentAmount == 0)
+            _powerListenerOrder?.Remove(key);
     }
 
     public void AddEnergyNextTurn(Player player, int amount)
@@ -1003,7 +1035,8 @@ internal sealed partial class SimulatedCombatState
         CombatPredictionSimulator simulator,
         Creature owner,
         TurnStartChoiceCursor choices,
-        bool isExtraTurn = false)
+        bool isExtraTurn = false,
+        bool sideTurnStartAlreadyTriggered = false)
     {
         Player player = owner.Player
             ?? throw new InvalidOperationException("玩家回合开始钩子的持有者没有 Player。");
@@ -1011,12 +1044,15 @@ internal sealed partial class SimulatedCombatState
             return true;
         if (TurnStartPowerSupport.TriggerAfterPlayerTurnStart(simulator, this, player, choices))
             return true;
-        TriggerSideTurnStart(
-            simulator,
-            CombatSide.Player,
-            [owner],
-            decrementPlating: GetPlayerTurnNumber(player) != 1,
-            isExtraTurn);
+        if (!sideTurnStartAlreadyTriggered)
+        {
+            TriggerSideTurnStart(
+                simulator,
+                CombatSide.Player,
+                [owner],
+                decrementPlating: GetPlayerTurnNumber(player) != 1,
+                isExtraTurn);
+        }
         return false;
     }
 
@@ -1384,10 +1420,13 @@ internal sealed partial class SimulatedCombatState
     IReadOnlyList<AbstractModel> ICombatPredictionHookListenerSource.RunHookListeners
         => GetEffectiveRunHookListeners();
 
-    int ICombatPredictionPlayerLimits.GetMaxHandSize(Player player)
+    public int GetMaxHandSize(Player player)
         => _rootMaxHandSizes.TryGetValue(player, out int maxHandSize)
             ? maxHandSize
             : throw new KeyNotFoundException($"No captured max hand size exists for player {player.NetId}.");
+
+    int ICombatPredictionPlayerLimits.GetMaxHandSize(Player player)
+        => GetMaxHandSize(player);
 
     int ICombatPredictionPlayerLimits.GetPotionSlotCount(Player player)
         => PotionSlotCount(player);
@@ -1466,9 +1505,9 @@ internal sealed partial class SimulatedCombatState
         }
         if (_powers != null)
         {
-            foreach (PowerModel power in _powers.Values)
+            foreach ((Creature Owner, Type Type) key in _powerListenerOrder ?? [])
             {
-                if (power.Amount != 0)
+                if (_powers.TryGetValue(key, out PowerModel? power) && power.Amount != 0)
                     listeners.Add(power);
             }
         }

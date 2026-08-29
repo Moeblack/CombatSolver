@@ -810,8 +810,20 @@ internal sealed partial class CombatBeamSolver
         PersistentPowerSupport.TriggerAfterEnergyReset(simulator, simulatedCombat, _player);
         TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, simulatedCombat, _player);
         simulatedCombat.ClearPendingTurnStartChoice();
-        if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, choices))
-            return SearchBoundaryReason.PendingChoice;
+        bool sideTurnStartTriggeredEarly = false;
+        using (choices.BeforeNextTake(() =>
+               {
+                   simulatedCombat.TriggerSideTurnStart(
+                       simulator,
+                       CombatSide.Player,
+                       [_player.Creature],
+                       decrementPlating: _startTurnNumber != 1);
+                   sideTurnStartTriggeredEarly = true;
+               }))
+        {
+            if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, choices))
+                return SearchBoundaryReason.PendingChoice;
+        }
 
         int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
             simulatedCombat,
@@ -838,7 +850,7 @@ internal sealed partial class CombatBeamSolver
                 drawPile.Insert(0, card);
             }
             drawCount = Math.Max(drawCount, innateCards.Length);
-            drawCount = Math.Min(drawCount, CardPile.MaxCardsInHand);
+            drawCount = Math.Min(drawCount, simulatedCombat.GetMaxHandSize(_player));
         }
 
         int historyEntryStart = simulator.History.Entries.Count;
@@ -849,7 +861,11 @@ internal sealed partial class CombatBeamSolver
             simulator,
             simulatedCombat,
             historyEntryStart);
-        if (simulatedCombat.TriggerPlayerTurnStart(simulator, _player.Creature, choices))
+        if (simulatedCombat.TriggerPlayerTurnStart(
+                simulator,
+                _player.Creature,
+                choices,
+                sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
             return SearchBoundaryReason.PendingChoice;
         CorePowerSupport.ApplyEnemyDeathPowers(
             simulator,
@@ -1421,14 +1437,29 @@ internal sealed partial class CombatBeamSolver
             TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, simulatedCombat, _player);
             simulatedCombat.ClearPendingTurnStartChoice();
             int beforeHandDrawShuffleEvents = simulator.ShuffleEventCount;
-            if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, roundChoices))
-                return SearchBoundaryReason.PendingChoice;
+            bool sideTurnStartTriggeredEarly = false;
+            using (roundChoices.BeforeNextTake(() =>
+                   {
+                       simulatedCombat.TriggerSideTurnStart(
+                           simulator,
+                           CombatSide.Player,
+                           [_player.Creature],
+                           decrementPlating: simulatedCombat.GetPlayerTurnNumber(_player) != 1,
+                           takingExtraTurn);
+                       sideTurnStartTriggeredEarly = true;
+                   }))
+            {
+                if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, roundChoices))
+                    return SearchBoundaryReason.PendingChoice;
+            }
             shufflesCrossed += simulator.ShuffleEventCount - beforeHandDrawShuffleEvents;
             int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
                 simulatedCombat,
                 _player,
                 CombatManager.baseHandDrawCount);
-            int effectiveDraw = Math.Min(drawCount, CardPile.MaxCardsInHand - playerState.Hand.Cards.Count);
+            int effectiveDraw = Math.Min(
+                drawCount,
+                simulatedCombat.GetMaxHandSize(_player) - playerState.Hand.Cards.Count);
             bool willShuffle = effectiveDraw > playerState.DrawPile.Cards.Count
                 && !playerState.DiscardPile.IsEmpty;
             int historyEntryStart = simulator.History.Entries.Count;
@@ -1443,7 +1474,8 @@ internal sealed partial class CombatBeamSolver
                     simulator,
                     _player.Creature,
                     roundChoices,
-                    takingExtraTurn))
+                    takingExtraTurn,
+                    sideTurnStartTriggeredEarly))
                 return SearchBoundaryReason.PendingChoice;
             CorePowerSupport.ApplyEnemyDeathPowers(
                 simulator, simulatedCombat, simulatedCombat.KnownEnemies, processedEnemyDeaths);

@@ -765,7 +765,11 @@ internal sealed partial class UnattendedTestRunner
                 new HashSet<uint>());
         }
         if (check.TriggerPlayerSetupAfterMove)
-            TriggerSimulatedPlayerSetup(simulator, simulatedCombat, player);
+            TriggerSimulatedPlayerSetup(
+                simulator,
+                simulatedCombat,
+                player,
+                check.PlayerSetupChoiceCardIds);
         if (check.TriggerAutoPrePlayAfterPlayerSetup)
         {
             IReadOnlyList<PlanCardChoice> plannedChoices = BuildAutoPrePlayChoices(
@@ -947,7 +951,10 @@ internal sealed partial class UnattendedTestRunner
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         }
         if (check.TriggerPlayerSetupAfterMove)
-            await TriggerActualPlayerSetupAsync(combatState, player);
+            await TriggerActualPlayerSetupAsync(
+                combatState,
+                player,
+                check.PlayerSetupChoiceCardIds);
         if (check.TriggerAutoPrePlayAfterPlayerSetup)
         {
             HookPlayerChoiceContext context = new(player, player.NetId, GameActionType.Combat);

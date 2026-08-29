@@ -266,6 +266,7 @@ internal sealed class UnattendedMonsterMoveCheck
     public bool TriggerEnemySideTurnStartAfterMove { get; init; }
     public bool TriggerPlayerTurnEndAfterMove { get; init; }
     public bool TriggerPlayerSetupAfterMove { get; init; }
+    public string[] PlayerSetupChoiceCardIds { get; init; } = [];
     public bool TriggerAutoPrePlayAfterPlayerSetup { get; init; }
     public string[] AutoPrePlayChoiceCardIds { get; init; } = [];
     public bool KillMonsterAfterMove { get; init; }

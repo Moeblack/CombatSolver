@@ -54,7 +54,7 @@ internal sealed record NativeChoiceTrace(
 
 internal static class NativeChoiceRuntime
 {
-    private static readonly Stack<NativeChoiceSession> Sessions = [];
+    private static readonly List<NativeChoiceSession> Sessions = [];
     private static readonly List<NativeChoiceTrace> Traces = [];
     private static readonly object TraceSync = new();
     private static long _nextSequence;
@@ -84,7 +84,7 @@ internal static class NativeChoiceRuntime
         string owner)
     {
         NativeChoiceSession session = new(combat, player, owner);
-        Sessions.Push(session);
+        Sessions.Add(session);
         return session;
     }
 
@@ -101,7 +101,7 @@ internal static class NativeChoiceRuntime
     {
         if (CardSelectCmd.Selector != null || Sessions.Count == 0)
             return;
-        NativeChoiceSession session = Sessions.Peek();
+        NativeChoiceSession session = Sessions[^1];
         if (!ReferenceEquals(session.Player, player)
             || !ReferenceEquals(session.Combat, CombatManager.Instance.DebugOnlyGetState()))
         {
@@ -124,9 +124,10 @@ internal static class NativeChoiceRuntime
 
     internal static void End(NativeChoiceSession session)
     {
-        if (Sessions.Count == 0 || !ReferenceEquals(Sessions.Peek(), session))
-            throw new InvalidOperationException($"原生选牌会话 {session.Owner} 没有位于活动栈顶。");
-        Sessions.Pop();
+        int index = Sessions.FindLastIndex(candidate => ReferenceEquals(candidate, session));
+        if (index < 0)
+            throw new InvalidOperationException($"原生选牌会话 {session.Owner} 没有注册为活动会话。");
+        Sessions.RemoveAt(index);
     }
 
     internal static void RecordTrace(
@@ -165,6 +166,7 @@ internal sealed class NativeChoiceSession : IDisposable
     private IReadOnlyList<PlanCardChoice>? _plans;
     private Task? _driver;
     private bool _producerCompleted;
+    private bool _detached;
     private bool _disposed;
 
     public NativeChoiceSession(CombatState combat, Player player, string owner)
@@ -290,6 +292,17 @@ internal sealed class NativeChoiceSession : IDisposable
             throw new InvalidOperationException($"原生选牌会话 {Owner} 被重复完成。");
         _producerCompleted = true;
         _requests.Writer.Complete();
+        if (_driver != null)
+            await _driver;
+    }
+
+    public async Task CompleteAndDetachAsync()
+    {
+        if (_producerCompleted)
+            throw new InvalidOperationException($"原生选牌会话 {Owner} 被重复完成。");
+        _producerCompleted = true;
+        _requests.Writer.Complete();
+        Detach();
         if (_driver != null)
             await _driver;
     }
@@ -442,7 +455,15 @@ internal sealed class NativeChoiceSession : IDisposable
         if (!_producerCompleted)
             _requests.Writer.TryComplete();
         ReleaseVisibleSurface();
+        Detach();
+    }
+
+    private void Detach()
+    {
+        if (_detached)
+            return;
         NativeChoiceRuntime.End(this);
+        _detached = true;
     }
 }
 

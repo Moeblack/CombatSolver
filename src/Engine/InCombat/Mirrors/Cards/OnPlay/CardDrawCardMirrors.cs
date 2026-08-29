@@ -104,7 +104,7 @@ internal static class CardDrawCardMirrors
         {
             var drawnCards = context.Simulator.Draw(card.Owner, 1);
             if (drawnCards is not [{ Preview.Type: CardType.Attack }] ||
-                context.OwnerState.Hand.Cards.Count >= CardPile.MaxCardsInHand)
+                context.OwnerState.Hand.Cards.Count >= context.Simulator.GetMaxHandSize(card.Owner))
             {
                 break;
             }
@@ -141,7 +141,7 @@ internal static class CardDrawCardMirrors
 
     public static void ScrawlOnPlay(Scrawl card, CardOnPlayMirrorContext context)
     {
-        var count = CardPile.MaxCardsInHand - context.OwnerState.Hand.Cards.Count;
+        int count = context.Simulator.GetMaxHandSize(card.Owner) - context.OwnerState.Hand.Cards.Count;
         context.Simulator.Draw(card.Owner, count);
     }
 

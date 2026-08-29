@@ -1,4 +1,3 @@
-using System.Reflection;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -6,12 +5,12 @@ using MegaCrit.Sts2.Core.Modding;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Runs;
 using CombatSolver.Engine.Common;
+using STS2RitsuLib;
 
 namespace CombatSolver;
 
 internal sealed class PredictionModHookSubscriberCapture
 {
-    private const string BaseLibMaxHandSizeInterfaceName = "BaseLib.Hooks.IMaxHandSizeModifier";
     private const string LoadoutMaxHandSizeModifierTypeName =
         "Loadout.Services.TildeKey.LoadoutMaxHandSizeModifier";
     private const string LoadoutEveryCardFreeCombatHookTypeName =
@@ -62,36 +61,9 @@ internal sealed class PredictionModHookSubscriberCapture
         Dictionary<Player, int> maxHandSizes = [];
         foreach (Player player in combat.Players)
         {
-            int maxHandSize = CardPile.MaxCardsInHand;
-            foreach (AbstractModel listener in runHookListeners)
-            {
-                Type listenerType = listener.GetType();
-                if (!listenerType.GetInterfaces().Any(@interface =>
-                        @interface.FullName == BaseLibMaxHandSizeInterfaceName))
-                {
-                    continue;
-                }
-                if (listenerType.FullName != LoadoutMaxHandSizeModifierTypeName)
-                {
-                    throw new PredictionUnsupportedException(
-                        $"Unsupported max-hand-size listener {listenerType.FullName}.");
-                }
-                MethodInfo modify = listenerType.GetMethod(
-                    "ModifyMaxHandSizeLate",
-                    BindingFlags.Instance | BindingFlags.Public,
-                    binder: null,
-                    types: [typeof(Player), typeof(int)],
-                    modifiers: null)
-                    ?? throw new MissingMethodException(listenerType.FullName, "ModifyMaxHandSizeLate(Player, int)");
-                maxHandSize = (int)(modify.Invoke(listener, [player, maxHandSize])
-                    ?? throw new InvalidOperationException(
-                        $"Max-hand-size listener {listenerType.FullName} returned null."));
-                if (maxHandSize < 0)
-                {
-                    throw new InvalidOperationException(
-                        $"Max-hand-size listener {listenerType.FullName} returned {maxHandSize}.");
-                }
-            }
+            int maxHandSize = RitsuLibFramework.GetMaxHandSize(player);
+            if (maxHandSize < 0)
+                throw new InvalidOperationException($"RitsuLib returned max hand size {maxHandSize}.");
             maxHandSizes.Add(player, maxHandSize);
         }
 

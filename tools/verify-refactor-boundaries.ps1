@@ -314,11 +314,23 @@ $rootModelBoundaryChecks = @(
     },
     @{
         Path = Join-Path $repositoryRoot "src\Engine\InCombat\Simulation\CombatPredictionSimulator.CardPile.cs"
-        Text = "limits.GetMaxHandSize(owner)"
+        Text = "int maxHandSize = GetMaxHandSize(player)"
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Engine\InCombat\Simulation\CombatPredictionSimulator.CardPile.cs"
+        Text = "limits.GetMaxHandSize(player)"
     },
     @{
         Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.cs"
         Text = ".Take(standardCombatListenerCount)"
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.cs"
+        Text = "UpdatePowerListenerOrder("
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.Fork.cs"
+        Text = "fork._powerListenerOrder ="
     },
     @{
         Path = Join-Path $repositoryRoot "src\Engine\Common\PredictionModModelSupport.cs"

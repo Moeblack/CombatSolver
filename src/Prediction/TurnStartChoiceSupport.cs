@@ -23,6 +23,7 @@ internal sealed class TurnStartChoiceCursor(IReadOnlyList<PlanCardChoice>? choic
     private readonly IReadOnlyList<PlanCardChoice> _choices = choices ?? [];
     private readonly Func<TurnStartChoiceRequest, PlanCardChoice?>? _automaticPolicy;
     private int _index;
+    private Action? _beforeNextTake;
 
     private TurnStartChoiceCursor(
         Func<TurnStartChoiceRequest, PlanCardChoice?> automaticPolicy,
@@ -41,6 +42,8 @@ internal sealed class TurnStartChoiceCursor(IReadOnlyList<PlanCardChoice>? choic
         if (_index >= _choices.Count)
         {
             choice = _automaticPolicy?.Invoke(request);
+            if (choice != null)
+                InvokeBeforeNextTake();
             return choice != null;
         }
 
@@ -52,6 +55,7 @@ internal sealed class TurnStartChoiceCursor(IReadOnlyList<PlanCardChoice>? choic
                 $"当前需要 {request.SourceId}/{request.Effect}/{request.SourcePile}；" +
                 $"计划上下文={choice.ContextId}，当前上下文={request.ContextId}。");
         }
+        InvokeBeforeNextTake();
         _index++;
         return true;
     }
@@ -61,11 +65,23 @@ internal sealed class TurnStartChoiceCursor(IReadOnlyList<PlanCardChoice>? choic
         if (_index >= _choices.Count || !Matches(_choices[_index], request))
         {
             choice = _automaticPolicy?.Invoke(request);
+            if (choice != null)
+                InvokeBeforeNextTake();
             return choice != null;
         }
 
-        choice = _choices[_index++];
+        choice = _choices[_index];
+        InvokeBeforeNextTake();
+        _index++;
         return true;
+    }
+
+    public IDisposable BeforeNextTake(Action callback)
+    {
+        if (_beforeNextTake != null)
+            throw new InvalidOperationException("选牌游标已经存在一个消费前回调。");
+        _beforeNextTake = callback;
+        return new BeforeNextTakeScope(this, callback);
     }
 
     public void AssertConsumed()
@@ -84,6 +100,22 @@ internal sealed class TurnStartChoiceCursor(IReadOnlyList<PlanCardChoice>? choic
             && choice.Effect == request.Effect
             && choice.SourcePile == request.SourcePile
             && string.Equals(choice.ContextId, request.ContextId, StringComparison.Ordinal);
+
+    private void InvokeBeforeNextTake()
+    {
+        Action? callback = _beforeNextTake;
+        _beforeNextTake = null;
+        callback?.Invoke();
+    }
+
+    private sealed class BeforeNextTakeScope(TurnStartChoiceCursor owner, Action callback) : IDisposable
+    {
+        public void Dispose()
+        {
+            if (ReferenceEquals(owner._beforeNextTake, callback))
+                owner._beforeNextTake = null;
+        }
+    }
 }
 
 internal static class TurnStartChoiceSupport

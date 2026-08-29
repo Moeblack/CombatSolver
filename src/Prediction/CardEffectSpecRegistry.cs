@@ -392,7 +392,7 @@ internal static class CardEffectSpecRegistry
                 break;
             case CrashLanding:
             {
-                int count = CardPile.MaxCardsInHand
+                int count = simulator.GetMaxHandSize(card.Owner)
                     - simulator.State.GetPlayerCombatState(card.Owner).Hand.Cards.Count;
                 AddFixed<Debris>(simulator, card, PileType.Hand, count);
                 applied = true;
