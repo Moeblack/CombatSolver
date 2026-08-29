@@ -1240,7 +1240,6 @@ internal sealed partial class CombatBeamSolver
         {
         int roundHistoryEntryStart = simulator.History.Entries.Count;
         bool takingExtraTurn = simulatedCombat.PrepareExtraPlayerTurn(simulator, _player);
-        simulatedCombat.CommitHistoryCourseTurn(_player);
         int etherealExhaustCount = simulatedCombat.CountEtherealCardsInHand(simulator, _player);
         {
             using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundPlayerEnd);
@@ -1250,6 +1249,7 @@ internal sealed partial class CombatBeamSolver
                     simulatedCombat,
                     _player,
                     [_player.Creature]);
+            simulatedCombat.CommitHistoryCourseTurn(_player);
             simulatedCombat.NormalizeAeonglassWithers(simulator);
             simulatedCombat.NormalizeCardAfflictions(simulator);
             CorePowerSupport.ApplyEnemyDeathPowers(

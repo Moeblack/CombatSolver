@@ -57,7 +57,6 @@ internal static class LiveEndTurnRiskEvaluator
             simulator,
             player,
             paelsEyeTriggers);
-        combat.CommitHistoryCourseTurn(player);
         int etherealExhaustCount = combat.CountEtherealCardsInHand(simulator, player);
 
         PlayerTurnEndLifecycle.RunPhaseOne(
@@ -65,6 +64,7 @@ internal static class LiveEndTurnRiskEvaluator
             combat,
             player,
             [player.Creature]);
+        combat.CommitHistoryCourseTurn(player);
         combat.NormalizeAeonglassWithers(simulator);
         combat.NormalizeCardAfflictions(simulator);
         CorePowerSupport.ApplyEnemyDeathPowers(

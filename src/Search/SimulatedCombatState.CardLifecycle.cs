@@ -21,6 +21,7 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Creature, int>? _simulatedOstyMaxHp;
     private HashSet<PredictedCard>? _returnToHandNextTurn;
     private ForkableDictionary<Creature, int>? _cardsPlayedThisTurn;
+    private ForkableDictionary<Creature, int>? _manualCardsPlayedThisTurn;
     private ForkableSet<CardModel>? _fetchCardsPlayedThisTurn;
     private ISet<uint>? _activeCardExecutionDeaths;
     private int _cardExecutionScopeDepth;
@@ -158,6 +159,10 @@ internal sealed partial class SimulatedCombatState
             return;
         Creature owner = card.Preview.Owner.Creature;
         (_cardPlaysStartedThisTurn ??= [])[owner] = GetCardPlaysStartedThisTurn(owner) + 1;
+        if (!cardPlay.IsAutoPlay)
+        {
+            (_manualCardsPlayedThisTurn ??= [])[owner] = GetManualCardsPlayedThisTurn(owner) + 1;
+        }
     }
 
     void ICombatPredictionCardExecutionSink.ApplyCardPlayEffects(
@@ -429,6 +434,19 @@ internal sealed partial class SimulatedCombatState
         return value;
     }
 
+    public int GetManualCardsPlayedThisTurn(Creature owner)
+    {
+        if (_manualCardsPlayedThisTurn?.TryGetValue(owner, out int value) == true)
+            return value;
+        value = _rootHistory.CardPlaysStarted.Count(entry =>
+            entry.HappenedThisTurn(this)
+            && entry.CardPlay.IsFirstInSeries
+            && !entry.CardPlay.IsAutoPlay
+            && entry.CardPlay.Player.Creature == owner);
+        (_manualCardsPlayedThisTurn ??= [])[owner] = value;
+        return value;
+    }
+
     public int GetCardPlaysStartedThisTurn(Creature owner)
     {
         if (_cardPlaysStartedThisTurn?.TryGetValue(owner, out int value) == true)
@@ -456,6 +474,7 @@ internal sealed partial class SimulatedCombatState
     private void ResetCardLifecycleTurn(Creature owner)
     {
         (_cardsPlayedThisTurn ??= [])[owner] = 0;
+        (_manualCardsPlayedThisTurn ??= [])[owner] = 0;
         _fetchCardsPlayedThisTurn?.Clear();
         ResetPowerLifecycleTurn(owner);
     }
@@ -465,6 +484,7 @@ internal sealed partial class SimulatedCombatState
         CombatPredictionSimulator simulator)
     {
         AddCreatureIntMap(ref fingerprint, 'c', _cardsPlayedThisTurn);
+        AddCreatureIntMap(ref fingerprint, 'm', _manualCardsPlayedThisTurn);
         AddCreatureIntMap(ref fingerprint, 'o', _simulatedOstyMaxHp);
 
         ulong first = 0;

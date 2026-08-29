@@ -61,6 +61,7 @@ internal sealed partial class SimulatedCombatState
             _simulatedOsties = _simulatedOsties?.Fork(),
             _simulatedOstyMaxHp = _simulatedOstyMaxHp?.Fork(),
             _cardsPlayedThisTurn = _cardsPlayedThisTurn?.Fork(),
+            _manualCardsPlayedThisTurn = _manualCardsPlayedThisTurn?.Fork(),
             _fetchCardsPlayedThisTurn = _fetchCardsPlayedThisTurn?.Fork(),
             _simulatedPlayerGold = _simulatedPlayerGold?.Fork(),
             _liveCardsAtSnapshot = _liveCardsAtSnapshot?.Fork(),
