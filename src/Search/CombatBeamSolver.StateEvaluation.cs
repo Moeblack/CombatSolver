@@ -314,6 +314,7 @@ internal sealed partial class CombatBeamSolver
             playerState.Stars,
             simulator.History.Entries.Count,
             playerState.Hand.Cards.Count,
+            combat.CanTriggerArtOfWarNextTurn(_player),
             pocketwatchCardsPlayedThisTurn,
             pocketwatchCardsPlayedLastTurn,
             pocketwatchCardThreshold,

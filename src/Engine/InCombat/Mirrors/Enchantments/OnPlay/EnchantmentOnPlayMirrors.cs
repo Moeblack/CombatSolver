@@ -79,7 +79,7 @@ internal static class EnchantmentOnPlayMirrors
     {
         if (context.CombatState is not ICombatPredictionEffectSink effects)
             throw new InvalidOperationException("墨染附魔缺少可写的预测状态。");
-        IEnumerable<Creature> targets = context.PreviewCard.TargetType == TargetType.AllEnemies
+        IEnumerable<Creature> targets = context.Simulator.GetTargetType(context.Card) == TargetType.AllEnemies
             ? context.State.HittableEnemies
             : context.CardPlay.Target is { } selectedTarget ? [selectedTarget] : [];
         foreach (Creature target in targets)

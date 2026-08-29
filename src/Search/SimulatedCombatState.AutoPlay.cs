@@ -109,7 +109,7 @@ internal sealed partial class SimulatedCombatState
                         .FirstOrDefault(candidate => CanPlayCard(simulator, candidate));
                     if (card == null)
                         break;
-                    Creature? target = card.Preview.TargetType switch
+                    Creature? target = simulator.GetTargetType(card) switch
                     {
                         TargetType.AnyEnemy => HittableEnemies.FirstOrDefault(),
                         TargetType.AnyAlly => simulator.Rng.CombatTargets.NextItem(

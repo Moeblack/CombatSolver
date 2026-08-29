@@ -37,6 +37,7 @@ internal sealed partial class CombatPredictionSimulator
         }
 
         var state = State.GetPlayerCombatState(player);
+        int maxHandSize = GetMaxHandSize(player);
         List<PredictedCard> drawnCards = [];
 
         for (var i = 0; i < drawCount; i++)
@@ -46,7 +47,7 @@ internal sealed partial class CombatPredictionSimulator
                 break;
             }
 
-            if (state.Hand.Cards.Count >= CardPile.MaxCardsInHand)
+            if (state.Hand.Cards.Count >= maxHandSize)
             {
                 break;
             }
@@ -62,7 +63,7 @@ internal sealed partial class CombatPredictionSimulator
             if (HasPendingChoice)
                 break;
 
-            if (state.DrawPile.IsEmpty || state.Hand.Cards.Count >= CardPile.MaxCardsInHand)
+            if (state.DrawPile.IsEmpty || state.Hand.Cards.Count >= maxHandSize)
             {
                 break;
             }
@@ -80,6 +81,11 @@ internal sealed partial class CombatPredictionSimulator
 
         return drawnCards;
     }
+
+    public int GetMaxHandSize(Player player)
+        => State.CombatState is ICombatPredictionPlayerLimits limits
+            ? limits.GetMaxHandSize(player)
+            : CardPile.MaxCardsInHand;
 
     /// <summary>
     /// Mirrors <see cref="CardPileCmd.Shuffle"/>.
@@ -264,9 +270,7 @@ internal sealed partial class CombatPredictionSimulator
             return result with { Success = false };
         }
 
-        int maxHandSize = State.CombatState is ICombatPredictionPlayerLimits limits
-            ? limits.GetMaxHandSize(owner)
-            : CardPile.MaxCardsInHand;
+        int maxHandSize = GetMaxHandSize(owner);
         SimCardPile targetPile = newPile.Type == PileType.Hand
             && newPile.Cards.Count >= maxHandSize
                 ? playerCombatState.DiscardPile
@@ -364,9 +368,7 @@ internal sealed partial class CombatPredictionSimulator
             var card = result.CardAdded;
 
             var targetPile = newPile;
-            int maxHandSize = State.CombatState is ICombatPredictionPlayerLimits limits
-                ? limits.GetMaxHandSize(owner)
-                : CardPile.MaxCardsInHand;
+            int maxHandSize = GetMaxHandSize(owner);
             if (targetPile.Type == PileType.Hand && targetPile.Cards.Count >= maxHandSize)
             {
                 targetPile = playerCombatState.DiscardPile;

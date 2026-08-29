@@ -808,7 +808,10 @@ internal static class AfterCardPlayedMirrors
 
         SimulatedCombatState combat = context.CombatState as SimulatedCombatState
             ?? throw new InvalidOperationException("Make It So requires simulated combat state.");
-        int count = combat.GetSkillCardsPlayedThisTurn(card.Owner.Creature);
+        // Vanilla records CardPlayFinished before dispatching AfterCardPlayedLate.
+        // The simulated lifecycle counter is committed after this hook, so include
+        // the skill that is currently finishing.
+        int count = combat.GetSkillCardsPlayedThisTurn(card.Owner.Creature) + 1;
         if (count % card.DynamicVars.Cards.IntValue == 0)
         {
             context.Simulator.AddToPile(predictedCard, PileType.Hand);

@@ -103,6 +103,8 @@ internal sealed partial class CombatBeamSolver
                 potionFreeStrategicHpDeficit = auditedBaseline.HpDeficit;
                 potionFreePlayerHp = auditedBaseline.PlayerHp;
             }
+            bool anyRouteWon = potionFreeWon
+                || policyCandidates.Any(candidate => candidate.Features.AllEnemiesDead);
             if (emitDiagnostics)
             {
                 if (potionFreeBaselineIndex >= 0)
@@ -137,6 +139,7 @@ internal sealed partial class CombatBeamSolver
                          candidate.PotionStrategicCost,
                          potionFreeWon,
                          potionFreeStrategicHpDeficit,
+                         anyRouteWon,
                          candidate.Features.AllEnemiesDead,
                          candidate.StrategicHpDeficit)
                      || theftPolicy == SolverTheftPolicy.PreserveResources
@@ -181,6 +184,7 @@ internal sealed partial class CombatBeamSolver
                           candidate.PotionStrategicCost,
                           potionFreeWon,
                           potionFreeStrategicHpDeficit,
+                          anyRouteWon,
                           candidate.Features.AllEnemiesDead,
                           candidate.StrategicHpDeficit)
                       || theftPolicy == SolverTheftPolicy.PreserveResources

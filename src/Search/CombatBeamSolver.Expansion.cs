@@ -516,6 +516,10 @@ internal sealed partial class CombatBeamSolver
         if (!choices.Contains(null))
             probeSnapshot.ReleaseSimulator();
 
+        int repeatedAutoPlayBranchQuota = choiceSpec?.Effect == PlanChoiceEffect.AutoPlayRepeated
+            ? Math.Max(1, _profile.MaxHandChoiceBranchesPerAction / Math.Max(1, choices.Count))
+            : int.MaxValue;
+
         foreach (PlanCardChoice? choice in choices)
         {
             if (unregisteredPendingChoice)
@@ -537,7 +541,11 @@ internal sealed partial class CombatBeamSolver
                 childSnapshot = replayedChoice;
             }
             foreach ((PlanAction finalAction, SimulationSnapshot finalSnapshot) in
-                     ResolveRoundChoiceBranches(node, resolvedAction, childSnapshot))
+                     ResolveRoundChoiceBranches(
+                         node,
+                         resolvedAction,
+                         childSnapshot,
+                         maxFinalBranches: repeatedAutoPlayBranchQuota))
             {
                 yield return (finalAction, finalSnapshot);
             }
@@ -582,7 +590,8 @@ internal sealed partial class CombatBeamSolver
         SearchNode node,
         PlanAction action,
         SimulationSnapshot snapshot,
-        CardChoiceSpec? unresolvedPrimaryChoice = null)
+        CardChoiceSpec? unresolvedPrimaryChoice = null,
+        int maxFinalBranches = int.MaxValue)
     {
         if (snapshot.BoundaryReason != SearchBoundaryReason.PendingChoice)
         {
@@ -596,8 +605,9 @@ internal sealed partial class CombatBeamSolver
             IReadOnlyList<PlanCardChoice> branches = KnowledgeDemonChoiceSupport.BuildChoices(
                 knowledgeRequest,
                 displayNames);
-            _run.ChoiceBranchesEvaluated += branches.Count;
+            _run.ChoiceBranchesEvaluated += Math.Min(branches.Count, maxFinalBranches);
             snapshot.ReleaseSimulator();
+            int yielded = 0;
             foreach (PlanCardChoice branch in branches)
             {
                 IReadOnlyList<PlanCardChoice> existing = action.TurnStartChoices ?? [];
@@ -614,9 +624,12 @@ internal sealed partial class CombatBeamSolver
                              node,
                              resolvedAction,
                              resolvedSnapshot,
-                             unresolvedPrimaryChoice))
+                             unresolvedPrimaryChoice,
+                             maxFinalBranches - yielded))
                 {
                     yield return (finalAction, finalSnapshot);
+                    if (++yielded >= maxFinalBranches)
+                        yield break;
                 }
             }
             yield break;
@@ -631,8 +644,9 @@ internal sealed partial class CombatBeamSolver
                 displayNames,
                 _profile.MaxPileChoiceBranchesPerAction,
                 _profile.MaxHandChoiceBranchesPerAction);
-            _run.ChoiceBranchesEvaluated += branches.Count;
+            _run.ChoiceBranchesEvaluated += Math.Min(branches.Count, maxFinalBranches);
             snapshot.ReleaseSimulator();
+            int yielded = 0;
             foreach (PlanCardChoice branch in branches)
             {
                 bool turnResolution = action.Kind == PlanActionKind.EndTurn
@@ -683,9 +697,12 @@ internal sealed partial class CombatBeamSolver
                              node,
                              resolvedAction,
                              resolvedSnapshot,
-                             unresolvedPrimaryChoice))
+                             unresolvedPrimaryChoice,
+                             maxFinalBranches - yielded))
                 {
                     yield return (finalAction, finalSnapshot);
+                    if (++yielded >= maxFinalBranches)
+                        yield break;
                 }
             }
             yield break;
@@ -810,8 +827,20 @@ internal sealed partial class CombatBeamSolver
         PersistentPowerSupport.TriggerAfterEnergyReset(simulator, simulatedCombat, _player);
         TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, simulatedCombat, _player);
         simulatedCombat.ClearPendingTurnStartChoice();
-        if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, choices))
-            return SearchBoundaryReason.PendingChoice;
+        bool sideTurnStartTriggeredEarly = false;
+        using (choices.BeforeNextTake(() =>
+               {
+                   simulatedCombat.TriggerSideTurnStart(
+                       simulator,
+                       CombatSide.Player,
+                       [_player.Creature],
+                       decrementPlating: _startTurnNumber != 1);
+                   sideTurnStartTriggeredEarly = true;
+               }))
+        {
+            if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, choices))
+                return SearchBoundaryReason.PendingChoice;
+        }
 
         int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
             simulatedCombat,
@@ -838,7 +867,7 @@ internal sealed partial class CombatBeamSolver
                 drawPile.Insert(0, card);
             }
             drawCount = Math.Max(drawCount, innateCards.Length);
-            drawCount = Math.Min(drawCount, CardPile.MaxCardsInHand);
+            drawCount = Math.Min(drawCount, simulatedCombat.GetMaxHandSize(_player));
         }
 
         int historyEntryStart = simulator.History.Entries.Count;
@@ -849,7 +878,11 @@ internal sealed partial class CombatBeamSolver
             simulator,
             simulatedCombat,
             historyEntryStart);
-        if (simulatedCombat.TriggerPlayerTurnStart(simulator, _player.Creature, choices))
+        if (simulatedCombat.TriggerPlayerTurnStart(
+                simulator,
+                _player.Creature,
+                choices,
+                sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
             return SearchBoundaryReason.PendingChoice;
         CorePowerSupport.ApplyEnemyDeathPowers(
             simulator,
@@ -1207,7 +1240,6 @@ internal sealed partial class CombatBeamSolver
         {
         int roundHistoryEntryStart = simulator.History.Entries.Count;
         bool takingExtraTurn = simulatedCombat.PrepareExtraPlayerTurn(simulator, _player);
-        simulatedCombat.CommitHistoryCourseTurn(_player);
         int etherealExhaustCount = simulatedCombat.CountEtherealCardsInHand(simulator, _player);
         {
             using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundPlayerEnd);
@@ -1217,6 +1249,7 @@ internal sealed partial class CombatBeamSolver
                     simulatedCombat,
                     _player,
                     [_player.Creature]);
+            simulatedCombat.CommitHistoryCourseTurn(_player);
             simulatedCombat.NormalizeAeonglassWithers(simulator);
             simulatedCombat.NormalizeCardAfflictions(simulator);
             CorePowerSupport.ApplyEnemyDeathPowers(
@@ -1421,14 +1454,29 @@ internal sealed partial class CombatBeamSolver
             TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, simulatedCombat, _player);
             simulatedCombat.ClearPendingTurnStartChoice();
             int beforeHandDrawShuffleEvents = simulator.ShuffleEventCount;
-            if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, roundChoices))
-                return SearchBoundaryReason.PendingChoice;
+            bool sideTurnStartTriggeredEarly = false;
+            using (roundChoices.BeforeNextTake(() =>
+                   {
+                       simulatedCombat.TriggerSideTurnStart(
+                           simulator,
+                           CombatSide.Player,
+                           [_player.Creature],
+                           decrementPlating: simulatedCombat.GetPlayerTurnNumber(_player) != 1,
+                           takingExtraTurn);
+                       sideTurnStartTriggeredEarly = true;
+                   }))
+            {
+                if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, roundChoices))
+                    return SearchBoundaryReason.PendingChoice;
+            }
             shufflesCrossed += simulator.ShuffleEventCount - beforeHandDrawShuffleEvents;
             int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
                 simulatedCombat,
                 _player,
                 CombatManager.baseHandDrawCount);
-            int effectiveDraw = Math.Min(drawCount, CardPile.MaxCardsInHand - playerState.Hand.Cards.Count);
+            int effectiveDraw = Math.Min(
+                drawCount,
+                simulatedCombat.GetMaxHandSize(_player) - playerState.Hand.Cards.Count);
             bool willShuffle = effectiveDraw > playerState.DrawPile.Cards.Count
                 && !playerState.DiscardPile.IsEmpty;
             int historyEntryStart = simulator.History.Entries.Count;
@@ -1443,7 +1491,8 @@ internal sealed partial class CombatBeamSolver
                     simulator,
                     _player.Creature,
                     roundChoices,
-                    takingExtraTurn))
+                    takingExtraTurn,
+                    sideTurnStartTriggeredEarly))
                 return SearchBoundaryReason.PendingChoice;
             CorePowerSupport.ApplyEnemyDeathPowers(
                 simulator, simulatedCombat, simulatedCombat.KnownEnemies, processedEnemyDeaths);
@@ -1728,14 +1777,7 @@ internal sealed partial class CombatBeamSolver
         PredictedCard card,
         CombatPredictionSimulator simulator)
     {
-        if (card.Preview is SovereignBlade
-            && ((SimulatedCombatState)simulator.State.CombatState)
-                .GetAmount<SeekingEdgePower>(card.Preview.Owner.Creature) > 0)
-        {
-            yield return (-1, null);
-            yield break;
-        }
-        if (card.Preview.TargetType == TargetType.AnyEnemy)
+        if (simulator.GetTargetType(card) == TargetType.AnyEnemy)
         {
             IReadOnlyList<Creature> enemies = simulator.State.Enemies;
             for (int i = 0; i < enemies.Count; i++)

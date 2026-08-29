@@ -87,7 +87,8 @@ internal static class GeneralCardMirrors
             command.WithHitCount(context.Card.ResolveStarXValue(context.State));
         }
 
-        switch (card.TargetType)
+        TargetType targetType = context.Simulator.GetTargetType(context.Card);
+        switch (targetType)
         {
             case TargetType.AnyEnemy:
                 command.Targeting(context.Target);
@@ -102,7 +103,7 @@ internal static class GeneralCardMirrors
                 break;
 
             default:
-                EngineDiagnostics.Warn($"Attack {card.Id} has an unsupported target type: {card.TargetType}");
+                EngineDiagnostics.Warn($"Attack {card.Id} has an unsupported target type: {targetType}");
                 context.History.RecordRisk(PredictionRiskReason.MethodMirrorIncomplete);
                 return;
         }

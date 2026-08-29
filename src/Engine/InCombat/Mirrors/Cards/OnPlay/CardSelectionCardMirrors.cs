@@ -13,7 +13,7 @@ internal static class CardSelectionCardMirrors
 {
     public static void AnointedOnPlay(Anointed card, CardOnPlayMirrorContext context)
     {
-        var count = CardPile.MaxCardsInHand - context.OwnerState.Hand.Cards.Count;
+        int count = context.Simulator.GetMaxHandSize(card.Owner) - context.OwnerState.Hand.Cards.Count;
         if (count <= 0)
         {
             return;

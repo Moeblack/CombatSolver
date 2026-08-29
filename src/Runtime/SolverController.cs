@@ -1289,7 +1289,9 @@ internal static class SolverController
                         $"energy={liveState.Energy} hand={string.Join(',', liveState.Hand.Cards.Select(card => card.Id.Entry))} " +
                         $"draw={string.Join(',', liveState.DrawPile.Cards.Select(card => card.Id.Entry))} " +
                         $"discard={string.Join(',', liveState.DiscardPile.Cards.Select(card => card.Id.Entry))} " +
-                        $"exhaust={string.Join(',', liveState.ExhaustPile.Cards.Select(card => card.Id.Entry))}");
+                        $"exhaust={string.Join(',', liveState.ExhaustPile.Cards.Select(card => card.Id.Entry))} " +
+                        $"powers={string.Join(',', player.Creature.Powers.Select(power =>
+                            $"{power.Id.Entry}:{power.Amount}/{power.AmountOnTurnStart}"))}");
                 }
                 SolverOverlay.ShowDeploymentStep(actionIndex + 1, actions.Count, null);
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
@@ -1327,7 +1329,9 @@ internal static class SolverController
                     && (_stopFullAutoOnDeathTurn || _stopFullAutoOnWorseRecalculation))
                 {
                     await UnattendedTestRunner.ApplyScheduledPreEndTurnDriftAsync(state, turn);
-                    LiveEndTurnRiskProjection liveRisk = LiveEndTurnRiskEvaluator.Evaluate(state);
+                    LiveEndTurnRiskProjection liveRisk = LiveEndTurnRiskEvaluator.Evaluate(
+                        state,
+                        plannedEndTurn.TurnStartChoices);
                     int plannedHpLoss = result.HpLostByTurn.GetValueOrDefault(turn);
                     bool worsened = liveRisk.HpLost > plannedHpLoss;
                     if ((_stopFullAutoOnDeathTurn && liveRisk.PlayerDead)
@@ -1370,7 +1374,7 @@ internal static class SolverController
                     CombatManager.Instance.OnEndedTurnLocally();
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, turn));
                     await choiceSession.WaitForAllPlansConsumedAsync(token);
-                    await choiceSession.CompleteAsync();
+                    await choiceSession.CompleteAndDetachAsync();
                 }
                 else
                 {

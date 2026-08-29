@@ -47,7 +47,7 @@ internal sealed partial class SimulatedCombatState
         StatefulRelicState state = GetStatefulRelicState(relic);
         return state.Current == 0
             && state.Previous != 0
-            && GetCardsPlayedThisTurn(player.Creature) == 0
+            && GetManualCardsPlayedThisTurn(player.Creature) == 0
             && !(GetPlayerTurnNumber(player) == 1
                 && RelicsOf(player).Any(static candidate => !candidate.IsMelted && candidate is WhisperingEarring));
     }
@@ -76,7 +76,7 @@ internal sealed partial class SimulatedCombatState
             StatefulRelicState state = GetStatefulRelicState(relic);
             if (state.Current == 0
                 && state.Previous != 0
-                && GetCardsPlayedThisTurn(player.Creature) == 0)
+                && GetManualCardsPlayedThisTurn(player.Creature) == 0)
             {
                 SetStatefulRelicState(relic, state with { Current = 1 });
             }
@@ -304,7 +304,6 @@ internal sealed partial class SimulatedCombatState
         foreach (OrbModel orb in simulator.State.GetPlayerCombatState(relic.Owner).OrbQueue.Orbs.ToArray())
             simulator.TriggerOrbPassive(orb, null);
         TriggeredPowerSupport.CompensateHistorySince(simulator, this, historyEntryStart);
-        SetStatefulRelicState(relic, default);
     }
 
     private bool HasAvailablePotion(Player player)

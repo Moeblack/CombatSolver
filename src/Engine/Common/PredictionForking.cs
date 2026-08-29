@@ -102,7 +102,9 @@ internal interface ICombatPredictionCardExecutionSink
 {
     IDisposable BeginCardExecutionScope();
 
-    void RecordCardPlayStarted(CombatSolver.Engine.Common.PredictedCard card);
+    void RecordCardPlayStarted(
+        CombatSolver.Engine.Common.PredictedCard card,
+        MegaCrit.Sts2.Core.Entities.Cards.CardPlay cardPlay);
 
     void ApplyCardPlayEffects(
         CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,

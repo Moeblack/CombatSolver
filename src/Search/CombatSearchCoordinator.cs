@@ -241,31 +241,101 @@ internal static class CombatSearchCoordinator
         bool potionFreeWon = potionFree.Snapshot.AllEnemiesDead
             && !potionFree.Snapshot.PlayerDead
             && potionFree.Snapshot.ProjectedPlayerHp > 0;
-        int correctedSaved = primary.BestNode.Actions.Any(action =>
-                action.Kind == PlanActionKind.UsePotion
-                && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal))
-            ? Math.Max(0, primary.Snapshot.PlayerHp - potionFree.Snapshot.PlayerHp)
-            : Math.Max(0, potionFree.ProjectedBattleHpLost - primary.ProjectedBattleHpLost);
-        SolverResult selected;
+        PotionFreePolicyBaseline baseline = new(
+            Won: potionFreeWon,
+            HpDeficit: StrategicHpDeficit(root, potionFree),
+            PlayerHp: potionFree.Snapshot.PlayerHp);
+        List<SolverResult> searches = [primary, potionFree];
+        SolverResult selected = primary;
+        for (int maximumPotionUses = primary.PotionCount - 1;
+             potionFreeWon && maximumPotionUses >= 1 && selected.PotionCount > 1;
+             maximumPotionUses--)
+        {
+            SolverResult fewerPotions = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                SolverPotionPolicy.Smart,
+                baseline,
+                maximumPotionUses).Solve();
+            bool fewerPotionsDeepTriggered = shortCheckpointMilliseconds is { } marginalCheckpoint
+                && fewerPotions.Elapsed.TotalMilliseconds > marginalCheckpoint;
+            fewerPotions.SearchPhase = fewerPotionsDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            fewerPotions.DeepSearchTriggered = fewerPotionsDeepTriggered;
+            fewerPotions.DeepSearchImprovedResult = false;
+            fewerPotions.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                fewerPotions,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                fewerPotionsDeepTriggered);
+            searches.Add(fewerPotions);
+
+            bool fewerPotionsWon = fewerPotions.Snapshot.AllEnemiesDead
+                && !fewerPotions.Snapshot.PlayerDead
+                && fewerPotions.Snapshot.ProjectedPlayerHp > 0;
+            if (!fewerPotionsWon || fewerPotions.PotionCount >= selected.PotionCount)
+                continue;
+
+            int marginalHpSaved = Math.Max(
+                0,
+                StrategicHpDeficit(root, fewerPotions) - StrategicHpDeficit(root, selected));
+            int marginalHpRequired = Math.Max(
+                0,
+                selected.PotionHpRequired - fewerPotions.PotionHpRequired);
+            bool additionalPotionsProtectLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
+                && selected.OutstandingStolenResource < fewerPotions.OutstandingStolenResource;
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SMART_POTION_MARGINAL_AUDIT " +
+                $"more={selected.PotionCount} fewer={fewerPotions.PotionCount} " +
+                $"marginal_saved={marginalHpSaved} marginal_required={marginalHpRequired} " +
+                $"protects_more_loot={additionalPotionsProtectLoot} " +
+                $"selected={(additionalPotionsProtectLoot || marginalHpSaved >= marginalHpRequired ? "more" : "fewer")}");
+            if (!additionalPotionsProtectLoot && marginalHpSaved < marginalHpRequired)
+                selected = fewerPotions;
+        }
+
+        int correctedSaved = CorrectedPotionHpSaved(root, selected, potionFree);
         bool potionProtectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
-            && primary.OutstandingStolenResource < potionFree.OutstandingStolenResource;
-        if (!potionProtectsMoreLoot && potionFreeWon && correctedSaved < primary.PotionHpRequired)
+            && selected.OutstandingStolenResource < potionFree.OutstandingStolenResource;
+        if (!potionProtectsMoreLoot && potionFreeWon && correctedSaved < selected.PotionHpRequired)
         {
             selected = potionFree;
         }
         else
         {
-            primary.PotionHpSaved = potionFreeWon ? correctedSaved : primary.PotionHpSaved;
-            selected = primary;
+            selected.PotionHpSaved = potionFreeWon ? correctedSaved : selected.PotionHpSaved;
         }
-        MergeAuditTotals(selected, primary, potionFree);
+        MergeAuditTotals(selected, [.. searches]);
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SMART_POTION_AUDIT result potion_free_won={potionFreeWon} " +
-            $"corrected_saved={correctedSaved} required={primary.PotionHpRequired} " +
+            $"corrected_saved={correctedSaved} required={selected.PotionHpRequired} " +
             $"potion_protects_more_loot={potionProtectsMoreLoot} " +
             $"selected={(ReferenceEquals(selected, potionFree) ? "potion_free" : "potion_route")}");
         return selected;
     }
+
+    private static int CorrectedPotionHpSaved(
+        CombatRootSnapshot root,
+        SolverResult potionRoute,
+        SolverResult potionFree)
+        => potionRoute.BestNode.Actions.Any(action =>
+                action.Kind == PlanActionKind.UsePotion
+                && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal))
+            ? Math.Max(0, potionRoute.Snapshot.PlayerHp - potionFree.Snapshot.PlayerHp)
+            : Math.Max(
+                0,
+                StrategicHpDeficit(root, potionFree) - StrategicHpDeficit(root, potionRoute));
+
+    private static int StrategicHpDeficit(CombatRootSnapshot root, SolverResult result)
+        => result.Snapshot.CumulativePlayerHpLost
+            + Math.Max(0, root.InitialPlayerMaxHp - result.Snapshot.PlayerMaxHp);
 
     private static void MergeAuditTotals(
         SolverResult selected,

@@ -1,6 +1,6 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.17.2`（2026-08-29）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
+> 基线：CombatSolver `0.18.0`（2026-08-30）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
 
 同一版 DLL 的场景默认复用各平台启动器 marker 记录的 headless 游戏进程：首条命令直接启动游戏，完成后返回主菜单等待下一条请求；后续命令只向该测试 PID 投递。Windows 保留既有 PID/进程名检查；Linux 还核对进程启动时刻、隔离环境以及 Mod DLL/manifest 的 SHA-256，重编译后会安全重启，不会复用内存中的旧程序集。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。发现未由 marker 管理的塔 2 进程时，两端都会拒绝运行。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。最后一批分别传入 `-ExitOnComplete` 或 `--exit-on-complete` 时退出游戏。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
@@ -11,6 +11,37 @@
 | `LINUX-HEADLESS-INSTANT-AB` | 通过 | 同一 PID `66703` 先后运行 `Normal / Instant / Normal`；内部耗时分别为 `7098.0 / 2917.7 / 7064.5 ms`，Instant 稳定节省约 `59%`。三次均应用并恢复测试速度，runId `e8dede980dbb4daab57cc1c6a1d71730`、`8851e4147f9940e2921088474c8c7e5f`、`42148ebf930243b59d9230d2cb68f913` | 2026-08-29 |
 | `LINUX-HEADLESS-REUSE-REGRESSION` | 通过 | 同一 PID 连续通过怪物严格差分、铁甲战士跨回合复用、跨角色切换到星辰、再切回铁甲战士完成精灵药自动战斗；对应 runId `74da3eefb1e841219c5721323dad83d6`、`dbd5cf92f61043b28d38978aa8307a6e`、`8605ff494b604c019323e222f5247314`、`261c9007073d40709a5f388d698063e9`，两项复用场景和完整战斗的计划外重算均为 `0` | 2026-08-29 |
 | `LINUX-HEADLESS-LIFECYCLE` | 通过 | 原生日志为 `N/A (headless) / VRAM 0B`；marker 验证 PID starttime、隔离环境及 DLL/manifest 哈希。无变化复用同一 PID；Release 重建后输出 `UNATTENDED_RESTART reason=mod_changed` 并自动换 PID。失败退出约 `510 ms`，最终进程、marker、临时 RitsuLib 投影均清理 | 2026-08-29 |
+
+## 0.18.0
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `MAKE-IT-SO-FINISHED-HISTORY-018` | 通过 | 独立回合从 0 次技能历史开始，逐张断言如此甚好在前两张技能后留在弃牌堆、第 3 张后回手，实机与模拟一致。runId `5d226c100ea949f1bc498a01a7961106` | 2026-08-29 |
+| `NEUROSURGE-MUTABLE-POWER-018` | 通过 | 精神过载及同批 47 项卡牌施加 Power 后，生命、能量、牌堆、Power 和怪物状态实机差分一致。runId `fa74bbbe3c4245188cde369d7bcf6144` | 2026-08-29 |
+| `LIVE-END-TURN-RISK-CHOICE-REUSE-018` | 通过 | 惊逃在结束回合风险复核中自动打出头槌，复用路线选择将盛怒置顶，选择顺序与消费数严格一致。runId `216d8643891f442689074fa5f6f7954e` | 2026-08-29 |
+| `FOREGONE-CONCLUSION-DELAYED-DRAW-018` | 通过 | 既定事项页面暂停回合准备时，先执行原版 `AfterSideTurnStart` 再确认选牌；下回合多抽一张在正式抽牌前移除，选中 3 张后总手牌为 8。实机与模拟严格一致。runId `a65c0460238c467c803394b5c07a59c5` | 2026-08-29 |
+| `OWL-MAGISTRATE-TURN-SETUP-REUSE-018` | 通过 | 从猫头鹰法官问题包战前状态完整自动执行，既定事项、辉光和回合准备选牌跨回合保持一致，第 5 回合结束前计划外重算 `0`。runId `cd2f163cd0cd41f5af6183fe9b4fec5c` | 2026-08-29 |
+| `SPECTRUM-FOREGONE-ORDER-018` | 通过 | 光谱偏移先生成随机无色牌，既定事项随后把 3 张牌移入手牌，再执行普通抽牌；有序牌堆、Power 和 RNG 与实机严格一致。runId `96f54d71babf4c3ba4871dd5400953a8` | 2026-08-29 |
+| `KNOWLEDGE-POWER-REAPPLICATION-ORDER-018` | 通过 | 从知识恶魔问题包战前状态完整自动执行；敌方诅咒选择会话正常退出，第 11 回合重新施加既定事项后保持正确 Power 监听顺序，第 12 回合结束战斗，计划外重算 `0`。runId `bdf89c2bf77341ee8da1c7f68b2d2161` | 2026-08-29 |
+| `CURRENT-BUNDLE-DIRECT-COVERAGE-018` | 通过 | 当前源码直接重放地道虫、外骨骼虫、感染棱柱、活体盾与高塔炮手，以及连枷骑士、幽灵骑士与魔法骑士问题包，分别越过原初始化、计划外选牌、实时风险选牌、精神过载动作回放及如此甚好部署找牌错误；runId `edce410703414934a3f3259429b10d26`、`6a32338eb2f24b44aa45cf731c845163`、`417c1b5707924606816351b1aa339c21`、`b2d4cb91395e46ccb944da5a8558192b`、`0d737a4acb9e4a85a9365f296562311c` | 2026-08-29 |
+| `POWER-ROOT-INTERNAL-STATE-018` | 通过 | 鬼祟珊瑚群第 2 回合继承本回合已受到的 `9` 点伤害，搜索与实机的回合伤害上限一致；完整自动战斗在第 5 回合结束，计划外重算 `0`。runId `b126492a542c4c3d85bc47f0bffe0b1c` | 2026-08-29 |
+| `EMOTION-CHIP-HISTORY-ROLL-018` | 通过 | 情感芯片触发充能球后保留上回合失去生命的记录，直到敌方回合结束再滚动；完整自动战斗在第 5 回合结束，计划外重算 `0`。runId `e265c0a6887f48ea892c2e5489236721` | 2026-08-29 |
+| `FAN-OF-KNIVES-SHIV-TARGET-018` | 通过 | 刀扇生效后，小刀按全体攻击生成无目标动作并与实机一致；永世沙漏问题包完整自动执行到第 7 回合，计划外重算 `0`。runId `e825a7e0fe244d5b8be45086c3f3d7ef` | 2026-08-29 |
+| `UPROAR-ECHO-FORM-AUTOPLAY-018` | 通过 | 回响形态重放骚动时，骚动自动打出的集中打击读取已经开始的外层出牌系列，因此只结算一次；敌人生命、集中、牌堆、能量与 RNG 的原生/预测完整状态一致。runId `06550cd755b246c7b044865469541422` | 2026-08-29 |
+| `TEST-SUBJECT-GC-ECHO-FINAL-018` | 通过 | 实验体原问题包在首轮搜索与全自动请求重叠时只执行一次 No-GC 滚动回收，不再循环触发 `before_next_search`；随后连续复用并在第 8 回合结束，计划外重算 `0`。runId `913d3393e919438fbf2d7635ce318b2b` | 2026-08-29 |
+| `DECISIONS-REPEATED-CHOICE-BUDGET-018` | 通过 | 抉择，抉择的三次自动出牌共享整张牌的手牌选择分支预算；储君实验体原包首轮短搜返回后连续精确复用 10 回合，第 11 回合结束，计划外重算 `0`。runId `c8c9f6f2edda40bd87bc2bf5e6b20520` | 2026-08-29 |
+| `TURRET-RELIC-ANNOTATION-018` | 通过 | 活体盾与高塔炮手原问题包的首轮最终遗物标注正常完成；完整自动执行到第 4 回合，计划外重算 `0`。runId `6d1e48b181824f0fbebc43525c959403` | 2026-08-29 |
+| `MECHA/SOUL-NEXUS-REPLAN-018` | 通过 | 机甲骑士与静默猎手对灵魂枢纽的两份原问题包分别完整自动执行到第 4、5 回合，计划外重算均为 `0`。runId `cb31ec9272284f579bbf6efa942281e0`、`2b11153f74af4766848d585e8372d62f` | 2026-08-29 |
+| `WATERFALL-SMART-MARGINAL-POTION-018` | 通过 | 瀑布巨兽原问题包的智能用药路线只保留痊愈药水；独立无药反事实确认预计省血 `10/9`，再生药水不再借用另一瓶药水的收益通过门槛。runId `dbce824e7919490882bd6022f2ebc394` | 2026-08-29 |
+| `MYTES-SMART-BLOCK-POTION-018` | 通过 | 异螨原问题包在第 2 回合实际使用格挡药水，完整自动执行到第 5 回合，预计省血 `9/9`，计划外重算 `0`。runId `1959c1dd79c743958a6f921f727d6cae` | 2026-08-29 |
+| `LOST-FORGOTTEN-REQUIRED-POTION-BOUNDARY-018` | 通过 | 失落之物与遗忘之物原问题包在“至少使用一瓶”下正常返回一瓶药水的边界路线，不再把已展开的流动铜液与能力药水误报为没有可执行路线；该短预算结果仍为死亡边界。runId `d3fa5886b45e46948093c0d42518f79d` | 2026-08-29 |
+| `QUEEN-POTION-POLICY-DISABLED-018` | 通过 | 女王原问题包全程记录“禁用药水”，路线按设置保留稳定血清与固化药水；玩家手动使用稳定血清后，本局已用药数正确增加。该项是设置行为，不是药水适配失败 | 2026-08-29 |
+| `TEST-SUBJECT-REQUIRED-POTION-QUALITY-018` | 通过 | 实验体同一起点、高档预算成对复跑：智能模式 0 瓶、预计战损 `78`；至少使用一瓶时选择肌肉药水、预计战损 `74`，不再发生强制用药后战损上升。runId `12dc53ed6dc1469d9e0bae71a1b14b2e`、`6a4b981c9c7c4fb7999304980c33f00c` | 2026-08-29 |
+| `INSATIABLE-REQUIRED-POTION-BOUNDARY-018` | 通过 | 无厌沙虫原问题包在“至少使用一瓶”下返回包含第 4 回合易伤药水的边界路线，不再因长战斗尚未搜索到完整胜利而误报没有可执行路线；该结果仍为死亡边界。runId `6563e660595d4b35932719281320b5c3` | 2026-08-29 |
+| `HISTORY-COURSE-STAMPEDE-PAELS-EYE-018` | 通过 | 历史课在惊逃的回合末自动攻击之后记录上一回合最后一张非复制攻击牌；佩尔之眼只统计玩家主动出牌。永世沙漏原问题包完整全自动执行到第 5 回合，包含额外回合，计划外重算 `0`。runId `0b1d38c391d04a36a7a9cc14c5122d5f` | 2026-08-29 |
+| `AEONGLASS-EXACT-PILE-ART-ROUTING-018` | 通过 | 从永世沙漏问题包战前存档恢复跑局与 RNG，并固定首手和 29 张有序抽牌；路线实际打出灵动步法+，预计战损 `27`，低于包内原路线的 `42`。runId `0c2c35a7510b4e0f9846fca740aa80c1` | 2026-08-30 |
+| `QUEEN-ART-OF-WAR-LANE-REGRESSION-018` | 通过（邻接回归） | 女王战前重建在中档预算、智能用药下预计战损 `18`，低于回归上限 `26`；该场景只证明孙子兵法专用通道没有影响无关战斗，不作为第 18 项“更优解”的同根证明。runId `8d69269258924485aef31a0325d1d3c1` | 2026-08-30 |
+| `QUEEN-EXACT-PILE-MANUAL-QUALITY-018` | 通过（未追平手操） | 固定女王问题包的 7 张首手和 32 张有序抽牌后，当前路线主动打出余像与计划妥当，预计战损 `9`；包内旧求解路线为 `26`，玩家手操路线实测为 `5`。runId `598bc5d8e86b4094bbf96c04942e192e` | 2026-08-30 |
 
 ## 0.17.2
 
@@ -63,7 +94,7 @@
 | `JAXFRUIT-TORIC-TOUGHNESS-REUSE-0160` | 通过 | 从啪嗒果问题包战前存档恢复种子、A10、双敌生命、首行动与 RNG；第 4 回合精确复用，计划外重算 0。runId `ed4f9715bde9405bab9655fd83701aba` | 2026-08-28 |
 | `PAINFUL-STABS-MONSTER-ATTACK-0160` | 通过 | 给酸液攻击怪物注入荆棘，单次穿透格挡的命中后弃牌堆精确加入 1 张伤口；原生与预测完整状态一致。runId `b89e025cf429450595e4d38f2e603c90` | 2026-08-28 |
 | `POWER-DAMAGE-HOOKS-REGRESSION-0160` | 通过 | 14 组伤害与攻击钩子严格差分全部通过，覆盖荆棘、吸取、活力、缓冲等，确认怪物攻击接入共享 `AfterAttack` 后没有重复结算。runId `50849d4ecff04661a7254b529611c74e` | 2026-08-28 |
-| `TEST-SUBJECT-PAINFUL-STABS-REUSE-0160` | 通过 | 从试验体问题包战前存档恢复种子、A10、牌组、遗物、首行动与 RNG；越过第二形态多爪与荆棘，至第 6 回合持续精确复用，计划外重算 0。runId `a267600d977549f1a492d36479394f60` | 2026-08-28 |
+| `TEST-SUBJECT-PAINFUL-STABS-REUSE-0160` | 通过 | 从实验体问题包战前存档恢复种子、A10、牌组、遗物、首行动与 RNG；越过第二形态多爪与荆棘，至第 6 回合持续精确复用，计划外重算 0。runId `a267600d977549f1a492d36479394f60` | 2026-08-28 |
 | `VANTOM-UPGRADED-CARD-SHUFFLE-0160` | 通过 | 从 Vantom 问题包战前存档恢复种子、A2、牌组、首行动与 RNG；普通/升级打击跨洗牌顺序一致，第 5 回合精确复用，计划外重算 0。runId `e877c8239def4647a36c7d5102c940f3` | 2026-08-28 |
 | `INSATIABLE-INVOKE-CROSS-CHARACTER-0160` | 通过 | 静默猎手打出召唤后推进到第 2 回合；原生与预测均创建 `2/2` 奥斯提并施加 1 层“为你而死”，两项下回合 Power 被消费，额外能量与 5 张手牌严格一致。runId `ec2f0a77e09a424fad6b8f78f2460c7e`；既有亡灵契约师奥斯提卡牌与伤害转移回归 runId `037a7a3ec6bc48f797913d398f0dfde1`、`c09e18e9f28b47e1a5c528495c62c124` 同时通过 | 2026-08-28 |
 | `INSATIABLE-INVOKE-SEARCH-0160` | 通过 | 无厌沙虫固定为液化地面，静默猎手只有召唤与 5 张防御；正式 Short 搜索越过原 `EndTurn → SUMMON_NEXT_TURN_POWER` 初始化错误，正常返回 5 回合候选、1 个可执行动作、未镜像项 0。runId `0765ed5133604dcb9fab017fa8e30f42` | 2026-08-28 |

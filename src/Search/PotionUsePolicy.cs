@@ -70,13 +70,14 @@ internal static class PotionUsePolicy
         int strategicHpCost,
         bool potionFreeWon,
         int potionFreeHpDeficit,
+        bool anyRouteWon,
         bool potionRouteWon,
         int potionRouteHpDeficit)
         => policy switch
         {
             SolverPotionPolicy.Disabled => potionCount == automaticPotionCount,
             SolverPotionPolicy.RequireAtLeastOne => potionCount > 0
-                && potionRouteWon
+                && (!anyRouteWon || potionRouteWon)
                 && (potionCount == 1
                     || !potionFreeWon
                     || HpSaved(potionFreeHpDeficit, potionRouteHpDeficit)

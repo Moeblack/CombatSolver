@@ -643,6 +643,7 @@ internal sealed partial class UnattendedTestRunner
                     $"skills={simulatedCombat.GetSkillCardsPlayedThisTurn(card.Preview.Owner.Creature)}。");
             }
             if (playable)
+            {
                 PlaySimulatedCard(
                     simulator,
                     simulatedCombat,
@@ -651,6 +652,8 @@ internal sealed partial class UnattendedTestRunner
                     combatState.Enemies,
                     playCheck.UseChoice ? playCheck.ChoiceCardIds : null,
                     playCheck.ExpectedExcludedChoiceCardIds);
+                AssertSimulatedCardPileAfterPlay(simulator, player, playCheck);
+            }
         }
         if (check.TriggerPlayerSideTurnEndAfterMove)
             CorePowerSupport.TriggerPlayerSideTurnEndEffects(simulator, simulatedCombat, [player.Creature]);
@@ -779,7 +782,11 @@ internal sealed partial class UnattendedTestRunner
                 new HashSet<uint>());
         }
         if (check.TriggerPlayerSetupAfterMove)
-            TriggerSimulatedPlayerSetup(simulator, simulatedCombat, player);
+            TriggerSimulatedPlayerSetup(
+                simulator,
+                simulatedCombat,
+                player,
+                check.PlayerSetupChoiceCardIds);
         if (check.TriggerAutoPrePlayAfterPlayerSetup)
         {
             IReadOnlyList<PlanCardChoice> plannedChoices = BuildAutoPrePlayChoices(
@@ -863,7 +870,10 @@ internal sealed partial class UnattendedTestRunner
                     $"实机中怪物行动前卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
             }
             if (playable)
+            {
                 await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+                AssertActualCardPileAfterPlay(player, playCheck);
+            }
         }
         if (check.TriggerPlayerSideTurnEndBeforeMove)
             await TriggerActualSideTurnEndAsync(combatState, CombatSide.Player, [player.Creature]);
@@ -871,6 +881,8 @@ internal sealed partial class UnattendedTestRunner
             await TriggerActualSideTurnEndAsync(combatState, CombatSide.Enemy, combatState.Enemies);
         await monster.PerformMove();
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        if (check.LiveEndTurnRiskCardId != null)
+            AssertLiveEndTurnRiskChoices(combatState, player, check);
         foreach (UnattendedPowerInjection injectedPowerAfterMove in check.PowersAfterMove)
         {
             await InjectPowerAsync(combatState, player, injectedPowerAfterMove, enemy);
@@ -908,7 +920,10 @@ internal sealed partial class UnattendedTestRunner
                     $"实机中卡牌 {playCheck.CardId}#{playCheck.Occurrence} 可打出={playable}，预期 {playCheck.ExpectedPlayable}。");
             }
             if (playable)
+            {
                 await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+                AssertActualCardPileAfterPlay(player, playCheck);
+            }
         }
         if (check.TriggerPlayerSideTurnEndAfterMove)
             await TriggerActualSideTurnEndAsync(combatState, CombatSide.Player, [player.Creature]);
@@ -953,7 +968,10 @@ internal sealed partial class UnattendedTestRunner
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         }
         if (check.TriggerPlayerSetupAfterMove)
-            await TriggerActualPlayerSetupAsync(combatState, player);
+            await TriggerActualPlayerSetupAsync(
+                combatState,
+                player,
+                check.PlayerSetupChoiceCardIds);
         if (check.TriggerAutoPrePlayAfterPlayerSetup)
         {
             HookPlayerChoiceContext context = new(player, player.NetId, GameActionType.Combat);
@@ -1415,6 +1433,50 @@ internal sealed partial class UnattendedTestRunner
             .FirstOrDefault()
             ?? throw new InvalidOperationException($"模拟手牌中找不到 {cardId}#{occurrence}。");
 
+    private static void AssertLiveEndTurnRiskChoices(
+        CombatState combatState,
+        Player player,
+        UnattendedMonsterMoveCheck check)
+    {
+        SimulatedCombatState combat = new(combatState);
+        CombatPredictionSimulator simulator = new(combat);
+        PredictedCard choiceCard = FindSimulatedHandCard(
+            simulator,
+            player,
+            check.LiveEndTurnRiskCardId!,
+            0);
+        CardChoiceSpec spec = CardChoiceSupport.GetSpec(simulator, choiceCard)
+            ?? throw new InvalidOperationException(
+                $"结束回合风险复核测试牌 {check.LiveEndTurnRiskCardId} 没有选牌定义。");
+        PlanCardChoice choice = CardChoiceSupport.BuildRequestedChoice(
+            spec,
+            check.LiveEndTurnRiskChoiceCardIds) with
+        {
+            SourceId = check.LiveEndTurnRiskChoiceSourceId,
+        };
+        _ = LiveEndTurnRiskEvaluator.Evaluate(combatState, [choice]);
+    }
+
+    private static void AssertSimulatedCardPileAfterPlay(
+        CombatPredictionSimulator simulator,
+        Player player,
+        UnattendedCardPlayCheck check)
+    {
+        if (check.ExpectedCardIdAfterPlay == null || check.ExpectedCardPileAfterPlay == null)
+            return;
+        PredictedCard card = simulator.State.GetPlayerCombatState(player).AllCards
+            .Single(candidate => candidate.Preview.Id.Entry.Equals(
+                check.ExpectedCardIdAfterPlay,
+                StringComparison.Ordinal));
+        string actualPile = card.GetPile(simulator.State)?.Type.ToString() ?? "None";
+        if (!actualPile.Equals(check.ExpectedCardPileAfterPlay, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"模拟中打出 {check.CardId} 后 {check.ExpectedCardIdAfterPlay} 位于 {actualPile}，" +
+                $"预期 {check.ExpectedCardPileAfterPlay}。");
+        }
+    }
+
     private static IReadOnlyList<PlanCardChoice> BuildAutoPrePlayChoices(
         CombatPredictionSimulator simulator,
         Player player,
@@ -1446,6 +1508,25 @@ internal sealed partial class UnattendedTestRunner
             .Skip(occurrence)
             .FirstOrDefault()
             ?? throw new InvalidOperationException($"实机手牌中找不到 {cardId}#{occurrence}。");
+
+    private static void AssertActualCardPileAfterPlay(
+        Player player,
+        UnattendedCardPlayCheck check)
+    {
+        if (check.ExpectedCardIdAfterPlay == null || check.ExpectedCardPileAfterPlay == null)
+            return;
+        CardModel card = player.PlayerCombatState!.AllCards
+            .Single(candidate => candidate.Id.Entry.Equals(
+                check.ExpectedCardIdAfterPlay,
+                StringComparison.Ordinal));
+        string actualPile = card.Pile?.Type.ToString() ?? "None";
+        if (!actualPile.Equals(check.ExpectedCardPileAfterPlay, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"实机中打出 {check.CardId} 后 {check.ExpectedCardIdAfterPlay} 位于 {actualPile}，" +
+                $"预期 {check.ExpectedCardPileAfterPlay}。");
+        }
+    }
 
     private static void PlaySimulatedCard(
         CombatPredictionSimulator simulator,

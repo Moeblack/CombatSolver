@@ -8,10 +8,13 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Helpers;
+using MegaCrit.Sts2.Core.Hooks;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Enchantments;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Nodes;
+using STS2RitsuLib;
 using STS2RitsuLib.Patching.Models;
 
 namespace CombatSolver;
@@ -327,6 +330,7 @@ internal static class PlayerTurnSetupCoordinator
                 $"source=continuation choices={replayChoices!.Count} search=false " +
                 $"driving={active.ReplayDrivingStarted.ToString().ToLowerInvariant()}");
         }
+        LogSetupPowers(player, "before_original");
         Task originalSetup = InvokeOriginalSetupAsync(manager, turnState, player, choiceContext);
         try
         {
@@ -392,6 +396,7 @@ internal static class PlayerTurnSetupCoordinator
                 await TryStartSearchAfterVisibleChoiceAsync(active, host, original, "auto_pre_play");
             await active.Choices.AwaitPhaseAsync(original);
             await active.Choices.CompleteAsync();
+            LogSetupPowers(player, "after_original");
 
             if (active.ReplayChoices != null)
             {
@@ -574,6 +579,26 @@ internal static class PlayerTurnSetupCoordinator
             .Concat(state.ExhaustPile.Cards)
             .Concat(state.PlayPile.Cards)
             .Any(card => card.Enchantment is Imbued);
+    }
+
+    private static void LogSetupPowers(Player player, string stage)
+    {
+        if (!SolverSettings.Current.EnableDetailedDiagnosticLogs)
+            return;
+        ICombatState combat = player.Creature.CombatState
+            ?? throw new InvalidOperationException("回合准备详细诊断时玩家不在战斗中。");
+        decimal handDraw = Hook.ModifyHandDraw(
+            combat,
+            player,
+            CombatManager.baseHandDrawCount,
+            out IEnumerable<AbstractModel> modifiers);
+        Entry.Logger.Info(
+            $"[CombatSolver/Debug] TURN_SETUP_POWERS turn={player.PlayerCombatState?.TurnNumber ?? 0} " +
+            $"stage={stage} max_hand={RitsuLibFramework.GetMaxHandSize(player)} " +
+            $"hand_draw={handDraw:0.##} " +
+            $"hand_draw_modifiers={string.Join(',', modifiers.Select(model => model.Id.Entry))} " +
+            $"powers={string.Join(',', player.Creature.Powers.Select(power =>
+                $"{power.Id.Entry}:{power.Amount}/{power.AmountOnTurnStart}"))}");
     }
 
     private static void StartReplayDriver(ActivePlan active, NGame host)

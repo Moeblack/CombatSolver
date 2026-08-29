@@ -88,8 +88,20 @@ internal sealed partial class UnattendedTestRunner
     private static void TriggerSimulatedPlayerSetup(
         CombatPredictionSimulator simulator,
         SimulatedCombatState combat,
-        Player player)
+        Player player,
+        IReadOnlyList<string> choiceCardIds)
     {
+        TurnStartChoiceCursor choices = choiceCardIds.Count == 0
+            ? new TurnStartChoiceCursor(null)
+            : TurnStartChoiceCursor.ForAutomaticPolicy(request =>
+            {
+                CardChoiceSpec spec = TurnStartChoiceSupport.BuildSpec(simulator, player, request);
+                return CardChoiceSupport.BuildRequestedChoice(spec, choiceCardIds) with
+                {
+                    SourceId = request.SourceId,
+                    ContextId = request.ContextId,
+                };
+            });
         SimPlayerCombatState state = simulator.State.GetPlayerCombatState(player);
         combat.AdvancePlayerTurn(player);
         combat.SnapshotPowerAmountsAtTurnStart([player.Creature]);
@@ -120,8 +132,20 @@ internal sealed partial class UnattendedTestRunner
         TurnStartRelicSupport.TriggerAfterEnergyReset(simulator, combat, player);
         PersistentPowerSupport.TriggerAfterEnergyReset(simulator, combat, player);
         TurnStartRelicSupport.TriggerAfterEnergyResetLate(simulator, combat, player);
-        if (combat.PrepareBeforeHandDraw(simulator, player))
-            throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌前结算。");
+        bool sideTurnStartTriggeredEarly = false;
+        using (choices.BeforeNextTake(() =>
+               {
+                   combat.TriggerSideTurnStart(
+                       simulator,
+                       CombatSide.Player,
+                       [player.Creature],
+                       decrementPlating: combat.GetPlayerTurnNumber(player) != 1);
+                   sideTurnStartTriggeredEarly = true;
+               }))
+        {
+            if (combat.PrepareBeforeHandDraw(simulator, player, choices))
+                throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌前结算。");
+        }
         int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
             combat,
             player,
@@ -129,11 +153,19 @@ internal sealed partial class UnattendedTestRunner
         int historyEntryStart = simulator.History.Entries.Count;
         simulator.Draw(player, drawCount, fromHandDraw: true);
         TriggeredPowerSupport.CompensateHistorySince(simulator, combat, historyEntryStart);
-        if (combat.TriggerPlayerTurnStart(simulator, player.Creature, turnStartChoices: null))
+        if (combat.TriggerPlayerTurnStart(
+                simulator,
+                player.Creature,
+                choices,
+                sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
             throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌后结算。");
+        choices.AssertConsumed();
     }
 
-    private static async Task TriggerActualPlayerSetupAsync(CombatState combatState, Player player)
+    private static async Task TriggerActualPlayerSetupAsync(
+        CombatState combatState,
+        Player player,
+        IReadOnlyList<string> choiceCardIds)
     {
         PlayerCombatState state = player.PlayerCombatState
             ?? throw new InvalidOperationException("玩家没有 PlayerCombatState。");
@@ -156,7 +188,15 @@ internal sealed partial class UnattendedTestRunner
             state.AddMaxEnergyToCurrent();
         await Hook.AfterEnergyReset(combatState, player);
         var choiceContext = new BlockingPlayerChoiceContext();
-        await Hook.BeforeHandDraw(combatState, player, choiceContext);
+        bool sideTurnStartTriggeredEarly = choiceCardIds.Count > 0;
+        if (sideTurnStartTriggeredEarly)
+            await Hook.AfterSideTurnStart(combatState, CombatSide.Player, [player.Creature]);
+        using (choiceCardIds.Count == 0
+                   ? null
+                   : CardSelectCmd.PushSelector(new UnattendedCardSelector(choiceCardIds)))
+        {
+            await Hook.BeforeHandDraw(combatState, player, choiceContext);
+        }
         decimal drawCount = Hook.ModifyHandDraw(
             combatState,
             player,
@@ -165,7 +205,8 @@ internal sealed partial class UnattendedTestRunner
         await Hook.AfterModifyingHandDraw(combatState, modifiers);
         await CardPileCmd.Draw(choiceContext, drawCount, player, fromHandDraw: true);
         await Hook.AfterPlayerTurnStart(combatState, choiceContext, player);
-        await Hook.AfterSideTurnStart(combatState, CombatSide.Player, [player.Creature]);
+        if (!sideTurnStartTriggeredEarly)
+            await Hook.AfterSideTurnStart(combatState, CombatSide.Player, [player.Creature]);
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
     }
 

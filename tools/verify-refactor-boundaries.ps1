@@ -115,6 +115,18 @@ foreach ($check in $forkBoundaryChecks) {
     }
 }
 
+$searchGcPolicyPath = Join-Path $repositoryRoot "src\Runtime\SearchGcPolicy.cs"
+foreach ($gcChainRule in @(
+    "return WaitForReclaimChainAsync(_reclaimTask)",
+    "failure == null && _reclaimRequired")) {
+    if (-not (Select-String -LiteralPath $searchGcPolicyPath -SimpleMatch $gcChainRule -Quiet)) {
+        $violations.Add("${searchGcPolicyPath}: missing serialized reclaim-chain rule '$gcChainRule'")
+    }
+}
+if (Select-String -LiteralPath $searchGcPolicyPath -SimpleMatch "ReclaimAfterActiveCheckpointAsync" -Quiet) {
+    $violations.Add("${searchGcPolicyPath}: recursive reclaim handoff returned")
+}
+
 $cardPlayPredictionStatePath = Join-Path $repositoryRoot "src\Engine\InCombat\Mirrors\Hooks\Card\CardPlayHookPredictionStates.cs"
 foreach ($stableVambraceState in @(
     "internal sealed class VambracePredictionState(Vambrace relic) : IPredictionStateForkable",
@@ -171,6 +183,14 @@ foreach ($runtimePath in Get-ChildItem (Join-Path $repositoryRoot "src\Runtime")
         $violations.Add("$($runtimePath.FullName):$($match.LineNumber): production runtime bypasses native choice UI")
     }
 }
+$cardTargetingPath = Join-Path $repositoryRoot "src\Engine\InCombat\Simulation\CombatPredictionSimulator.CardTargeting.cs"
+foreach ($targetingRule in @(
+    "Shiv when combat.GetAmount<FanOfKnivesPower>",
+    "SovereignBlade when combat.GetAmount<SeekingEdgePower>")) {
+    if (-not (Select-String -LiteralPath $cardTargetingPath -SimpleMatch $targetingRule -Quiet)) {
+        $violations.Add("${cardTargetingPath}: missing simulated card targeting rule '$targetingRule'")
+    }
+}
 foreach ($check in $rootSnapshotChecks) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing root snapshot boundary '$($check.Text)'")
@@ -217,6 +237,9 @@ foreach ($check in $beamStructureChecks) {
     if (-not (Select-String -LiteralPath $path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("${path}: missing CombatBeamSolver stage member '$($check.Text)'")
     }
+}
+if (-not (Select-String -LiteralPath (Join-Path $searchRoot "CombatBeamSolver.Expansion.cs") -SimpleMatch "repeatedAutoPlayBranchQuota" -Quiet)) {
+    $violations.Add("CombatBeamSolver.Expansion.cs: repeated auto-play choices are missing their per-action branch quota")
 }
 $beamEntryPath = Join-Path $searchRoot "CombatBeamSolver.cs"
 if (Select-String -LiteralPath $beamEntryPath -SimpleMatch "public SolverResult Solve()" -Quiet) {
@@ -273,6 +296,14 @@ $rootModelBoundaryChecks = @(
         Text = "CaptureRootState("
     },
     @{
+        Path = Join-Path $repositoryRoot "src\Prediction\PowerPredictionStateSupport.cs"
+        Text = "HardenedShellPredictionState(original)"
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.cs"
+        Text = "PowerPredictionStateSupport.CaptureRootState(simulator, mutable, power)"
+    },
+    @{
         Path = Join-Path $repositoryRoot "src\Testing\UnattendedTestRunner.CombatRootSnapshot.cs"
         Text = "workerLiveConstructorRejected"
     },
@@ -314,11 +345,23 @@ $rootModelBoundaryChecks = @(
     },
     @{
         Path = Join-Path $repositoryRoot "src\Engine\InCombat\Simulation\CombatPredictionSimulator.CardPile.cs"
-        Text = "limits.GetMaxHandSize(owner)"
+        Text = "int maxHandSize = GetMaxHandSize(player)"
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Engine\InCombat\Simulation\CombatPredictionSimulator.CardPile.cs"
+        Text = "limits.GetMaxHandSize(player)"
     },
     @{
         Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.cs"
         Text = ".Take(standardCombatListenerCount)"
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.cs"
+        Text = "UpdatePowerListenerOrder("
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.Fork.cs"
+        Text = "fork._powerListenerOrder ="
     },
     @{
         Path = Join-Path $repositoryRoot "src\Engine\Common\PredictionModModelSupport.cs"
