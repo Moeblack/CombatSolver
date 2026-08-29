@@ -1066,6 +1066,20 @@ internal sealed partial class SimulatedCombatState
             (_energySpentThisTurn ??= [])[ownerPlayer] = 0;
             (_starsGainedThisTurn ??= [])[ownerPlayer] = 0;
             (_nonHandDrawsThisTurn ??= [])[ownerPlayer] = 0;
+            // Osty is never a turn-start participant but acts during the player turn; reset its counters here.
+            if (ownerPlayer.Osty is { } osty)
+            {
+                (_creatureAttacksThisTurn ??= [])[osty] = 0;
+                if (_poweredAttackHitsThisTurn != null)
+                {
+                    foreach ((Creature Dealer, Creature Receiver) key in _poweredAttackHitsThisTurn.Keys
+                                 .Where(key => key.Dealer == osty)
+                                 .ToArray())
+                    {
+                        _poweredAttackHitsThisTurn.Remove(key);
+                    }
+                }
+            }
         }
         _doomAppliersThisTurn?.Remove(owner);
         _unblockedDamageThisTurn?.Remove(owner);

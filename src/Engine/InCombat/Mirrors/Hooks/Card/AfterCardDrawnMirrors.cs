@@ -107,8 +107,7 @@ internal static class AfterCardDrawnMirrors
 
         if (shouldAutoPlay)
         {
-            if (context.Simulator.AutoPlay(context.Card))
-                context.Simulator.ResolveNestedAutoPlayChoice(context.Card, power.Id.Entry);
+            context.Simulator.AutoPlay(context.Card, nestedChoiceSourceId: power.Id.Entry);
         }
     }
 

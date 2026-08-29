@@ -64,8 +64,8 @@ internal static class CardSelectionCardMirrors
                 target = context.Rng.CombatTargets.NextItem(context.State.HittableEnemies);
             }
 
-            if (context.Simulator.AutoPlay(selectedCard, target)
-                && !context.Simulator.ResolveNestedAutoPlayChoice(selectedCard, card.Id.Entry))
+            context.Simulator.AutoPlay(selectedCard, target, nestedChoiceSourceId: card.Id.Entry);
+            if (context.Simulator.HasPendingChoice)
             {
                 break;
             }
@@ -95,8 +95,8 @@ internal static class CardSelectionCardMirrors
             }
 
             context.Simulator.History.CardsSelected([selectedCard]);
-            if (context.Simulator.AutoPlay(selectedCard)
-                && !context.Simulator.ResolveNestedAutoPlayChoice(selectedCard, card.Id.Entry))
+            context.Simulator.AutoPlay(selectedCard, nestedChoiceSourceId: card.Id.Entry);
+            if (context.Simulator.HasPendingChoice)
             {
                 break;
             }
@@ -290,8 +290,7 @@ internal static class CardSelectionCardMirrors
         }
 
         context.Simulator.History.CardsSelected([selectedCard]);
-        if (context.Simulator.AutoPlay(selectedCard))
-            context.Simulator.ResolveNestedAutoPlayChoice(selectedCard, card.Id.Entry);
+        context.Simulator.AutoPlay(selectedCard, nestedChoiceSourceId: card.Id.Entry);
     }
 
     private static PredictedCard? SelectRandomHandCard(

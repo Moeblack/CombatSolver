@@ -119,40 +119,20 @@ internal sealed partial class SimulatedCombatState
                         TargetType.AnyPlayer => player.Creature,
                         _ => null,
                     };
+                    // The overridden cursor answers every request with the fixed Vakuu policy, so the
+                    // card's own selection resolves inside the auto-play like any other nested choice.
                     if (!CardExecutionSupport.AutoPlay(
                             simulator,
                             this,
                             card,
                             target,
                             processedEnemyDeaths,
-                            payResources: true))
+                            payResources: true,
+                            nestedChoiceSourceId: card.Preview.Id.Entry))
                     {
                         break;
                     }
 
-                    CardChoiceSpec? spec = CardChoiceSupport.GetSpec(simulator, card);
-                    if (spec != null)
-                    {
-                        CardChoiceSupport.Apply(
-                            simulator,
-                            this,
-                            card,
-                            CardChoiceSupport.BuildVakuuChoice(spec),
-                            processedEnemyDeaths);
-                    }
-                    else if (CardChoiceSupport.BuildRequiredEmptyChoice(card.Preview) is { } emptyChoice)
-                    {
-                        CardChoiceSupport.Apply(
-                            simulator,
-                            this,
-                            card,
-                            emptyChoice,
-                            processedEnemyDeaths);
-                    }
-                    else
-                    {
-                        CardChoiceSupport.ApplyNoChoiceEffects(simulator, this, card);
-                    }
                     CorePowerSupport.ApplyEnemyDeathPowers(
                         simulator,
                         this,

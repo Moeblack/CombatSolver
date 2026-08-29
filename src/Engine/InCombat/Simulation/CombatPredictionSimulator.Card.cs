@@ -66,7 +66,7 @@ internal sealed partial class CombatPredictionSimulator
             eventSink.RecordCardDiscarded(card.Preview.Owner.Creature);
         HookMirrors.AfterCardDiscarded(this, card);
         if (isSly)
-            AutoPlay(card, type: AutoPlayType.SlyDiscard);
+            AutoPlay(card, type: AutoPlayType.SlyDiscard, nestedChoiceSourceId: card.Preview.Id.Entry);
     }
 
     // Mirrors CardCmd.Discard(PlayerChoiceContext, IEnumerable<CardModel>).
@@ -106,7 +106,11 @@ internal sealed partial class CombatPredictionSimulator
 
         foreach (var slyCard in slyCards)
         {
-            AutoPlay(slyCard, type: AutoPlayType.SlyDiscard);
+            AutoPlay(slyCard, type: AutoPlayType.SlyDiscard, nestedChoiceSourceId: slyCard.Preview.Id.Entry);
+            if (HasPendingChoice)
+            {
+                break;
+            }
         }
     }
 
@@ -144,7 +148,7 @@ internal sealed partial class CombatPredictionSimulator
         if (History.Entries.Skip(historyEntryStart)
             .OfType<CombatPredictionCardPlayStartedEntry>()
             .Any(entry => ReferenceEquals(entry.Card, card))
-            && State.CombatState is not ICombatPredictionPendingChoiceState { HasPendingChoice: true }
+            && !HasPendingChoice
             && State.CombatState is ICombatPredictionCardExecutionSink sink)
         {
             sink.CompleteCardExecution(this);
@@ -266,7 +270,8 @@ internal sealed partial class CombatPredictionSimulator
         Creature? target,
         bool isAutoPlay,
         ResourceInfo resources,
-        out PredictionTraceFrame frame)
+        out PredictionTraceFrame frame,
+        string? nestedChoiceSourceId = null)
     {
         using var _ = PushActionSource(card.Original, PredictionActionKind.CardPlay);
         frame = CurrentFrame ?? throw new UnreachableException("No current frame after pushing action source.");
@@ -356,6 +361,15 @@ internal sealed partial class CombatPredictionSimulator
             if (!isAutoPlay
                 && State.CombatState is ICombatPredictionManualCardChoiceSink choiceSink
                 && !choiceSink.ResolveManualCardChoice(this, card))
+            {
+                return;
+            }
+
+            // Vanilla awaits an auto-played card's own selection inside OnPlay, so the selected card
+            // reaches its pile before this card moves to its result pile.
+            if (isAutoPlay
+                && nestedChoiceSourceId != null
+                && !ResolveNestedAutoPlayChoice(card, nestedChoiceSourceId))
             {
                 return;
             }

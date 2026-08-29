@@ -46,8 +46,7 @@ internal static class AfterAutoPostPlayPhaseEnteredMirrors
             return;
         }
 
-        if (context.Simulator.AutoPlay(predictedCard))
-            context.Simulator.ResolveNestedAutoPlayChoice(predictedCard, card.Id.Entry);
+        context.Simulator.AutoPlay(predictedCard, nestedChoiceSourceId: card.Id.Entry);
     }
 
     private static void HandleIAmInvincible(IAmInvincible card, AfterAutoPostPlayMirrorContext context)
@@ -81,8 +80,8 @@ internal static class AfterAutoPostPlayPhaseEnteredMirrors
 
             if (card != null)
             {
-                if (context.Simulator.AutoPlay(card)
-                    && !context.Simulator.ResolveNestedAutoPlayChoice(card, power.Id.Entry))
+                context.Simulator.AutoPlay(card, nestedChoiceSourceId: power.Id.Entry);
+                if (context.Simulator.HasPendingChoice)
                 {
                     break;
                 }

@@ -72,7 +72,7 @@ internal sealed partial class SimulatedCombatState :
             sourcePile);
     }
 
-    public bool ResolveActionCardChoice(
+    private bool ResolveActionCardChoice(
         CombatPredictionSimulator simulator,
         PredictedCard playedCard,
         string sourceId,
