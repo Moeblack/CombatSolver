@@ -5,6 +5,8 @@ param(
     [string]$CharacterId = "IRONCLAD",
     [string]$Seed = "COMBATSOLVER",
     [string]$EncounterId = "FUZZY_WURM_CRAWLER_WEAK",
+    [string]$Sts2GameRoot = "D:\Steam\steamapps\common\Slay the Spire 2",
+    [string]$RitsuWorkshopRoot = "D:\Steam\steamapps\workshop\content\2868840\3747602295",
     [string]$RunSnapshotPath = "",
     [string]$ProgressSnapshotPath = "",
     [ValidateRange(0, 10)]
@@ -158,6 +160,8 @@ param(
     [switch]$StopAfterExpectedPlayerPower,
     [switch]$ExpectedPlayerDeath,
     [ValidateSet("", "FollowGame", "Normal", "Fast", "Instant")]
+    [string]$HeadlessFastModeForTest = "",
+    [ValidateSet("", "FollowGame", "Normal", "Fast", "Instant")]
     [string]$DeploymentFastModeForTest = "",
     [ValidateSet("", "Low", "Medium", "High", "VeryHigh", "Custom")]
     [string]$PerformancePresetForTest = "",
@@ -195,12 +199,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$gameExe = "D:\Steam\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe"
-$gameRoot = Split-Path -Parent $gameExe
+$gameRoot = [IO.Path]::GetFullPath($Sts2GameRoot)
+$gameExe = Join-Path $gameRoot "SlayTheSpire2.exe"
 $gameModsRoot = Join-Path $gameRoot "mods"
-$ritsuWorkshopRoot = "D:\Steam\steamapps\workshop\content\2868840\3747602295"
-$ritsuVariantDll = Join-Path $ritsuWorkshopRoot "lib\0.111.0\STS2-RitsuLib.dll"
-$ritsuManifestSource = Join-Path $ritsuWorkshopRoot "mod_manifest.json"
+$resolvedRitsuWorkshopRoot = [IO.Path]::GetFullPath($RitsuWorkshopRoot)
+$ritsuVariantDll = Join-Path $resolvedRitsuWorkshopRoot "lib\0.111.0\STS2-RitsuLib.dll"
+$ritsuManifestSource = Join-Path $resolvedRitsuWorkshopRoot "mod_manifest.json"
 $headlessDependencyDir = Join-Path $gameModsRoot ".combatsolver-headless-ritsulib"
 $headlessDependencyMarker = Join-Path $headlessDependencyDir ".combatsolver-headless-only"
 $interactiveDataDir = Join-Path ([Environment]::GetFolderPath("ApplicationData")) "SlayTheSpire2"
@@ -219,7 +223,7 @@ if (-not (Test-Path -LiteralPath $gameExe -PathType Leaf)) {
 }
 if (-not (Test-Path -LiteralPath $ritsuVariantDll -PathType Leaf) -or
     -not (Test-Path -LiteralPath $ritsuManifestSource -PathType Leaf)) {
-    throw "Headless RitsuLib source not found under: $ritsuWorkshopRoot"
+    throw "Headless RitsuLib source not found under: $resolvedRitsuWorkshopRoot"
 }
 if ($KeepGameOpen.IsPresent -and $ExitOnComplete.IsPresent) {
     throw "KeepGameOpen and ExitOnComplete cannot be used together."
@@ -455,6 +459,7 @@ $request = [ordered]@{
     expectedNativeChoiceSearchStartedAtMost = if ($ExpectedNativeChoiceSearchStartedAtMost -ge 0) { $ExpectedNativeChoiceSearchStartedAtMost } else { $null }
     stopAfterExpectedPlayerPower = $StopAfterExpectedPlayerPower.IsPresent
     expectedPlayerDeath = $ExpectedPlayerDeath.IsPresent
+    headlessFastModeForTest = if ([string]::IsNullOrWhiteSpace($HeadlessFastModeForTest)) { $null } else { $HeadlessFastModeForTest }
     deploymentFastModeForTest = if ([string]::IsNullOrWhiteSpace($DeploymentFastModeForTest)) { $null } else { $DeploymentFastModeForTest }
     performancePresetForTest = if ([string]::IsNullOrWhiteSpace($PerformancePresetForTest)) { $null } else { $PerformancePresetForTest }
     potionPolicyForTest = if ([string]::IsNullOrWhiteSpace($PotionPolicyForTest)) { $null } else { $PotionPolicyForTest }

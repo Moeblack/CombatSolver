@@ -50,20 +50,29 @@ internal sealed partial class UnattendedTestRunner
     private readonly NGame _host;
     private readonly UnattendedTestRequest _request;
     private readonly ProtocolHost _protocolHost;
+    private readonly DateTimeOffset _startedAtUtc = DateTimeOffset.UtcNow;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly List<string> _completedChecks = [];
+    private readonly List<UnattendedStageTiming> _completedStageTimings = [];
     private readonly Writer _writer;
     private readonly ScenarioBuilder _scenarioBuilder;
     private readonly Assertions _assertions;
     private readonly Executor _executor;
     private string _stage = "created";
+    private double _stageStartedMilliseconds;
+    private FastModeType? _headlessFastModeBeforeTest;
 
     private UnattendedTestRunner(NGame host, UnattendedTestRequest request, ProtocolHost protocolHost)
     {
         _host = host;
         _request = request;
         _protocolHost = protocolHost;
-        _writer = new Writer(request, _stopwatch, _completedChecks);
+        _writer = new Writer(
+            request,
+            _stopwatch,
+            _completedChecks,
+            _startedAtUtc,
+            CaptureStageTimings);
         _scenarioBuilder = new ScenarioBuilder(this);
         _assertions = new Assertions(this);
         _executor = new Executor(this);
@@ -157,12 +166,20 @@ internal sealed partial class UnattendedTestRunner
                     : LocalContext.GetMe(combatState)?.PlayerCombatState?.TurnNumber ?? startedTurn,
                 ex.ToString());
             Entry.Logger.Error($"[CombatSolver/Unattended] FAILED run_id={_request.RunId} scenario={_request.ScenarioId} stage={_stage} exception={ex}");
-            if (RunManager.Instance.IsInProgress)
-                await _host.ReturnToMainMenu();
+            try
+            {
+                if (RunManager.Instance.IsInProgress)
+                    await _host.ReturnToMainMenu();
+            }
+            finally
+            {
+                await ExitIfRequestedAsync(1);
+            }
         }
         finally
         {
             _executor.RestoreSettings();
+            RestoreHeadlessFastModeOverride();
         }
     }
 
@@ -1502,8 +1519,68 @@ internal sealed partial class UnattendedTestRunner
 
     private void SetStage(string stage)
     {
+        double elapsedMilliseconds = _stopwatch.Elapsed.TotalMilliseconds;
+        double previousStageMilliseconds = Math.Max(0, elapsedMilliseconds - _stageStartedMilliseconds);
+        _completedStageTimings.Add(new UnattendedStageTiming
+        {
+            Stage = _stage,
+            StartedMilliseconds = _stageStartedMilliseconds,
+            DurationMilliseconds = previousStageMilliseconds,
+        });
+        string previousStage = _stage;
         _stage = stage;
-        Entry.Logger.Info($"[CombatSolver/Unattended] STAGE run_id={_request.RunId} stage={stage}");
+        _stageStartedMilliseconds = elapsedMilliseconds;
+        Entry.Logger.Info(
+            $"[CombatSolver/Unattended] STAGE run_id={_request.RunId} stage={stage} " +
+            $"elapsed_ms={elapsedMilliseconds:F1} previous_stage={previousStage} " +
+            $"previous_stage_ms={previousStageMilliseconds:F1}");
+    }
+
+    private UnattendedStageTiming[] CaptureStageTimings()
+    {
+        double elapsedMilliseconds = _stopwatch.Elapsed.TotalMilliseconds;
+        UnattendedStageTiming[] timings = new UnattendedStageTiming[_completedStageTimings.Count + 1];
+        _completedStageTimings.CopyTo(timings);
+        timings[^1] = new UnattendedStageTiming
+        {
+            Stage = _stage,
+            StartedMilliseconds = _stageStartedMilliseconds,
+            DurationMilliseconds = Math.Max(0, elapsedMilliseconds - _stageStartedMilliseconds),
+        };
+        return timings;
+    }
+
+    private void ApplyHeadlessFastModeOverride()
+    {
+        if (_request.HeadlessFastModeForTest is not { } requestedMode
+            || requestedMode == SolverDeploymentFastMode.FollowGame
+            || _headlessFastModeBeforeTest.HasValue)
+        {
+            return;
+        }
+
+        _headlessFastModeBeforeTest = SaveManager.Instance.PrefsSave.FastMode;
+        SaveManager.Instance.PrefsSave.FastMode = requestedMode switch
+        {
+            SolverDeploymentFastMode.Normal => FastModeType.Normal,
+            SolverDeploymentFastMode.Fast => FastModeType.Fast,
+            SolverDeploymentFastMode.Instant => FastModeType.Instant,
+            _ => throw new InvalidOperationException($"不支持的无头测试速度 {requestedMode}。"),
+        };
+        Entry.Logger.Info(
+            $"[CombatSolver/Unattended] HEADLESS_FAST_MODE run_id={_request.RunId} " +
+            $"requested={requestedMode} previous={_headlessFastModeBeforeTest}");
+    }
+
+    private void RestoreHeadlessFastModeOverride()
+    {
+        if (_headlessFastModeBeforeTest is not { } originalFastMode)
+            return;
+        SaveManager.Instance.PrefsSave.FastMode = originalFastMode;
+        _headlessFastModeBeforeTest = null;
+        Entry.Logger.Info(
+            $"[CombatSolver/Unattended] HEADLESS_FAST_MODE_RESTORED run_id={_request.RunId} " +
+            $"restored={originalFastMode}");
     }
 
     private async Task ExitIfRequestedAsync(int exitCode)

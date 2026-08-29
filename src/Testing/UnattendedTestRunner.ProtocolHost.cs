@@ -117,7 +117,8 @@ internal sealed partial class UnattendedTestRunner
                 }
                 if (!request.ExitOnComplete)
                 {
-                    for (int frame = 0; frame < 180; frame++)
+                    await SearchGcPolicy.ReclaimIfPendingAsync("unattended_reuse");
+                    for (int frame = 0; frame < 2; frame++)
                         await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 }
             }

@@ -1,8 +1,9 @@
 <Project>
   <PropertyGroup>
-    <Sts2Dir>D:\Path\To\Slay the Spire 2</Sts2Dir>
-    <Sts2DataDir>$(Sts2Dir)\data_sts2_windows_x86_64</Sts2DataDir>
-    <RitsuLibDir>D:\Path\To\RitsuLib\lib\0.111.0</RitsuLibDir>
-    <RandomForeseerSourceDir>D:\Path\To\StS2.RandomForeseer</RandomForeseerSourceDir>
+    <!-- Linux Steam default; override this one property for another library. -->
+    <SteamRoot>$(HOME)/.local/share/Steam</SteamRoot>
+    <Sts2Dir>$(SteamRoot)/steamapps/common/Slay the Spire 2</Sts2Dir>
+    <Sts2DataDir>$(Sts2Dir)/data_sts2_linuxbsd_x86_64</Sts2DataDir>
+    <RitsuLibDir>$(SteamRoot)/steamapps/workshop/content/2868840/3747602295/lib/0.111.0</RitsuLibDir>
   </PropertyGroup>
 </Project>

@@ -36,6 +36,7 @@ internal sealed partial class UnattendedTestRunner
             UnattendedTestRequest request = runner._request;
             runner.SetStage("game_startup");
             await runner._host.GameStartupComplete;
+            runner.ApplyHeadlessFastModeOverride();
             runner.EnsureWithinDeadline();
             if (RunManager.Instance.IsInProgress)
                 throw new InvalidOperationException("无人测试要求从无进行中跑局的独立游戏进程启动。");

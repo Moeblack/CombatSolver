@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -1153,6 +1154,10 @@ internal static class SolverController
         CancellationToken token)
     {
         AssertMainThread();
+        bool measureDeploymentTiming = UnattendedTestRunner.IsActive;
+        long deploymentStartedAt = measureDeploymentTiming
+            ? Stopwatch.GetTimestamp()
+            : 0;
         int turn = result.StartTurnNumber;
         List<PlanAction> actions = result.BestNode.Actions
             .Where(action => action.Turn == turn && action.IsExecutable)
@@ -1199,6 +1204,9 @@ internal static class SolverController
                     player,
                     $"deployment:{turn}:{actionIndex}:{action.CardId ?? action.PotionId}");
                 choiceSession.SetPlanAndStartDriving(host, actionChoices, token);
+                long actionStartedAt = measureDeploymentTiming
+                    ? Stopwatch.GetTimestamp()
+                    : 0;
                 Task actionCompletion;
                 if (action.Kind == PlanActionKind.UsePotion)
                 {
@@ -1265,6 +1273,13 @@ internal static class SolverController
                     Entry.Logger.Info($"[CombatSolver/Test] DEPLOY_ACTION turn={turn} card={action.CardId} target_index={action.TargetIndex} target_combat_id={action.TargetCombatId?.ToString() ?? "-"} choice={action.Choice?.Effect.ToString() ?? "-"}");
                 }
                 await choiceSession.AwaitProducerAndCompleteAsync(actionCompletion);
+                if (measureDeploymentTiming)
+                {
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] DEPLOY_ACTION_COMPLETE turn={turn} action_index={actionIndex} " +
+                        $"action={action.CardId ?? action.PotionId ?? action.Kind.ToString()} " +
+                        $"elapsed_ms={Stopwatch.GetElapsedTime(actionStartedAt).TotalMilliseconds:F1}");
+                }
                 if (deploymentSettings.EnableDetailedDiagnosticLogs)
                 {
                     PlayerCombatState liveState = player.PlayerCombatState!;
@@ -1363,16 +1378,30 @@ internal static class SolverController
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, turn));
                 }
                 SolverOverlay.ShowDeploymentComplete(host, turn, actions.Count, endedTurn: true);
-                Entry.Logger.Info(
+                string deploymentEndMessage =
                     $"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} end_turn=true " +
                     $"forecast_turn_start_choices={plannedEndTurn.TurnStartChoices?.Count ?? 0} " +
-                    $"enemy_turn_choices={enemyTurnChoices.Length}");
+                    $"enemy_turn_choices={enemyTurnChoices.Length}";
+                if (measureDeploymentTiming)
+                {
+                    deploymentEndMessage +=
+                        $" elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}";
+                }
+                Entry.Logger.Info(deploymentEndMessage);
                 _combat.LastSolverDeployedTurn = turn;
             }
             else
             {
                 SolverOverlay.ShowDeploymentComplete(host, turn, actions.Count, endedTurn: false);
-                Entry.Logger.Info($"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} end_turn=false combat_or_turn_finished=true");
+                string deploymentEndMessage =
+                    $"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} " +
+                    $"end_turn=false combat_or_turn_finished=true";
+                if (measureDeploymentTiming)
+                {
+                    deploymentEndMessage +=
+                        $" elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}";
+                }
+                Entry.Logger.Info(deploymentEndMessage);
                 _combat.LastSolverDeployedTurn = turn;
             }
         }
@@ -1392,6 +1421,12 @@ internal static class SolverController
                 SaveManager.Instance.PrefsSave.FastMode = originalFastMode;
                 Entry.Logger.Info(
                     $"[CombatSolver/Test] DEPLOY_SPEED_RESTORED turn={turn} restored={originalFastMode}");
+            }
+            if (measureDeploymentTiming)
+            {
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] DEPLOY_FINISH turn={turn} " +
+                    $"elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}");
             }
             CompleteDeployment(deployment);
             SolverOverlay.RefreshControls();

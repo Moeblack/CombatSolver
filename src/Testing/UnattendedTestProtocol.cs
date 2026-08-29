@@ -144,6 +144,7 @@ internal sealed class UnattendedTestRequest
     public int? ExpectedNativeChoiceSearchStartedAtMost { get; init; }
     public bool StopAfterExpectedPlayerPower { get; init; }
     public bool ExpectedPlayerDeath { get; init; }
+    public SolverDeploymentFastMode? HeadlessFastModeForTest { get; init; }
     public SolverDeploymentFastMode? DeploymentFastModeForTest { get; init; }
     public SolverPerformancePreset? PerformancePresetForTest { get; init; }
     public SolverPotionPolicy? PotionPolicyForTest { get; init; }
@@ -383,6 +384,7 @@ internal sealed class UnattendedTestResult
     public required string CharacterId { get; init; }
     public required string EncounterId { get; init; }
     public required string Seed { get; init; }
+    public DateTimeOffset StartedAtUtc { get; init; }
     public double ElapsedMilliseconds { get; init; }
     public bool MainThread { get; init; }
     public bool CombatEnded { get; init; }
@@ -392,9 +394,17 @@ internal sealed class UnattendedTestResult
     public long ManagedFragmentedBytes { get; init; }
     public long WorkingSetBytes { get; init; }
     public long PrivateMemoryBytes { get; init; }
+    public UnattendedStageTiming[] StageTimings { get; init; } = [];
     public string[] CompletedChecks { get; init; } = [];
     public string? Error { get; init; }
     public DateTimeOffset FinishedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
+internal sealed class UnattendedStageTiming
+{
+    public required string Stage { get; init; }
+    public double StartedMilliseconds { get; init; }
+    public double DurationMilliseconds { get; init; }
 }
 
 internal static class UnattendedTestFiles

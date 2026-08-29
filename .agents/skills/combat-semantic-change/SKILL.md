@@ -82,13 +82,13 @@ CombatRootSnapshot.Capture（主线程根）
 先建立未改代码的最小基线，再按影响面递增：
 
 1. 目标效果的 actual/simulated 严格差分，比较有序牌堆、逐实例状态、Power、怪物 AI、球与相关 RNG；
-2. 改 Fork、卡牌、Power、AI、死亡、选择或跨回合状态时，运行 `-VerifyIncrementalSearch`；
+2. 改 Fork、卡牌、Power、AI、死亡、选择或跨回合状态时，运行 `--verify-incremental-search`；
 3. 覆盖相邻生命周期，例如回合开始/结束、叠加/移除、死亡/复活或嵌套选择；
 4. 跨回合改动跑完整 headless，固定 `Instant / 0 秒` 并断言零非预期重算；
 5. 改 mirror 支持面、状态字段或 coverage 分类时，运行对应 CoverageCatalog verify；完整发布前再跑全量；
 6. UI、动画或真实卡顿另做可见 Steam 验收。
 
-性能数字不能来自 `-VerifyIncrementalSearch`。通用 helper 改动应覆盖其调用类型族，不只跑最初报告的一个模型。
+性能数字不能来自 `--verify-incremental-search`。通用 helper 改动应覆盖其调用类型族，不只跑最初报告的一个模型。
 
 ## 6. 记录与提交
 
