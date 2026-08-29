@@ -149,7 +149,7 @@ internal sealed partial class CombatPredictionSimulator
     // Mirrors the logic in CardCmd.AutoPlay for resolving a target when none is provided.
     private bool TryResolveAutoPlayTarget(PredictedCard card, ref Creature? target)
     {
-        switch (card.Preview.TargetType)
+        switch (GetTargetType(card))
         {
             case TargetType.AnyEnemy:
                 target ??= Rng.CombatTargets.NextItem(State.HittableEnemies);

@@ -171,6 +171,14 @@ foreach ($runtimePath in Get-ChildItem (Join-Path $repositoryRoot "src\Runtime")
         $violations.Add("$($runtimePath.FullName):$($match.LineNumber): production runtime bypasses native choice UI")
     }
 }
+$cardTargetingPath = Join-Path $repositoryRoot "src\Engine\InCombat\Simulation\CombatPredictionSimulator.CardTargeting.cs"
+foreach ($targetingRule in @(
+    "Shiv when combat.GetAmount<FanOfKnivesPower>",
+    "SovereignBlade when combat.GetAmount<SeekingEdgePower>")) {
+    if (-not (Select-String -LiteralPath $cardTargetingPath -SimpleMatch $targetingRule -Quiet)) {
+        $violations.Add("${cardTargetingPath}: missing simulated card targeting rule '$targetingRule'")
+    }
+}
 foreach ($check in $rootSnapshotChecks) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing root snapshot boundary '$($check.Text)'")
@@ -271,6 +279,14 @@ $rootModelBoundaryChecks = @(
     @{
         Path = Join-Path $repositoryRoot "src\Prediction\RelicPredictionStateSupport.cs"
         Text = "CaptureRootState("
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Prediction\PowerPredictionStateSupport.cs"
+        Text = "HardenedShellPredictionState(original)"
+    },
+    @{
+        Path = Join-Path $repositoryRoot "src\Search\SimulatedCombatState.cs"
+        Text = "PowerPredictionStateSupport.CaptureRootState(simulator, mutable, power)"
     },
     @{
         Path = Join-Path $repositoryRoot "src\Testing\UnattendedTestRunner.CombatRootSnapshot.cs"

@@ -1609,7 +1609,10 @@ internal sealed partial class SimulatedCombatState
             card.SetMutationObserver(InvalidateBaseHookListeners);
         _ = GetBaseHookListeners();
         foreach (PowerModel power in _rootHookListeners.OfType<PowerModel>())
-            _ = GetMutablePowerInstance(power);
+        {
+            PowerModel mutable = GetMutablePowerInstance(power);
+            PowerPredictionStateSupport.CaptureRootState(simulator, mutable, power);
+        }
         foreach (Player player in Players)
         {
             _ = GetPlayerTurnNumber(player);

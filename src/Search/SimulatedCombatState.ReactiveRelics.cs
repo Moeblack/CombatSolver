@@ -304,7 +304,6 @@ internal sealed partial class SimulatedCombatState
         foreach (OrbModel orb in simulator.State.GetPlayerCombatState(relic.Owner).OrbQueue.Orbs.ToArray())
             simulator.TriggerOrbPassive(orb, null);
         TriggeredPowerSupport.CompensateHistorySince(simulator, this, historyEntryStart);
-        SetStatefulRelicState(relic, default);
     }
 
     private bool HasAvailablePotion(Player player)

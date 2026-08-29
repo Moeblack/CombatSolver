@@ -1760,14 +1760,7 @@ internal sealed partial class CombatBeamSolver
         PredictedCard card,
         CombatPredictionSimulator simulator)
     {
-        if (card.Preview is SovereignBlade
-            && ((SimulatedCombatState)simulator.State.CombatState)
-                .GetAmount<SeekingEdgePower>(card.Preview.Owner.Creature) > 0)
-        {
-            yield return (-1, null);
-            yield break;
-        }
-        if (card.Preview.TargetType == TargetType.AnyEnemy)
+        if (simulator.GetTargetType(card) == TargetType.AnyEnemy)
         {
             IReadOnlyList<Creature> enemies = simulator.State.Enemies;
             for (int i = 0; i < enemies.Count; i++)
