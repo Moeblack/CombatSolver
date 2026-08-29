@@ -28,7 +28,7 @@ internal sealed partial class SimulatedCombatState :
     {
         TurnStartChoiceCursor cursor = _activeActionChoices
             ?? throw new InvalidOperationException("模拟状态没有活动的动作选择游标。");
-        if (PendingTurnStartChoice == null)
+        if (!HasPendingChoice)
             cursor.AssertConsumed();
         _activeActionChoices = null;
     }

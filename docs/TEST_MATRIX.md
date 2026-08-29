@@ -4,6 +4,11 @@
 
 同一版 DLL 的场景默认复用 marker 记录的 headless 游戏进程：首条命令直接启动游戏，完成后返回主菜单等待下一条请求；后续命令只向该测试 PID 投递。测试使用独立 `APPDATA/LOCALAPPDATA`、关闭 Steam，并只在隔离设置中确认允许加载 Mod；RitsuLib 在 headless 生命周期内从创意工坊版本目录临时投影到带所有权标记的本地目录，退出时删除。发现未由 marker 管理的塔 2 进程时拒绝运行。只有重新编译需要加载新 DLL，或最后一批显式传入 `-ExitOnComplete` 时才退出游戏。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
+## 未发布
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `KNOWLEDGE-DEMON-CURSE-REPLAY` | 待验证 | 知识恶魔 boss 首回合自动搜索此前以 `InvalidPlannedChoiceBranchException`（`ApplyKnowledgeCurse` 未消费）终止整轮。本次修复 `EndActionChoices` 豁免条件为 `!HasPendingChoice`（覆盖 `PendingKnowledgeDemonChoice`）。本次仅编译验证通过（`dotnet build -c Release`，0 警告 / 0 错误）；actual/simulated 严格差分与 `-VerifyIncrementalSearch` 夹具尚未运行。 | 2026-08-30 |
 ## 0.18.0
 
 | 场景 | 结果 | 验证内容 | 日期 |

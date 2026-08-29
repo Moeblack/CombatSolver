@@ -4,6 +4,11 @@
 > 本文是项目的持续记录。每次改变搜索语义、评分、模拟覆盖、性能策略、UI 或测试方式时，都应同步更新对应章节和文末变更记录。  
 > “未来构想”均不是已经实现的功能。
 
+## 未发布：知识恶魔诅咒重放豁免
+
+- 知识恶魔 boss 首回合自动搜索以 `InvalidPlannedChoiceBranchException`（“回合开始仍有 1 个计划选牌没有触发；下一个=…/ApplyKnowledgeCurse/None/”）终止整轮搜索。知识恶魔的诅咒选牌由 `PendingKnowledgeDemonChoice` 独立消费、不经回合开始选牌游标；`EndActionChoices` 的豁免条件只认 `PendingTurnStartChoice`，敌回合因诅咒提前 `PendingChoice` 退出时会对未消费到底的游标误执行 `AssertConsumed()`。
+- 豁免条件改为 `!HasPendingChoice`（`PendingTurnStartChoice != null || PendingKnowledgeDemonChoice != null`），敌方诅咒暂停不再误清点；整轮正常完成时 `roundChoices` / `Replay` 的 `AssertConsumed()` 仍捕获真正遗漏的选择。
+- 该异常仍属“精确计划分支失效”，按既有 `InvalidPlannedChoiceBranchException` 通道只淘汰候选；其它执行异常继续中止搜索。
 ## 0.18.0：集中修复批次
 
 - 本节记录 `0.17.2` 发布后的 29 项集中修复；全部问题已结案并进入 `0.18.0` 发布准备。
