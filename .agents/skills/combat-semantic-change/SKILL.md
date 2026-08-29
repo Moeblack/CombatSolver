@@ -94,4 +94,4 @@ CombatRootSnapshot.Capture（主线程根）
 
 提交前同步受影响的 `docs/DEVELOPMENT_NOTES.md`、`docs/TEST_MATRIX.md` 和必要的结构化证据。职责边界有变化时同时更新 `docs/ARCHITECTURE.md` 与结构门禁。
 
-普通语义修复直接提交，不自动提升版本或打包。汇报应说明首个错误状态、权威实现层、状态所有权、实际运行的 fixture 和未执行项。
+普通语义修复直接提交。是否随该项提升版本和打包，以 `AGENTS.md` 的活动发布批次和发布口令为准；不要由本 skill 另立发包规则。汇报应说明首个错误状态、权威实现层、状态所有权、实际运行的 fixture 和未执行项。

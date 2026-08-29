@@ -78,4 +78,4 @@ description: 重构 CombatSolver 的 Search、Runtime 会话、UI snapshot、无
 - `docs/refactoring/refactor-roadmap.md` 保存批次状态；
 - `docs/TEST_MATRIX.md` 保存可重跑场景。
 
-普通架构重构直接提交，不提升版本、不打包、不计算文件哈希。用户明确要求发布时再转 `release-gate`。
+普通架构重构直接提交，不自行提升版本、不计算文件哈希。版本和打包时机以 `AGENTS.md` 的活动发布批次和发布口令为准，再转 `release-gate`。

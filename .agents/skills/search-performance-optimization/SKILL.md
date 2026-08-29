@@ -33,6 +33,8 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 
 至少有三类基线：目标质量、不可退化质量、固定长线性能。当前稳定场景从 `docs/TEST_MATRIX.md` 选择，不把历史数字硬编码成永久阈值。
 
+路线质量的首要基线是同一起点、同牌序与 RNG 下的整场战损。回合数、击杀速度和展开深度只作次级信息，除非用户明确把它们设为目标；不得用更少回合替代更低战损宣称优化。
+
 `-VerifyIncrementalSearch` 会逐转移执行完整回放，只用于正确性，不能与性能门槛组合，也不能引用其时间或分配作为生产性能。
 
 ## 2. 判断瓶颈所在职责
@@ -74,4 +76,4 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 6. 改动涉及 coverage/state 分类时运行对应 CoverageCatalog verify；
 7. 性能最终结论来自关闭诊断的正常可见 Steam 会话。
 
-职责迁移时同步 `docs/ARCHITECTURE.md` 和结构门禁。搜索行为或指标变化同步开发笔记与测试矩阵。普通优化直接提交；只有用户要求版本或 ZIP 时才转 `release-gate`。
+职责迁移时同步 `docs/ARCHITECTURE.md` 和结构门禁。搜索行为或指标变化同步开发笔记与测试矩阵。普通优化直接提交；版本和打包时机以 `AGENTS.md` 的活动发布批次和发布口令为准，再转 `release-gate`。
