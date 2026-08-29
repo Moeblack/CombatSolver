@@ -509,6 +509,9 @@ internal sealed partial class UnattendedTestRunner
             SolverSettingsData testSettings = request.PerformancePresetForTest is { } preset
                 ? SolverSettings.ApplyPerformancePreset(_settingsBeforeTest, preset)
                 : _settingsBeforeTest;
+            bool hasCustomPerformanceOverride = request.NoGcRegionBudgetGigabytesForTest.HasValue
+                || request.ShortMaxCardBranchesPerNodeForTest.HasValue
+                || request.DeepMaxCardBranchesPerNodeForTest.HasValue;
             if (request.NoGcRegionBudgetGigabytesForTest is { } noGcBudget)
             {
                 testSettings = testSettings with
@@ -546,7 +549,38 @@ internal sealed partial class UnattendedTestRunner
             });
             FastModeType fastModeBeforeDeployment = SaveManager.Instance.PrefsSave.FastMode;
             if (request.PerformancePresetForTest is { } expectedPreset)
-                runner.AssertPerformancePreset(expectedPreset);
+            {
+                runner.AssertPerformancePreset(
+                    hasCustomPerformanceOverride
+                        ? SolverPerformancePreset.Custom
+                        : expectedPreset);
+            }
+            SolverSettingsSnapshot snapshot = SolverSettings.Capture();
+            if (request.ShortMaxCardBranchesPerNodeForTest is { } expectedShortBranches
+                && snapshot.ShortProfile.MaxCardBranchesPerNode != expectedShortBranches)
+            {
+                throw new InvalidOperationException(
+                    $"短搜单节点出牌分支为 {snapshot.ShortProfile.MaxCardBranchesPerNode}，" +
+                    $"预期 {expectedShortBranches}。");
+            }
+            if (request.DeepMaxCardBranchesPerNodeForTest is { } expectedDeepBranches
+                && snapshot.DeepProfile.MaxCardBranchesPerNode != expectedDeepBranches)
+            {
+                throw new InvalidOperationException(
+                    $"深搜单节点出牌分支为 {snapshot.DeepProfile.MaxCardBranchesPerNode}，" +
+                    $"预期 {expectedDeepBranches}。");
+            }
+            if (request.NoGcRegionBudgetGigabytesForTest is { } expectedNoGcGigabytes)
+            {
+                long expectedNoGcBytes = checked((long)Math.Round(
+                    expectedNoGcGigabytes * 1_000_000_000d,
+                    MidpointRounding.AwayFromZero));
+                if (snapshot.NoGcRegionBudgetBytes != expectedNoGcBytes)
+                {
+                    throw new InvalidOperationException(
+                        $"No-GC 预算为 {snapshot.NoGcRegionBudgetBytes}，预期 {expectedNoGcBytes}。");
+                }
+            }
             return fastModeBeforeDeployment;
         }
     }

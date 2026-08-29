@@ -14,6 +14,17 @@ internal sealed partial class UnattendedTestRunner
         SolverSettingsSnapshot snapshot = SolverSettings.Capture();
         if (SolverSettings.ResolvePerformancePreset(SolverSettings.Current) != preset)
             throw new InvalidOperationException($"性能预设没有保持为 {preset}。");
+        if (preset == SolverPerformancePreset.Custom)
+        {
+            _completedChecks.Add(
+                $"PerformancePreset:Custom:{snapshot.ShortProfile.SoftTimeBudgetMilliseconds}/" +
+                $"{snapshot.DeepProfile.SoftTimeBudgetMilliseconds}ms:" +
+                $"Beam={snapshot.ShortProfile.BeamWidth}/{snapshot.DeepProfile.BeamWidth}:" +
+                $"Nodes={snapshot.ShortProfile.MaxExpandedNodes}/{snapshot.DeepProfile.MaxExpandedNodes}:" +
+                $"Branches={snapshot.ShortProfile.MaxCardBranchesPerNode}/" +
+                $"{snapshot.DeepProfile.MaxCardBranchesPerNode}:NoGC={snapshot.NoGcRegionBudgetBytes}");
+            return;
+        }
         (int ShortMs, int DeepMs, int ShortBeam, int DeepBeam, int ShortNodes, int DeepNodes,
             int ShortBranches, int DeepBranches, long NoGcBytes) expected = preset switch
         {
@@ -21,7 +32,6 @@ internal sealed partial class UnattendedTestRunner
             SolverPerformancePreset.Medium => (8_000, 120_000, 18, 45, 2_400, 12_000, 14, 24, 8_000_000_000L),
             SolverPerformancePreset.High => (12_000, 180_000, 24, 60, 5_000, 25_000, 20, 32, 12_000_000_000L),
             SolverPerformancePreset.VeryHigh => (20_000, 300_000, 36, 90, 10_000, 50_000, 30, 48, 16_000_000_000L),
-            SolverPerformancePreset.Custom => (8_000, 120_000, 18, 45, 2_400, 12_000, 14, 24, 8_000_000_000L),
             _ => throw new ArgumentOutOfRangeException(nameof(preset)),
         };
         if (snapshot.ShortProfile.SoftTimeBudgetMilliseconds != expected.ShortMs

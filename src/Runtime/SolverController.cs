@@ -1316,6 +1316,8 @@ internal static class SolverController
                         $"draw={string.Join(',', liveState.DrawPile.Cards.Select(card => card.Id.Entry))} " +
                         $"discard={string.Join(',', liveState.DiscardPile.Cards.Select(card => card.Id.Entry))} " +
                         $"exhaust={string.Join(',', liveState.ExhaustPile.Cards.Select(card => card.Id.Entry))} " +
+                        $"enemies={string.Join(',', state.Enemies.Select(enemy =>
+                            $"{enemy.Monster?.Id.Entry ?? "null"}:{enemy.CurrentHp}/{enemy.Block}"))} " +
                         $"powers={string.Join(',', player.Creature.Powers.Select(power =>
                             $"{power.Id.Entry}:{power.Amount}/{power.AmountOnTurnStart}"))}");
                 }

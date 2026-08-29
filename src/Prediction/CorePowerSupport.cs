@@ -266,6 +266,10 @@ internal static class CorePowerSupport
                         target,
                         card.DynamicVars["VulnerablePower"].IntValue,
                         owner);
+                    // Dominate awaits the Vulnerable application before it reads the resulting
+                    // amount. Vicious and other AfterPowerAmountChanged listeners therefore
+                    // finish (including any nested draws/auto-plays) before Strength is gained.
+                    PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, combat);
                     combat.Apply<StrengthPower>(owner, combat.GetAmount<VulnerablePower>(target), owner);
                 }
                 break;

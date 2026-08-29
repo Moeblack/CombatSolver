@@ -36,6 +36,7 @@ internal static class PredictionCoverage
                 or StockPower or SurprisePower or SurroundedPower when method == "AfterDeath" => true,
             SteamEruptionPower when method == "AfterDeath" => true,
             ConstrictPower when method == "AfterDeath" => true,
+            HexPower when method == "AfterDeath" => true,
             ShrinkPower when method == "AfterDeath" => true,
             DecimillipedeSegment when method == "AfterDeath" => true,
             ConcoctPower when method == "AfterDamageGiven" => true,

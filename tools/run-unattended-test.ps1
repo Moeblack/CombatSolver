@@ -46,6 +46,7 @@ param(
     [string]$CombatRelicsPath = "",
     [string]$CardsJson = "",
     [string]$CardsPath = "",
+    [string]$ReplayStateCardsPath = "",
     [string]$RunCardsJson = "",
     [string]$RunCardsPath = "",
     [string]$PotionCheckJson = "",
@@ -326,8 +327,49 @@ $resolvedRunSnapshotPath = if ([string]::IsNullOrWhiteSpace($RunSnapshotPath)) {
     (Resolve-Path -LiteralPath $RunSnapshotPath).Path
 }
 $runId = [Guid]::NewGuid().ToString("N")
+$replayStateCards = $null
+if (-not [string]::IsNullOrWhiteSpace($ReplayStateCardsPath)) {
+    $replayState = Get-Content -LiteralPath $ReplayStateCardsPath -Raw | ConvertFrom-Json -Depth 100
+    $replayPlayer = @($replayState.players)[0]
+    if ($null -eq $replayPlayer) {
+        throw "Replay state does not contain a player: $ReplayStateCardsPath"
+    }
+    $replayStateCards = @(
+        foreach ($pile in @($replayPlayer.piles)) {
+            foreach ($card in @($pile.cards)) {
+                $injection = [ordered]@{
+                    cardId = [string]$card.id
+                    pile = [string]$pile.pile
+                    count = 1
+                }
+                if ([int]$card.currentUpgradeLevel -gt 0) {
+                    $injection.upgradeLevels = [int]$card.currentUpgradeLevel
+                }
+                if ($null -ne $card.enchantment) {
+                    $injection.enchantmentId = [string]$card.enchantment.id
+                    $injection.enchantmentAmount = [int]$card.enchantment.amount
+                }
+                if ($null -ne $card.affliction) {
+                    $injection.afflictionId = [string]$card.affliction.id
+                    $injection.afflictionAmount = [int]$card.affliction.amount
+                }
+                $enumMembers = [ordered]@{}
+                foreach ($field in @($card.fields.PSObject.Properties)) {
+                    if ($field.Name -match '\.(?<_member>_tinkerTimeType|_tinkerTimeRider)$') {
+                        $enumMembers[$Matches['_member']] = [string]$field.Value
+                    }
+                }
+                if ($enumMembers.Count -gt 0) {
+                    $injection.enumMembers = [pscustomobject]$enumMembers
+                }
+                [pscustomobject]$injection
+            }
+        }
+    )
+}
 $cardsExplicitlyConfigured = -not [string]::IsNullOrWhiteSpace($CardsPath) -or
-    -not [string]::IsNullOrWhiteSpace($CardsJson)
+    -not [string]::IsNullOrWhiteSpace($CardsJson) -or
+    $null -ne $replayStateCards
 $request = [ordered]@{
     schemaVersion = 1
     runId = $runId
@@ -369,7 +411,7 @@ $request = [ordered]@{
     expectedFinishedTurnAtMost = if ($ExpectedFinishedTurnAtMost -gt 0) { $ExpectedFinishedTurnAtMost } else { $null }
     expectedFinishedPlayerHpAtLeast = if ($ExpectedFinishedPlayerHpAtLeast -ge 0) { $ExpectedFinishedPlayerHpAtLeast } else { $null }
     clearPlayerHand = $ClearPlayerHand.IsPresent
-    clearPlayerPiles = $ClearPlayerPiles.IsPresent
+    clearPlayerPiles = $ClearPlayerPiles.IsPresent -or $null -ne $replayStateCards
     clearAllPowers = $ClearAllPowers.IsPresent
     verifyPredictionFailureBoundaries = $VerifyPredictionFailureBoundaries.IsPresent
     verifySearchPolicySnapshot = $VerifySearchPolicySnapshot.IsPresent
@@ -514,6 +556,8 @@ if (-not [string]::IsNullOrWhiteSpace($CardsPath)) {
     $request.cards = @(Get-Content -LiteralPath $CardsPath -Raw | ConvertFrom-Json)
 } elseif (-not [string]::IsNullOrWhiteSpace($CardsJson)) {
     $request.cards = @($CardsJson | ConvertFrom-Json)
+} elseif ($null -ne $replayStateCards) {
+    $request.cards = $replayStateCards
 }
 if (-not [string]::IsNullOrWhiteSpace($RunCardsPath)) {
     $request.runCards = @(Get-Content -LiteralPath $RunCardsPath -Raw | ConvertFrom-Json)

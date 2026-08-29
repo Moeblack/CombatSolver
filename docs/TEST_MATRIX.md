@@ -17,12 +17,18 @@
 | `POST018-BYGONE-EFFIGY-TOOLS-CHOICE` | 通过 | 必备工具选择按下一玩家回合阶段消费，完整自动执行到第 7 回合且零重算。runId `1dbadbe59d9147879d62f44d38a55cf0` | 2026-08-30 |
 | `POST018-KNOWLEDGE-ANGER-END-RISK` | 通过 | 知识恶魔敌方回合选择不再被当前结束回合复核误判为计划外；完整自动执行到第 8 回合且零重算。runId `2612caee23e14c42a274aa7567ae2251` | 2026-08-30 |
 | `POST018-SCROLLS-AUTO-CHOICE-PHASE` | 通过（邻接覆盖） | 三卷轴怪当前路线首回合结束战斗，自动执行不中止且零重算；第 2 回合必备工具由独立阶段回归覆盖。runId `a9f7d23ea7d5439c97a78ddf327d520f` | 2026-08-30 |
-| `POST018-SOUL-NEXUS-GRID-SCROLL` | 通过 | 原生 37 张卡牌网格滚动到底部并通过真实节点选择支配，完整自动执行到第 7 回合且零重算。runId `b1a13ffbde4c46a6b64825cb2a3e8049` | 2026-08-30 |
+| `POST018-SOUL-NEXUS-GRID-SCROLL` | 通过 | 原生 37 张卡牌网格滚动到底部并通过真实节点选择主宰，完整自动执行到第 7 回合且零重算。runId `b1a13ffbde4c46a6b64825cb2a3e8049` | 2026-08-30 |
 | `POST018-OVERGROWTH-ENTROPIC-CONTINUATION` | 通过（未复现旧重算） | 从蔓生爬虫问题根完整执行到第 2 回合且零重算；旧包在搜索期间实机药水栏与 RNG 已变化，因此保留为证据不足。runId `17fb59dfc1284928912eba1644b1ead5` | 2026-08-30 |
 | `POST018-TEST-SUBJECT-LOOT-CURRENT` | 通过 | 满手后的战利品生成与后续回放完整执行到第 12 回合，计划外重算 `0`。runId `7d95638f6d6f4a058221cb3507c05187` | 2026-08-30 |
 | `POST018-AEONGLASS-CHOICE-CURRENT` | 通过 | 永世沙漏原生选牌与重新接管完整执行到第 6 回合，计划外重算 `0`；更优路线仍属暂缓项。runId `c51d8cf8f47e43ccb7e4a922361688d8` | 2026-08-30 |
 | `POST018-ENTOMANCER-CLUMSY-CONTINUATION` | 通过 | 养蜂人塞入笨拙后的牌堆和洗牌续用一致，完整自动执行到第 4 回合且零重算。runId `066e8d5e64ff4eb3a2b0b2e8c4853685` | 2026-08-30 |
 | `POST018-KNIGHTS-FAILURE-CURRENT` | 通过（入口覆盖） | 当前路线首回合结束，最终回放入口不再失败且零重算；不宣称复现旧 9 回合路线。runId `d19d34b506cd4b67a863e124293bfaf1` | 2026-08-30 |
+| `POST018-DOMINATE-VICIOUS-ORDER` | 通过 | 主宰施加易伤后，凶恶先抽牌、地狱狂徒先自动打出攻击，随后才按当前易伤获得力量；原生与预测完整状态一致。runId `ad8f66a8594d436dac6a1c5fafb0e313` | 2026-08-30 |
+| `POST018-HEX-DEATH-COVERAGE-FINAL` | 通过 | 两只幽灵骑士连续施加恶咒，后施加者死亡保留、初始施加者死亡移除；Power 与逐张卡牌状态三段差分一致。runId `d53826f1d06a487fbca60ffb740892f7` | 2026-08-30 |
+| `POST018-CUSTOM-OVERRIDE-ASSERTION` | 通过 | 中档基础上覆盖短搜/深搜单节点出牌分支为 `23/37`、No-GC 为 `7 GB` 后，预设身份与三个实际值均按自定义配置断言。runId `011e9c0e7daa4564867e8195a6299a11` | 2026-08-30 |
+| `POST018-BYRDONIS-EXACT-DEFERRED-BASELINE` | 通过（质量基线） | 从问题包回放状态恢复精确牌堆与 RNG，当前路线预计战损仍为 `55`，玩家手操上界为 `41`；只固化差距，不计作策略修复。runId `b4e2837cecc04cb59dad6a4e4be6cb37` | 2026-08-30 |
+| `POST018-TEST-SUBJECT-EXACT-DEFERRED-BASELINE` | 通过（质量基线） | 从问题包回放状态恢复精确牌堆与 RNG，当前路线预计战损仍为 `20`，玩家手操上界为 `0`；只固化差距，不计作策略修复。runId `cad36ba7007d40e392ee882c49be2308` | 2026-08-30 |
+| `POST018-DETAILED-PLAN-REPLAY-STATE` | 通过 | 详细诊断在最终路线回放与实机部署动作后写出能量、手牌、抽牌堆、弃牌堆、消耗堆及敌方生命/格挡；最小战斗完整结束。runId `1e83a3bc0d864e278fba5a8a20d66b96` | 2026-08-30 |
 
 ## 0.18.0
 

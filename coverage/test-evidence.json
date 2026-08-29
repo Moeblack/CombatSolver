@@ -1,4 +1,36 @@
 {
+  "POST018-DOMINATE-VICIOUS-ORDER": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationNestedPowerListenerAndAutoPlayOrder",
+    "procedure": "玩家同时持有凶恶与地狱狂徒，手牌只有主宰、抽牌堆顶为打击；原生与预测分别打出主宰，并比较 Power、生命、能量、四个牌堆、RNG 与出牌历史。",
+    "expected": "主宰先施加易伤；凶恶响应 Power 层数变化抽到打击，地狱狂徒在玩家获得力量前自动打出该攻击；监听链结束后再按目标当前易伤获得力量。",
+    "observed": "runId ad8f66a8594d436dac6a1c5fafb0e313 Passed，完成 FuzzyWurmCrawler:INHALE 场景内的主宰原生/预测完整状态差分。",
+    "evidence": "src/Prediction/CorePowerSupport.cs；coverage/unattended/card-on-play-dominate-vicious-order.json；上述 runId；验证日期 2026-08-30。"
+  },
+  "POST018-HEX-DEATH-COVERAGE-FINAL": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationPowerApplierDeathAndCoverageDeclaration",
+    "procedure": "两只幽灵骑士依次施加恶咒；先杀死后施加者，再杀死初始施加者，逐步比较恶咒层数、施加者身份及所有受咒卡牌状态。",
+    "expected": "后施加者死亡不移除恶咒；初始施加者死亡移除恶咒并清除受咒。覆盖报告把已由 CorePowerSupport 实现的 AfterDeath 记为补偿。",
+    "observed": "runId d53826f1d06a487fbca60ffb740892f7 Passed，连续完成三条 SpectralKnight:HEX 差分；当前逐张卡牌状态键断言全部通过。",
+    "evidence": "src/Prediction/CorePowerSupport.cs；src/Prediction/PredictionCoverage.cs；coverage/unattended/monster-moves-batch-028-lifecycle.json；上述 runId；验证日期 2026-08-30。"
+  },
+  "POST018-REPLAY-STATE-CARDS-AND-CUSTOM-OVERRIDES": {
+    "status": "Passed",
+    "level": "HeadlessExactIssueBundlePileImportAndCustomPerformanceAssertion",
+    "procedure": "从问题包回放状态导入有序牌堆、升级、附魔、苦难与疯狂科学枚举状态；分别恢复多尼斯异鸟和实验体的开战根。另在中档预设上覆盖出牌分支与 No-GC 预算，断言实际自定义值。",
+    "expected": "复现器不再依赖手写牌表；导入后得到包内精确首手与有序抽牌堆。性能覆盖将设置标记为自定义，并按实际覆盖值断言。质量基线只记录，不改变搜索策略。",
+    "observed": "多尼斯异鸟 runId b4e2837cecc04cb59dad6a4e4be6cb37 Passed，预计战损 55；实验体 runId cad36ba7007d40e392ee882c49be2308 Passed，预计战损 20；自定义覆盖 runId 011e9c0e7daa4564867e8195a6299a11 Passed，Branches=23/37、NoGC=7000000000。",
+    "evidence": "tools/run-unattended-test.ps1；src/Testing/UnattendedTestRunner.Executor.cs；src/Testing/UnattendedTestRunner.SolverPolicy.cs；三个上述 runId；验证日期 2026-08-30。"
+  },
+  "POST018-DETAILED-PLAN-REPLAY-STATE": {
+    "status": "Passed",
+    "level": "HeadlessDetailedFinalPlanReplayAndLiveDeploymentStateTrace",
+    "procedure": "开启详细诊断，以 1 HP 毛绒伏地虫运行最小完整搜索与自动部署；读取同一测试日志中的最终路线标注回放状态和实机部署状态。",
+    "expected": "两类逐动作日志均包含动作、能量、手牌、抽牌堆、弃牌堆、消耗堆及敌方生命/格挡；Search 只通过注入的诊断出口写日志。",
+    "observed": "runId 1e83a3bc0d864e278fba5a8a20d66b96 Passed；日志写出 PLAN_REPLAY_STATE 与 DEPLOY_STATE，首个动作均为 STRIKE_IRONCLAD，战斗第 1 回合结束。",
+    "evidence": "src/Search/CombatBeamSolver.Expansion.cs；src/Runtime/SolverController.cs；上述 runId 与 godot-headless.log；验证日期 2026-08-30。"
+  },
   "RINGING-HAVOC-AUTOPLAY-0160": {
     "status": "Passed",
     "level": "HeadlessStrictNativeSimulationNestedAutoPlayAndBranchCardPlayStartedState",

@@ -12,7 +12,7 @@
       "HEX_POWER": 2
     },
     "expectedPlayerCardStates": {
-      "Hand:ARMAMENTS:HEXED:2:E": 1
+      "Hand:ARMAMENTS:HEXED:2:E:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   },
   {
@@ -29,8 +29,8 @@
     },
     "killMonsterAfterMove": true,
     "expectedPlayerCardStates": {
-      "Hand:ARMAMENTS:HEXED:2:E": 1,
-      "Hand:BODY_SLAM:HEXED:4:E": 1
+      "Hand:ARMAMENTS:HEXED:2:E:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:BODY_SLAM:HEXED:4:E:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   },
   {
@@ -42,8 +42,8 @@
       "HEX_POWER"
     ],
     "expectedPlayerCardStates": {
-      "Hand:ARMAMENTS:-:0:-": 1,
-      "Hand:BODY_SLAM:-:0:-": 1
+      "Hand:ARMAMENTS:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:BODY_SLAM:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   }
 ]

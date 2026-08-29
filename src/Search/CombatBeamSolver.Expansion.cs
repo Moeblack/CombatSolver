@@ -982,6 +982,7 @@ internal sealed partial class CombatBeamSolver
                     _run.Performance.End(SearchMetricPhase.RoundAdvance, roundMeasurement);
                 }
                 turn++;
+                LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn);
                 continue;
             }
 
@@ -1035,6 +1036,7 @@ internal sealed partial class CombatBeamSolver
                 {
                     shufflesCrossed++;
                 }
+                LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn);
                 continue;
             }
 
@@ -1111,6 +1113,7 @@ internal sealed partial class CombatBeamSolver
                     action.TurnStartChoices);
                 turn++;
             }
+            LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn);
         }
         _run.Performance.End(SearchMetricPhase.Action, actionMeasurement);
 
@@ -1124,6 +1127,33 @@ internal sealed partial class CombatBeamSolver
             processedEnemyDeaths);
         _run.Performance.End(SearchMetricPhase.Snapshot, snapshotMeasurement);
         return snapshot;
+    }
+
+    private void LogAnnotatedReplayState(
+        CombatPredictionSimulator simulator,
+        PlanAction action,
+        int actionIndex,
+        int turn)
+    {
+        if (!_detailedDiagnostics || simulator.ActionRelicTriggers == null)
+            return;
+
+        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
+        string actionToken = action.Kind switch
+        {
+            PlanActionKind.PlayCard => action.CardId,
+            PlanActionKind.UsePotion => action.PotionId,
+            _ => action.Kind.ToString(),
+        };
+        policy.Diagnostics.Info(
+            $"[CombatSolver/Debug] PLAN_REPLAY_STATE turn={turn} action_index={actionIndex} " +
+            $"action={actionToken} " +
+            $"energy={playerState.Energy} hand={string.Join(',', playerState.Hand.Cards.Select(card => card.Preview.Id.Entry))} " +
+            $"draw={string.Join(',', playerState.DrawPile.Cards.Select(card => card.Preview.Id.Entry))} " +
+            $"discard={string.Join(',', playerState.DiscardPile.Cards.Select(card => card.Preview.Id.Entry))} " +
+            $"exhaust={string.Join(',', playerState.ExhaustPile.Cards.Select(card => card.Preview.Id.Entry))} " +
+            $"enemies={string.Join(',', root.Enemies.Select(enemy =>
+                $"{enemy.Monster?.Id.Entry ?? "null"}:{simulator.State.GetCreature(enemy).CurrentHp}/{simulator.State.GetCreature(enemy).Block}"))}");
     }
 
     private SimulationSnapshot ReplayAction(SearchNode parent, PlanAction action)
