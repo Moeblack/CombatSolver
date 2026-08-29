@@ -33,7 +33,7 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 
 至少有三类基线：目标质量、不可退化质量、固定长线性能。当前稳定场景从 `docs/TEST_MATRIX.md` 选择，不把历史数字硬编码成永久阈值。
 
-`--verify-incremental-search` 会逐转移执行完整回放，只用于正确性，不能与性能门槛组合，也不能引用其时间或分配作为生产性能。
+`-VerifyIncrementalSearch`（PowerShell）/ `--verify-incremental-search`（Bash）会逐转移执行完整回放，只用于正确性，不能与性能门槛组合，也不能引用其时间或分配作为生产性能。
 
 ## 2. 判断瓶颈所在职责
 
@@ -67,7 +67,7 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 ## 5. 实验与验证
 
 1. 每轮只改变一个可解释因素，失败实验立即撤回；
-2. Release 构建并运行 `tools/verify-refactor-boundaries.sh`；
+2. Release 构建并运行 `tools/verify-refactor-boundaries.ps1`（Windows）或 `tools/verify-refactor-boundaries.sh`（Linux）；
 3. 先跑目标首轮质量，再跑完整自动战斗，固定 `Instant / 0 秒`、零非预期重算；
 4. 跑与改动相关的药水、卖血、延迟伤害、复活、选择等不可退化场景；
 5. 最终候选单独执行一次增量等价，数字不用于性能比较；

@@ -39,7 +39,7 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - [核验审计](docs/refactoring/verified-audit-4117eb0.md)：本轮重构的逐阶段证据；它是历史结果，不是持续规则。
 - [测试矩阵](docs/TEST_MATRIX.md) 与 `coverage/test-evidence.json`：可重跑场景和结构化证据。
 - [开发笔记](docs/DEVELOPMENT_NOTES.md)：版本历史与未发布行为变化。
-- `tools/verify-refactor-boundaries.sh`：当前架构边界的可执行门禁。
+- `tools/verify-refactor-boundaries.ps1`（Windows / PowerShell 7）与 `tools/verify-refactor-boundaries.sh`（Linux / Bash）：当前架构边界的等价可执行门禁。
 
 源码与当前可重跑结果优先于历史说明。职责发生变化时，同一提交更新 `docs/ARCHITECTURE.md`、相关 skill 和结构门禁，避免多份地图继续漂移。
 
@@ -134,8 +134,8 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 验证规模跟随改动影响面，不为文档或纯结构改动自动跑全量实机：
 
 - 文档/skill：检查链接、路径、frontmatter 与文档内部一致性。
-- 纯职责移动：Release 编译、`tools/verify-refactor-boundaries.sh`，再跑一个能穿过该边界的代表场景。
-- 战斗语义：目标严格差分；涉及 Fork/跨回合时增加 `--verify-incremental-search` 和完整自动战斗。
+- 纯职责移动：Release 编译、当前平台的 `tools/verify-refactor-boundaries.ps1` 或 `tools/verify-refactor-boundaries.sh`，再跑一个能穿过该边界的代表场景。
+- 战斗语义：目标严格差分；涉及 Fork/跨回合时增加 `-VerifyIncrementalSearch`（PowerShell）或 `--verify-incremental-search`（Bash）和完整自动战斗。
 - Beam/排序：固定质量基准、候选/剪枝计数和完整自动部署；性能样本关闭增量验证。
 - Mirror/覆盖元数据：相关差分与 CoverageCatalog 对应 verify；只有改变覆盖面或准备完整发布时才跑全部 verify。
 - UI/动画/输入：headless 结构事件加 Steam 可见检查。
@@ -143,7 +143,17 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 
 无人完整部署固定 `Instant / 0 秒`，并断言计划外重算数量。一个 headless 进程可以复用多个请求，但重新编译后必须退出仍加载旧 DLL 的进程。
 
-常用命令：
+Windows（PowerShell 7）常用命令：
+
+```powershell
+dotnet build CombatSolver.csproj -c Release
+pwsh -NoProfile -File tools\verify-refactor-boundaries.ps1
+pwsh -NoProfile -File tools\run-unattended-test.ps1 <fixture 参数>
+dotnet run --project tools\CoverageCatalog\CoverageCatalog.csproj -c Release -- . <verify 参数>
+pwsh -NoProfile -File tools\run-visible-steam-benchmark.ps1 <固定基准参数>
+```
+
+Linux（Bash）等价命令：
 
 ```bash
 dotnet build CombatSolver.csproj -c Release
@@ -153,7 +163,7 @@ dotnet run --project tools/CoverageCatalog/CoverageCatalog.csproj -c Release -- 
 ./tools/run-visible-steam-benchmark.sh <固定基准参数>
 ```
 
-Linux 当前入口使用原生 `.sh` 和 GNU 风格长参数；原有同名 `.ps1` 保留供 Windows 使用，`.sh` 不调用 PowerShell。测试脚本会探测当前 Linux Steam 安装并允许覆盖路径；这些本地入口仍不是可移植 CI。不要提交个人绝对路径更新。
+Windows `.ps1` 与 Linux `.sh` 都是受维护的平台原生入口：PowerShell 使用 PascalCase 参数，Bash 使用 GNU 风格长参数；`.sh` 不调用 PowerShell。两端无人测试脚本均允许覆盖游戏和依赖路径，Linux 脚本还会探测标准 Steam 安装；这些本地入口仍不是可移植 CI。修改协议、门禁或测试能力时同步维护两端脚本，不要提交个人绝对路径更新。
 
 ## 9. 文档、提交与发布
 

@@ -27,6 +27,15 @@ description: 用户明确要求提升 CombatSolver 版本、生成发布 ZIP、�
 
 ## 2. Release 构建
 
+Windows（PowerShell 7）：
+
+```powershell
+dotnet clean -c Release
+pwsh -NoProfile -File tools\build-local-stack.ps1 -Configuration Release
+```
+
+Linux（Bash）：
+
 ```bash
 dotnet clean -c Release
 ./tools/build-local-stack.sh --configuration Release
@@ -49,18 +58,37 @@ dotnet clean -c Release
 
 ## 4. 创意工坊上传
 
-用户说“上传创意工坊”或“更新创意工坊”时，视为已授权这一次外部上传，直接执行，不再询问是否确认。Linux 环境不提交机器特定路径；执行前要求：
+用户说“上传创意工坊”或“更新创意工坊”时，视为已授权这一次外部上传，直接执行，不再询问是否确认。Windows 保留以下既有默认工具与暂存目录，也允许用同名环境变量覆盖：
+
+- `D:\Desktop\sts2mod\ModUploader-win-x64\ModUploader.exe`；
+- `D:\Desktop\sts2mod\ModUploader-win-x64\CombatSolverWorkshop`。
+
+Linux 不使用上述 Windows 路径；执行前必须设置：
 
 - `COMBATSOLVER_MOD_UPLOADER` 指向当前平台可执行的 ModUploader；
 - `COMBATSOLVER_WORKSHOP_DIR` 指向现有创意工坊暂存目录。
 
-任一路径未设置、不可执行或不存在时，报告阻塞，不用 Windows 路径或兼容层猜测替代。
+任一最终解析路径未设置、不可执行或不存在时，报告阻塞，不猜测其他目录或兼容层。
 
 上传前只做一次本地暂存：
 
 1. 将当前最新版的 `CombatSolver.json`、刚完成的 Release `CombatSolver.dll` 和根目录 `THIRD_PARTY_NOTICES.md` 写入 `CombatSolverWorkshop/content/`，不得沿用该目录中的旧二进制判断版本；
 2. 保留现有标题、长描述、作者、封面、效果图、标签、依赖和可见性，除非当前请求或确切兼容性变化要求修改；
-3. 把本次更新说明写入 `workshop.json` 的 `changeNote`，然后执行一次 `"$COMBATSOLVER_MOD_UPLOADER" upload -w "$COMBATSOLVER_WORKSHOP_DIR"`。
+3. 把本次更新说明写入 `workshop.json` 的 `changeNote`，然后按当前平台执行一次上传。
+
+Windows（PowerShell 7；环境变量未设置时使用既有默认值）：
+
+```powershell
+$modUploader = if ($env:COMBATSOLVER_MOD_UPLOADER) { $env:COMBATSOLVER_MOD_UPLOADER } else { 'D:\Desktop\sts2mod\ModUploader-win-x64\ModUploader.exe' }
+$workshopDir = if ($env:COMBATSOLVER_WORKSHOP_DIR) { $env:COMBATSOLVER_WORKSHOP_DIR } else { 'D:\Desktop\sts2mod\ModUploader-win-x64\CombatSolverWorkshop' }
+& $modUploader upload -w $workshopDir
+```
+
+Linux（Bash）：
+
+```bash
+"$COMBATSOLVER_MOD_UPLOADER" upload -w "$COMBATSOLVER_WORKSHOP_DIR"
+```
 
 上传命令报告成功就是完成证据。不要重新打开创意工坊页面、重新下载订阅内容、检查远端条目、再次读取版本或重复上传；命令失败时报告真实错误，修正明确原因后才重试。
 
@@ -81,7 +109,7 @@ dotnet clean -c Release
 
 只有用户要求完整验收或正式发布时执行：
 
-1. 运行 `tools/verify-refactor-boundaries.sh`；
+1. 运行 `tools/verify-refactor-boundaries.ps1`（Windows）或 `tools/verify-refactor-boundaries.sh`（Linux）；
 2. 对当前 DLL 运行 CoverageCatalog 全 verify；
 3. 运行目标严格差分、相关类型族、增量等价和至少一场完整自动部署；
 4. 跑一场稳定长线质量基准，断言跨回合复用与零非预期重算；

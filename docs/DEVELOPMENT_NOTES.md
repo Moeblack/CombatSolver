@@ -4,13 +4,13 @@
 > 本文是项目的持续记录。每次改变搜索语义、评分、模拟覆盖、性能策略、UI 或测试方式时，都应同步更新对应章节和文末变更记录。  
 > “未来构想”均不是已经实现的功能。
 
-## 未发布：Linux 原生测试与无人复用提速
+## 未发布：跨平台原生测试与无人复用提速
 
-- 五个仓库 PowerShell 工具均保留 Windows 版本，并新增同名原生 Bash 入口；Linux 构建、简中本地化读取、无人测试、可见 Steam 基准和结构门禁不再调用 PowerShell。项目与 CoverageCatalog 的默认依赖路径改为 Windows/Linux 条件路径，仍可用 `SteamRoot` 或 `local.props` 覆盖。
+- 五个仓库 PowerShell 工具继续作为 Windows 原生入口，并新增同名 Linux Bash 入口；构建、简中本地化读取、无人测试、可见 Steam 基准和结构门禁在两端均可使用本平台脚本。PowerShell 使用 PascalCase 参数，Bash 使用 GNU 风格长参数，两者都直接实现对应流程而不互相包装；协议或门禁变化需同步维护。项目与 CoverageCatalog 的默认依赖路径改为 Windows/Linux 条件路径，仍可用 `SteamRoot` 或 `local.props` 覆盖。
 - Linux 无人启动器使用独立 XDG 数据目录、关闭 Steam，并清空 `DISPLAY/WAYLAND_DISPLAY`。原生日志确认 `Rendering device name: N/A (headless)`、显存 `0B`，因此无人功能与搜索回归不受 XRDP 软件渲染影响；可见帧性能仍必须在正常 GPU 会话中验收。
-- 同一版 Mod 的请求默认复用一个游戏进程，复用间显式完成待处理 GC 并只等待两帧；测试内游戏速度默认改为 `Instant`，完成后恢复原设置。同一 PID `66703` 的对照中，两个 `Normal` 请求分别为 `7098.0 ms`、`7064.5 ms`，`Instant` 为 `2917.7 ms`，本机稳定节省约 `4.16 s / 59%`。
-- marker 现在核对进程启动时刻、精确无头环境和 Mod DLL/manifest SHA-256；陈旧 marker 不会取得可见游戏所有权，重编译后自动停止旧无头进程并加载新程序集。失败且请求退出时也以进程码 `1` 清理，不再额外等待 30 秒；定向失败回归约 `510 ms` 返回。
-- 同一 PID 连续通过严格差分 `RINGING-HAVOC-AUTOPLAY-0160-FINAL`（`74da3eefb1e841219c5721323dad83d6`）、跨回合 `HEADBUTT-EMPTY-DISCARD-0160`（`dbd5cf92f61043b28d38978aa8307a6e`）、跨角色 `COSMIC-INDIFFERENCE-EMPTY-DISCARD-0160`（`8605ff494b604c019323e222f5247314`）和完整精灵药自动战斗（`261c9007073d40709a5f388d698063e9`）；最后一条退出后进程、marker 与临时 RitsuLib 投影均已清理。
+- 同一版 Mod 的请求默认复用一个游戏进程，复用间显式完成待处理 GC 并只等待两帧；Linux Bash 启动器默认请求 `Instant`，Windows PowerShell 启动器可用 `-HeadlessFastModeForTest Instant` 选择相同行为，完成后共享 runner 会恢复原设置。同一 Linux PID `66703` 的对照中，两个 `Normal` 请求分别为 `7098.0 ms`、`7064.5 ms`，`Instant` 为 `2917.7 ms`，本机稳定节省约 `4.16 s / 59%`。
+- Linux Bash 启动器的 marker 现在核对进程启动时刻、精确无头环境和 Mod DLL/manifest SHA-256；陈旧 marker 不会取得可见游戏所有权，重编译后自动停止旧无头进程并加载新程序集。两端共享 runner 在失败且请求退出时也以进程码 `1` 清理，不再额外等待 30 秒；Linux 定向失败回归约 `510 ms` 返回。
+- Linux 同一 PID 连续通过严格差分 `RINGING-HAVOC-AUTOPLAY-0160-FINAL`（`74da3eefb1e841219c5721323dad83d6`）、跨回合 `HEADBUTT-EMPTY-DISCARD-0160`（`dbd5cf92f61043b28d38978aa8307a6e`）、跨角色 `COSMIC-INDIFFERENCE-EMPTY-DISCARD-0160`（`8605ff494b604c019323e222f5247314`）和完整精灵药自动战斗（`261c9007073d40709a5f388d698063e9`）；最后一条退出后进程、marker 与临时 RitsuLib 投影均已清理。
 
 ## 0.17.2：手操路线反馈、搜索停止与预算说明
 

@@ -11,7 +11,7 @@ description: 重构 CombatSolver 的 Search、Runtime 会话、UI snapshot、无
 
 如果任务改变卡牌/怪物结算，叠加 `combat-semantic-change`；改变 Beam 权重或候选政策，叠加 `search-performance-optimization`。纯重构不能借机改变这些行为。
 
-开始前读取 `docs/ARCHITECTURE.md` 和 `tools/verify-refactor-boundaries.sh` 中对应边界，只读取本次涉及的源码分片。
+开始前读取 `docs/ARCHITECTURE.md`，并读取 `tools/verify-refactor-boundaries.ps1` 与 `tools/verify-refactor-boundaries.sh` 中对应边界，只读取本次涉及的源码分片。两套门禁分别服务 Windows 和 Linux，规则必须保持等价。
 
 ## 1. 先定义迁移前后的所有权
 
@@ -51,7 +51,7 @@ description: 重构 CombatSolver 的 Search、Runtime 会话、UI snapshot、无
 1. 记录迁移对象和不变量；
 2. 移动或接入具体所有者；
 3. 删除旧所有权和双写路径；
-4. 扩充 `verify-refactor-boundaries.sh`，阻止旧结构回流；
+4. 同步扩充 `verify-refactor-boundaries.ps1` 与 `verify-refactor-boundaries.sh`，阻止旧结构回流；
 5. 运行结构门禁和一个代表场景；
 6. 更新架构地图、必要的核验记录并直接提交。
 
@@ -62,7 +62,7 @@ description: 重构 CombatSolver 的 Search、Runtime 会话、UI snapshot、无
 纯职责移动的最低验证：
 
 - Release 编译；
-- `./tools/verify-refactor-boundaries.sh`；
+- `pwsh -NoProfile -File tools\verify-refactor-boundaries.ps1`（Windows）或 `./tools/verify-refactor-boundaries.sh`（Linux）；
 - 一个穿过新边界的代表 headless 场景；
 - 若移动 Beam 比较器，比较动作序列、expanded/transitions/choice branches 和各剪枝计数；
 - 若移动 UI 边界，验证 renderer 签名与 ready/deploying/complete 事件，人工视觉项不冒充 headless 通过；
