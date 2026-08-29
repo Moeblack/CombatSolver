@@ -384,4 +384,8 @@ internal sealed partial class SimulatedCombatState
             or UnsettlingLamp
             or VenerableTeaSet;
 
+    public bool CanTriggerArtOfWarNextTurn(Player player)
+        => RelicsOf(player)
+            .OfType<ArtOfWar>()
+            .Any(relic => !relic.IsMelted && GetStatefulRelicState(relic).Current == 0);
 }

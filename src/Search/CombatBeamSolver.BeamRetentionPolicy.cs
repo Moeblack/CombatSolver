@@ -116,7 +116,7 @@ internal sealed partial class CombatBeamSolver
                 Dictionary<RoutingChoiceSignature, List<SearchNode>> nodesByRoutingChoice = [];
                 foreach (SearchNode node in ranked)
                 {
-                    var signature = CurrentTurnRoutingChoice(node);
+                    RoutingChoiceSignature? signature = RetainedRoutingChoice(node);
                     if (signature == null)
                         continue;
                     if (!nodesByRoutingChoice.TryGetValue(signature.Value, out List<SearchNode>? routingNodes))
@@ -187,7 +187,7 @@ internal sealed partial class CombatBeamSolver
                         routingNodes,
                         FindBestTargetPressure(routingNodes));
                     List<SearchNode> candidates = [];
-                    if (routingNodes.Min(ActionsSinceCurrentRoutingChoice) <= 1)
+                    if (routingNodes.Min(ActionsSinceRetainedRoutingChoice) <= 1)
                     {
                         AddRoutingCandidate(candidates, bestSetupByRoutingChoice[signature]);
                         AddRoutingCandidate(candidates, bestTargetPressure);
@@ -230,7 +230,7 @@ internal sealed partial class CombatBeamSolver
                         IReadOnlyList<SearchNode> optionNodes = optionGroup
                             .SelectMany(pair => pair.Value)
                             .ToList();
-                        int actionsSinceChoice = optionNodes.Min(ActionsSinceCurrentRoutingChoice);
+                        int actionsSinceChoice = optionNodes.Min(ActionsSinceRetainedRoutingChoice);
                         SearchNode? optionLeader;
                         if (actionsSinceChoice == 0)
                         {
@@ -611,6 +611,21 @@ internal sealed partial class CombatBeamSolver
             }
             foreach (SearchNode routingChoice in routingChoices.Take(routingChoiceQuota))
                 AddRequired(required, routingChoice, effectiveLimit);
+            if (preserveDefensiveRoute)
+            {
+                foreach (IGrouping<int, SearchNode> potionGroup in ranked
+                             .GroupBy(node => node.PotionCount)
+                             .OrderBy(group => group.Key))
+                {
+                    IReadOnlyList<SearchNode> artOfWarCandidates = potionGroup
+                        .Where(node => node.Snapshot.CanTriggerArtOfWarNextTurn)
+                        .ToList();
+                    AddRequired(required, artOfWarCandidates.Aggregate(
+                        (SearchNode?)null,
+                        (best, node) => IsBetterDefensive(node, best) ? node : best), effectiveLimit);
+                    AddRequired(required, FindBestSetup(artOfWarCandidates), effectiveLimit);
+                }
+            }
             if (preserveDefensiveRoute && _profile.Phase == SolverSearchPhase.Deep)
             {
                 int signatureLimitPerPotionGroup = Math.Max(4, limit / 6);
@@ -895,7 +910,7 @@ internal sealed partial class CombatBeamSolver
         private double RoutingParentScore(IReadOnlyList<SearchNode> nodes)
             => nodes.Max(node =>
             {
-                if (TryGetCurrentTurnRoutingChoice(node, out _, out SearchNode choiceNode)
+                if (TryGetRetainedRoutingChoice(node, out _, out SearchNode choiceNode)
                     && choiceNode.Parent is { } choiceParent)
                 {
                     return BeamRankScore(choiceParent);
@@ -906,7 +921,7 @@ internal sealed partial class CombatBeamSolver
         private static int RoutingParentRetentionRank(IReadOnlyList<SearchNode> nodes)
             => nodes.Min(node =>
             {
-                if (TryGetCurrentTurnRoutingChoice(node, out _, out SearchNode choiceNode)
+                if (TryGetRetainedRoutingChoice(node, out _, out SearchNode choiceNode)
                     && choiceNode.Parent is { } choiceParent)
                 {
                     return choiceParent.RetentionRank;
@@ -1073,8 +1088,31 @@ internal sealed partial class CombatBeamSolver
                 ? signature
                 : null;
 
+        private static RoutingChoiceSignature? RetainedRoutingChoice(SearchNode node)
+            => TryGetRetainedRoutingChoice(node, out RoutingChoiceSignature signature, out _)
+                ? signature
+                : null;
+
+        private static bool TryGetRetainedRoutingChoice(
+            SearchNode node,
+            out RoutingChoiceSignature signature,
+            out SearchNode choiceNode)
+        {
+            int minimumChoiceTurn = node.Snapshot.CanTriggerArtOfWarNextTurn
+                ? Math.Max(0, node.Turn - PersistentRoutingContextRounds)
+                : node.Turn;
+            return TryGetRoutingChoice(node, minimumChoiceTurn, out signature, out choiceNode);
+        }
+
         private static bool TryGetCurrentTurnRoutingChoice(
             SearchNode node,
+            out RoutingChoiceSignature signature,
+            out SearchNode choiceNode)
+            => TryGetRoutingChoice(node, node.Turn, out signature, out choiceNode);
+
+        private static bool TryGetRoutingChoice(
+            SearchNode node,
+            int minimumChoiceTurn,
             out RoutingChoiceSignature signature,
             out SearchNode choiceNode)
         {
@@ -1093,6 +1131,7 @@ internal sealed partial class CombatBeamSolver
                                 cursor,
                                 choice,
                                 action.Turn + 1,
+                                minimumChoiceTurn,
                                 out RoutingChoiceSignature turnStartSignature))
                         {
                             signature = turnStartSignature;
@@ -1111,6 +1150,7 @@ internal sealed partial class CombatBeamSolver
                                 cursor,
                                 choice,
                                 action.Turn,
+                                minimumChoiceTurn,
                                 out RoutingChoiceSignature nestedSignature))
                         {
                             signature = nestedSignature;
@@ -1126,6 +1166,7 @@ internal sealed partial class CombatBeamSolver
                         cursor,
                         action.Choice,
                         action.Turn,
+                        minimumChoiceTurn,
                         out RoutingChoiceSignature actionSignature))
                 {
                     signature = actionSignature;
@@ -1136,9 +1177,9 @@ internal sealed partial class CombatBeamSolver
             return false;
         }
 
-        private static int ActionsSinceCurrentRoutingChoice(SearchNode node)
+        private static int ActionsSinceRetainedRoutingChoice(SearchNode node)
         {
-            if (!TryGetCurrentTurnRoutingChoice(node, out _, out SearchNode choiceNode))
+            if (!TryGetRetainedRoutingChoice(node, out _, out SearchNode choiceNode))
                 return int.MaxValue;
             int count = 0;
             for (SearchNode? cursor = node; cursor != null && !ReferenceEquals(cursor, choiceNode); cursor = cursor.Parent)
@@ -1151,6 +1192,7 @@ internal sealed partial class CombatBeamSolver
             SearchNode cursor,
             PlanCardChoice choice,
             int choiceTurn,
+            int minimumChoiceTurn,
             out RoutingChoiceSignature signature)
         {
             signature = default;
@@ -1170,7 +1212,7 @@ internal sealed partial class CombatBeamSolver
             }
 
             bool generated = choice.Effect == PlanChoiceEffect.GenerateToHand;
-            if (choiceTurn < node.Turn)
+            if (choiceTurn < minimumChoiceTurn)
                 return false;
 
             bool multiCard = choice.Cards.Count > 1;
