@@ -15,6 +15,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private readonly OptionButton _potionPolicy;
     private readonly OptionButton _performancePreset;
     private readonly Button _exportBugReport;
+    private readonly Button _uploadBugReport;
     private readonly Label _status;
     private readonly List<Action<SolverSettingsData>> _reloadInputs = [];
     private readonly List<Func<bool>> _commitInputs = [];
@@ -117,10 +118,25 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             1d,
             16d),
             "搜索期间为延迟垃圾回收预留的内存预算。提高后可减少长搜索中的回收与卡顿，但需要更多可用内存；超过机器余量可能触发系统换页。");
+        HBoxContainer bugReportRow = new()
+        {
+            MouseFilter = MouseFilterEnum.Pass,
+        };
+        bugReportRow.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+        _uploadBugReport = SolverUiTokens.CreateButton("上传问题包", SolverButtonStyle.Secondary);
+        _uploadBugReport.CustomMinimumSize = new Vector2(126, SolverUiTokens.Size.ButtonHeight);
+        _uploadBugReport.Pressed += OnUploadBugReportPressed;
+        bugReportRow.AddChild(_uploadBugReport);
         _exportBugReport = SolverUiTokens.CreateButton("导出问题包", SolverButtonStyle.Secondary);
         _exportBugReport.CustomMinimumSize = new Vector2(126, SolverUiTokens.Size.ButtonHeight);
         _exportBugReport.Pressed += OnExportBugReportPressed;
-        AddBasicRow(basicGrid, "问题反馈", _exportBugReport);
+        bugReportRow.AddChild(_exportBugReport);
+        AddBasicRow(basicGrid, "问题反馈", bugReportRow);
+        AddBasicRow(
+            basicGrid,
+            "反馈联系QQ（选填）",
+            CreateContactQqInput(),
+            "上传问题包时随附，方便开发者回访；只需填一次，弹窗里会自动带上。");
         settingsContent.AddChild(basicGrid);
 
         settingsContent.AddChild(CreateSectionHeading("搜索策略配置"));
@@ -452,6 +468,29 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         return input;
     }
 
+    private LineEdit CreateContactQqInput()
+    {
+        LineEdit input = CreateInput("未设置");
+        _reloadInputs.Add(data => input.Text = data.ReporterContactQq ?? string.Empty);
+        bool Commit()
+        {
+            string text = input.Text.Trim();
+            if (text.Length > 64)
+            {
+                ShowInvalid(input, "联系QQ最长 64 个字符");
+                return false;
+            }
+            return Save(input, SolverSettings.Current with
+            {
+                ReporterContactQq = text.Length == 0 ? null : text,
+            });
+        }
+        input.FocusExited += () => Commit();
+        input.TextSubmitted += _ => Commit();
+        _commitInputs.Add(Commit);
+        return input;
+    }
+
     private static LineEdit CreateInput(string defaultText)
     {
         LineEdit input = new()
@@ -660,6 +699,47 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         finally
         {
             _exportBugReport.Disabled = false;
+        }
+    }
+
+    private void OnUploadBugReportPressed()
+    {
+        BugReportUploadDialog dialog = new(SolverSettings.Current.ReporterContactQq ?? string.Empty);
+        dialog.UploadConfirmed += OnUploadConfirmed;
+        GetTree().Root.AddChild(dialog);
+    }
+
+    private void OnUploadConfirmed(string description)
+    {
+        _uploadBugReport.Disabled = true;
+        _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextSecondary);
+        _status.Text = "正在打包并上传…";
+        TaskHelper.RunSafely(UploadBugReportAsync(description));
+    }
+
+    private async Task UploadBugReportAsync(string description)
+    {
+        string? path = null;
+        try
+        {
+            path = await CombatBugReportExporter.ExportCurrentAsync();
+            string contactQq = SolverSettings.Current.ReporterContactQq ?? string.Empty;
+            string reportId = await CombatBugReportUploader.UploadAsync(path, description, contactQq);
+            File.Delete(path);
+            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+            _status.Text = $"已上传，反馈编号：{reportId}";
+        }
+        catch (Exception ex)
+        {
+            Entry.Logger.Error($"[CombatSolver/Test] BUG_REPORT_UPLOAD_FAILED exception={ex}");
+            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
+            _status.Text = path == null
+                ? $"上传失败：{ex.Message}"
+                : $"上传失败：{ex.Message}（问题包已保留在桌面 CombatSolver-BugReports）";
+        }
+        finally
+        {
+            _uploadBugReport.Disabled = false;
         }
     }
 
