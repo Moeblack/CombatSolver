@@ -152,8 +152,10 @@ internal sealed partial class SimulatedCombatState
     IDisposable ICombatPredictionCardExecutionSink.BeginCardExecutionScope()
         => BeginCardExecutionScope();
 
-    void ICombatPredictionCardExecutionSink.RecordCardPlayStarted(PredictedCard card)
+    void ICombatPredictionCardExecutionSink.RecordCardPlayStarted(PredictedCard card, CardPlay cardPlay)
     {
+        if (!cardPlay.IsFirstInSeries)
+            return;
         Creature owner = card.Preview.Owner.Creature;
         (_cardPlaysStartedThisTurn ??= [])[owner] = GetCardPlaysStartedThisTurn(owner) + 1;
     }
@@ -421,6 +423,7 @@ internal sealed partial class SimulatedCombatState
             return value;
         value = _rootHistory.CardPlaysStarted.Count(entry =>
             entry.HappenedThisTurn(this)
+            && entry.CardPlay.IsFirstInSeries
             && entry.CardPlay.Player.Creature == owner);
         (_cardsPlayedThisTurn ??= [])[owner] = value;
         return value;

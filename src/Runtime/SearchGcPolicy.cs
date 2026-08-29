@@ -184,21 +184,30 @@ internal static class SearchGcPolicy
             if (_reclaimActive)
             {
                 _reclaimRequired = true;
-                return ReclaimAfterActiveCheckpointAsync(_reclaimTask, reason);
+                _reclaimReason = reason;
+                return WaitForReclaimChainAsync(_reclaimTask);
             }
             if (_reclaimRequested)
-                return _reclaimTask;
+                return WaitForReclaimChainAsync(_reclaimTask);
             if (_activeSearches == 0 && !_noGcRegionActive && !_reclaimRequired)
                 return Task.CompletedTask;
             _reclaimRequired = true;
-            return RequestReclaimLocked(reason);
+            return WaitForReclaimChainAsync(RequestReclaimLocked(reason));
         }
     }
 
-    private static async Task ReclaimAfterActiveCheckpointAsync(Task checkpoint, string reason)
+    private static async Task WaitForReclaimChainAsync(Task checkpoint)
     {
-        await checkpoint;
-        await ReclaimIfPendingAsync(reason);
+        while (true)
+        {
+            await checkpoint;
+            lock (Gate)
+            {
+                if (!_reclaimActive && !_reclaimRequested)
+                    return;
+                checkpoint = _reclaimTask;
+            }
+        }
     }
 
     private static Task RequestReclaimLocked(string reason)
@@ -281,6 +290,8 @@ internal static class SearchGcPolicy
                 {
                     _reclaimActive = false;
                     _reclaimCompletion = null;
+                    if (failure == null && _reclaimRequired)
+                        RequestReclaimLocked(_reclaimReason);
                 }
                 if (failure == null)
                     completion.SetResult();

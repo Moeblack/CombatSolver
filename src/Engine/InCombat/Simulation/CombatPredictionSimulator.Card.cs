@@ -337,7 +337,7 @@ internal sealed partial class CombatPredictionSimulator
             HookMirrors.BeforeCardPlayed(this, card, cardPlay);
             History.CardPlayStarted(card, cardPlay);
             if (State.CombatState is ICombatPredictionCardExecutionSink startedSink)
-                startedSink.RecordCardPlayStarted(card);
+                startedSink.RecordCardPlayStarted(card, cardPlay);
 
             CardOnPlayMirrors.Invoke(this, card, cardPlay);
             decimal cardBlockGained = TakeBlockGained(cardPlay);

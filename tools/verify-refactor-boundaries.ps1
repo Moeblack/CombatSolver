@@ -115,6 +115,18 @@ foreach ($check in $forkBoundaryChecks) {
     }
 }
 
+$searchGcPolicyPath = Join-Path $repositoryRoot "src\Runtime\SearchGcPolicy.cs"
+foreach ($gcChainRule in @(
+    "return WaitForReclaimChainAsync(_reclaimTask)",
+    "failure == null && _reclaimRequired")) {
+    if (-not (Select-String -LiteralPath $searchGcPolicyPath -SimpleMatch $gcChainRule -Quiet)) {
+        $violations.Add("${searchGcPolicyPath}: missing serialized reclaim-chain rule '$gcChainRule'")
+    }
+}
+if (Select-String -LiteralPath $searchGcPolicyPath -SimpleMatch "ReclaimAfterActiveCheckpointAsync" -Quiet) {
+    $violations.Add("${searchGcPolicyPath}: recursive reclaim handoff returned")
+}
+
 $cardPlayPredictionStatePath = Join-Path $repositoryRoot "src\Engine\InCombat\Mirrors\Hooks\Card\CardPlayHookPredictionStates.cs"
 foreach ($stableVambraceState in @(
     "internal sealed class VambracePredictionState(Vambrace relic) : IPredictionStateForkable",
