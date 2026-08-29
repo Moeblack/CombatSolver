@@ -7,6 +7,21 @@ internal sealed record CompleteProjectionBaseline(
     int ProjectedBattleHpLost,
     string StateDifference);
 
+internal sealed record ManualProjectionBaseline(
+    int StartTurnNumber,
+    int ProjectedBattleHpLost,
+    string StateDifference);
+
+internal sealed record ManualProjectionComparison(
+    int OriginalTurnNumber,
+    int CurrentTurnNumber,
+    int PreviousProjectedBattleHpLost,
+    int CurrentProjectedBattleHpLost,
+    string StateDifference)
+{
+    public int Difference => CurrentProjectedBattleHpLost - PreviousProjectedBattleHpLost;
+}
+
 internal sealed class SolverCombatSession
 {
     public CombatState? State { get; set; }
@@ -16,6 +31,10 @@ internal sealed class SolverCombatSession
     public bool FullAutoEnabled { get; set; }
     public SolverTheftPolicy? TheftPolicy { get; set; }
     public CompleteProjectionBaseline? PendingCompleteProjectionBaseline { get; set; }
+    public ManualProjectionBaseline? PendingManualProjectionBaseline { get; set; }
+    public ManualProjectionComparison? LastManualProjectionComparison { get; set; }
+    public bool ManualRouteImprovementDetected { get; set; }
+    public bool AutomaticSearchPaused { get; set; }
     public Dictionary<ReplanCause, int> ReplanCounts { get; } = [];
     public int SearchesStarted { get; set; }
     public int ContinuationsReused { get; set; }

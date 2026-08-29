@@ -18,6 +18,7 @@ internal enum SolverPerformancePreset
     Low,
     Medium,
     High,
+    VeryHigh,
     Custom,
 }
 
@@ -81,25 +82,25 @@ internal sealed record SolverSettingsSnapshot(
 
 internal static class SolverSettings
 {
-    public const double DefaultNoGcRegionBudgetGigabytes = 6d;
+    public const double DefaultNoGcRegionBudgetGigabytes = 8d;
     private static readonly SolverPerformanceValues LowPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
-            BeamWidth: 10,
-            MaxExpandedNodes: 1_000,
-            MaxCardBranchesPerNode: 8,
-            MaxPileChoiceBranchesPerAction: 3,
-            MaxHandChoiceBranchesPerAction: 4,
-            SoftTimeBudgetMilliseconds: 2_000),
+            BeamWidth: 12,
+            MaxExpandedNodes: 1_200,
+            MaxCardBranchesPerNode: 10,
+            MaxPileChoiceBranchesPerAction: 4,
+            MaxHandChoiceBranchesPerAction: 6,
+            SoftTimeBudgetMilliseconds: 5_000),
         new SolverSearchProfile(
             SolverSearchPhase.Deep,
-            BeamWidth: 24,
-            MaxExpandedNodes: 4_000,
-            MaxCardBranchesPerNode: 12,
-            MaxPileChoiceBranchesPerAction: 6,
-            MaxHandChoiceBranchesPerAction: 8,
-            SoftTimeBudgetMilliseconds: 20_000),
-        NoGcRegionBudgetGigabytes: 4d);
+            BeamWidth: 30,
+            MaxExpandedNodes: 6_000,
+            MaxCardBranchesPerNode: 16,
+            MaxPileChoiceBranchesPerAction: 8,
+            MaxHandChoiceBranchesPerAction: 10,
+            SoftTimeBudgetMilliseconds: 60_000),
+        NoGcRegionBudgetGigabytes: 6d);
     private static readonly SolverPerformanceValues MediumPerformance = new(
         SolverSearchProfile.Short,
         SolverSearchProfile.Deep,
@@ -107,21 +108,39 @@ internal static class SolverSettings
     private static readonly SolverPerformanceValues HighPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
-            BeamWidth: 18,
-            MaxExpandedNodes: 2_400,
-            MaxCardBranchesPerNode: 14,
-            MaxPileChoiceBranchesPerAction: 6,
-            MaxHandChoiceBranchesPerAction: 8,
-            SoftTimeBudgetMilliseconds: 8_000),
+            BeamWidth: 24,
+            MaxExpandedNodes: 5_000,
+            MaxCardBranchesPerNode: 20,
+            MaxPileChoiceBranchesPerAction: 10,
+            MaxHandChoiceBranchesPerAction: 12,
+            SoftTimeBudgetMilliseconds: 12_000),
         new SolverSearchProfile(
             SolverSearchPhase.Deep,
-            BeamWidth: 45,
-            MaxExpandedNodes: 12_000,
-            MaxCardBranchesPerNode: 24,
-            MaxPileChoiceBranchesPerAction: 12,
-            MaxHandChoiceBranchesPerAction: 16,
-            SoftTimeBudgetMilliseconds: 120_000),
-        NoGcRegionBudgetGigabytes: 8d);
+            BeamWidth: 60,
+            MaxExpandedNodes: 25_000,
+            MaxCardBranchesPerNode: 32,
+            MaxPileChoiceBranchesPerAction: 18,
+            MaxHandChoiceBranchesPerAction: 24,
+            SoftTimeBudgetMilliseconds: 180_000),
+        NoGcRegionBudgetGigabytes: 12d);
+    private static readonly SolverPerformanceValues VeryHighPerformance = new(
+        new SolverSearchProfile(
+            SolverSearchPhase.Short,
+            BeamWidth: 36,
+            MaxExpandedNodes: 10_000,
+            MaxCardBranchesPerNode: 30,
+            MaxPileChoiceBranchesPerAction: 16,
+            MaxHandChoiceBranchesPerAction: 20,
+            SoftTimeBudgetMilliseconds: 20_000),
+        new SolverSearchProfile(
+            SolverSearchPhase.Deep,
+            BeamWidth: 90,
+            MaxExpandedNodes: 50_000,
+            MaxCardBranchesPerNode: 48,
+            MaxPileChoiceBranchesPerAction: 28,
+            MaxHandChoiceBranchesPerAction: 36,
+            SoftTimeBudgetMilliseconds: 300_000),
+        NoGcRegionBudgetGigabytes: 16d);
     private const string SettingsUri = "user://combat_solver_settings.json";
     private static readonly object Sync = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -205,6 +224,8 @@ internal static class SolverSettings
             return SolverPerformancePreset.Medium;
         if (legacy == HighPerformance)
             return SolverPerformancePreset.High;
+        if (legacy == VeryHighPerformance)
+            return SolverPerformancePreset.VeryHigh;
         return SolverPerformancePreset.Custom;
     }
 
@@ -214,6 +235,7 @@ internal static class SolverSettings
             SolverPerformancePreset.Low => LowPerformance,
             SolverPerformancePreset.Medium => MediumPerformance,
             SolverPerformancePreset.High => HighPerformance,
+            SolverPerformancePreset.VeryHigh => VeryHighPerformance,
             SolverPerformancePreset.Custom => BuildCustomPerformance(data),
             _ => throw new ArgumentOutOfRangeException(nameof(data.PerformancePreset)),
         };
@@ -229,6 +251,7 @@ internal static class SolverSettings
                 SolverPerformancePreset.Low => LowPerformance,
                 SolverPerformancePreset.Medium => MediumPerformance,
                 SolverPerformancePreset.High => HighPerformance,
+                SolverPerformancePreset.VeryHigh => VeryHighPerformance,
                 _ => throw new ArgumentOutOfRangeException(nameof(preset)),
             };
         return data with
@@ -308,8 +331,8 @@ internal static class SolverSettings
 
     private static void Validate(SolverSettingsData data)
     {
-        ValidateRange(data.ShortTimeLimitSeconds, 0.1d, 120d, nameof(data.ShortTimeLimitSeconds));
-        ValidateRange(data.DeepTimeLimitSeconds, 0.1d, 120d, nameof(data.DeepTimeLimitSeconds));
+        ValidateRange(data.ShortTimeLimitSeconds, 0.1d, 600d, nameof(data.ShortTimeLimitSeconds));
+        ValidateRange(data.DeepTimeLimitSeconds, 0.1d, 600d, nameof(data.DeepTimeLimitSeconds));
         ValidateRange(data.NoGcRegionBudgetGigabytes, 1d, 16d, nameof(data.NoGcRegionBudgetGigabytes));
         ValidateRange(data.ShortBeamWidth, 1, 512, nameof(data.ShortBeamWidth));
         ValidateRange(data.DeepBeamWidth, 1, 512, nameof(data.DeepBeamWidth));

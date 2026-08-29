@@ -50,10 +50,11 @@ internal static class SolverController
     private static readonly HashSet<string> DeployedCardIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> DeployedPotionIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
 
-    public static bool IsSearching => _search != null;
+    public static bool IsSearching => _search != null || PlayerTurnSetupCoordinator.IsSearching;
     public static bool IsDeploying => _deployment != null;
     public static bool SolverDisabled => _solverDisabled;
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
+    public static bool AutomaticSearchPaused => _combat.AutomaticSearchPaused;
     public static bool StopFullAutoOnCombatEnd => _stopFullAutoOnCombatEnd;
     public static bool StopFullAutoOnDeathTurn => _stopFullAutoOnDeathTurn;
     public static bool StopFullAutoOnWorseRecalculation => _stopFullAutoOnWorseRecalculation;
@@ -79,6 +80,10 @@ internal static class SolverController
         => UnexpectedReplanCount;
     internal static int ManualDivergenceCountForTesting
         => _combat.ReplanCounts.GetValueOrDefault(ReplanCause.ManualDivergence);
+    internal static bool ManualRouteImprovementDetected
+        => _combat.ManualRouteImprovementDetected;
+    internal static ManualProjectionComparison? LastManualProjectionComparisonForTesting
+        => _combat.LastManualProjectionComparison;
     internal static int NoGcRegionRolloverCountForTesting
         => SearchGcPolicy.RolloverCountForTesting;
     internal static long LastDeployedActionStartedAtMillisecondsForTesting { get; private set; }
@@ -93,6 +98,19 @@ internal static class SolverController
         if (!UnattendedTestRunner.IsActive)
             throw new InvalidOperationException("搜索会话取消入口只能在无人测试中使用。");
         CancelSearch();
+    }
+
+    internal static void RecordManualProjectionComparisonForTesting(
+        int previousProjectedBattleHpLost,
+        int currentProjectedBattleHpLost)
+    {
+        AssertMainThread();
+        if (!UnattendedTestRunner.IsActive)
+            throw new InvalidOperationException("手操战损比较入口只能在无人测试中使用。");
+        RecordManualProjectionComparison(
+            new ManualProjectionBaseline(1, previousProjectedBattleHpLost, "test_manual_state_change"),
+            currentTurnNumber: 1,
+            currentProjectedBattleHpLost);
     }
 
     public static void ApplyPersistentSettings(SolverSettingsSnapshot settings)
@@ -154,6 +172,7 @@ internal static class SolverController
         AssertMainThread();
         Player? player = LocalContext.GetMe(state);
         if (_solverDisabled
+            || _combat.AutomaticSearchPaused
             || !CombatManager.Instance.IsInProgress
             || state.Players.Count != 1
             || state.CurrentSide != CombatSide.Player
@@ -294,6 +313,19 @@ internal static class SolverController
     {
         AssertMainThread();
         SolverDispatcher.Ensure(host);
+        if (reason == SearchReason.Manual)
+        {
+            if (_combat.AutomaticSearchPaused)
+                Entry.Logger.Info("[CombatSolver/Test] AUTOMATIC_SEARCH_RESUMED reason=manual_recalculate");
+            _combat.AutomaticSearchPaused = false;
+        }
+        else if (_combat.AutomaticSearchPaused)
+        {
+            _combat.FullAutoEnabled = false;
+            Entry.Logger.Info($"[CombatSolver/Test] SEARCH_REJECT reason=user_stopped request={reason}");
+            SolverOverlay.ShowSearchStopped(host);
+            return;
+        }
         ReplanCause replanCause = reason switch
         {
             SearchReason.AutoTurnStart => ReplanCause.InitialSearch,
@@ -303,7 +335,10 @@ internal static class SolverController
         };
         SearchBoundaryReason? previousBoundary = _combat.ContinuationSource?.BoundaryReason;
         if (reason != SearchReason.AutoTurnStart)
+        {
             _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
+        }
         if (!CanSolve(state, out string rejection))
         {
             SolverOverlay.Show(host, $"[b]战斗路线求解器[/b]\n{rejection}");
@@ -322,6 +357,17 @@ internal static class SolverController
             BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(state);
             setupStage = "live_stamp";
             LiveCombatStamp stamp = LiveCombatStamp.Capture(state);
+            if (reason != SearchReason.AutoTurnStart
+                && _combat.LatestResult is { } previousResult
+                && _combat.LatestStamp is { } previousStamp
+                && previousStamp != stamp)
+            {
+                replanCause = ReplanCause.ManualDivergence;
+                _combat.PendingManualProjectionBaseline = new ManualProjectionBaseline(
+                    previousResult.StartTurnNumber,
+                    previousResult.ProjectedBattleHpLost,
+                    "field=live_combat_stamp expected={solver_result} actual={manual_state_change}");
+            }
             setupStage = "continuation";
             ContinuationStamp? continuationStamp = reason == SearchReason.AutoTurnStart && _combat.ContinuationSource != null
                 ? ContinuationStamp.CaptureLive(state)
@@ -378,6 +424,13 @@ internal static class SolverController
                     : expected == null
                         ? ReplanCause.ContinuationMissing
                         : ReplanCause.StateMismatch;
+                if (replanCause == ReplanCause.ManualDivergence)
+                {
+                    _combat.PendingManualProjectionBaseline = new ManualProjectionBaseline(
+                        _combat.ContinuationSource.StartTurnNumber,
+                        _combat.ContinuationSource.ProjectedBattleHpLost,
+                        difference);
+                }
                 if (followedBySolver
                     && _combat.ContinuationSource.BoundaryReason == SearchBoundaryReason.None
                     && _combat.ContinuationSource.CombatEndedTurn.HasValue)
@@ -494,6 +547,7 @@ internal static class SolverController
             _combat.LatestStamp = null;
             _combat.ContinuationSource = null;
             _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
             SolverOverlay.Show(
                 host,
                 FormatSearchSetupFailure(ex));
@@ -507,10 +561,11 @@ internal static class SolverController
     {
         string title = $"[color={SolverUiTokens.Palette.DangerHex}][b]搜索初始化失败[/b][/color]";
         if (exception is not IncompatibleGameplayModException incompatible)
-            return $"{title}  {exception.Message}";
+            return $"{title}\n[color={SolverUiTokens.Palette.DangerHex}]{EscapeRichText(exception.Message)}[/color]";
 
         string modName = EscapeRichText(incompatible.PlayerFacingModName);
-        return $"{title}  检测到不兼容的第三方 Mod：{modName}。建议卸载该 Mod 并重启游戏后再使用求解器。";
+        return $"{title}\n[color={SolverUiTokens.Palette.DangerHex}]检测到不兼容的第三方 Mod：{modName}。" +
+               "建议卸载该 Mod 并重启游戏后再使用求解器。[/color]";
     }
 
     private static string EscapeRichText(string value)
@@ -573,6 +628,14 @@ internal static class SolverController
             _combat.FullAutoEnabled = false;
             Entry.Logger.Info("[CombatSolver/Test] FULL_AUTO enabled=false reason=user");
             SolverOverlay.RefreshControls();
+            return;
+        }
+
+        if (_combat.AutomaticSearchPaused)
+        {
+            _combat.FullAutoEnabled = false;
+            Entry.Logger.Info("[CombatSolver/Test] FULL_AUTO_REJECT reason=user_stopped");
+            SolverOverlay.ShowSearchStopped(host);
             return;
         }
 
@@ -659,6 +722,25 @@ internal static class SolverController
         {
             RequestSearch(game, state, SearchReason.AutoTurnStart);
         }
+    }
+
+    public static void StopSearchByUser(NGame host)
+    {
+        AssertMainThread();
+        if (!IsSearching)
+            return;
+
+        int? generation = _search?.Generation;
+        _combat.FullAutoEnabled = false;
+        _combat.AutomaticSearchPaused = true;
+        CancelSearch();
+        bool stoppedTurnSetupSearch = PlayerTurnSetupCoordinator.StopSearchByUser();
+        _combat.PendingCompleteProjectionBaseline = null;
+        _combat.PendingManualProjectionBaseline = null;
+        SolverOverlay.ShowSearchStopped(host);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] SEARCH_STOPPED_BY_USER generation={generation?.ToString() ?? "-"} " +
+            $"turn_setup={stoppedTurnSetupSearch.ToString().ToLowerInvariant()} automatic_search_paused=true");
     }
 
     public static void SetStopFullAutoOnCombatEnd(bool enabled, bool persist = true)
@@ -832,8 +914,14 @@ internal static class SolverController
         string differences = _combat.LastContinuationDifferences.Count == 0
             ? "-"
             : string.Join(System.Environment.NewLine, _combat.LastContinuationDifferences);
+        string manualComparison = _combat.LastManualProjectionComparison is { } comparison
+            ? $"previous={comparison.PreviousProjectedBattleHpLost} current={comparison.CurrentProjectedBattleHpLost} " +
+              $"difference={comparison.Difference} original_turn={comparison.OriginalTurnNumber} " +
+              $"current_turn={comparison.CurrentTurnNumber}"
+            : "-";
         return DescribeReplanCounts() +
-               System.Environment.NewLine + "last_state_differences=" + differences;
+               System.Environment.NewLine + "last_state_differences=" + differences +
+               System.Environment.NewLine + "last_manual_projection_comparison=" + manualComparison;
     }
 
     private static string DescribeReplanCounts()
@@ -888,12 +976,14 @@ internal static class SolverController
         if (task.IsCanceled)
         {
             _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_CANCELED generation={generation}");
             return;
         }
         if (task.IsFaulted)
         {
             _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
             Exception ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("后台搜索失败但没有异常对象。");
             LastSearchFailureForTesting = ex;
             if (ex is PotionPolicyUnsatisfiedException)
@@ -901,7 +991,7 @@ internal static class SolverController
                 _combat.FullAutoEnabled = false;
                 SolverOverlay.RefreshControls();
             }
-            SolverOverlay.Show(host, $"[b]战斗路线求解器[/b]\n[color=red]计算失败：{ex.Message}[/color]");
+            SolverOverlay.Show(host, FormatSearchFailure(ex));
             Entry.Logger.Error($"[CombatSolver/Test] SEARCH_FAILURE generation={generation} exception={ex}");
             return;
         }
@@ -914,6 +1004,7 @@ internal static class SolverController
             || LiveCombatStamp.Capture(searchedState) != searchedStamp)
         {
             _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
             _combat.LatestResult = null;
             _combat.LatestStamp = null;
             SolverOverlay.Show(host, "[b]战斗路线求解器[/b]\n战斗状态在计算期间发生变化，已丢弃过期结果。");
@@ -923,7 +1014,9 @@ internal static class SolverController
 
         SolverResult result = task.Result;
         CompleteProjectionBaseline? recalculationBaseline = _combat.PendingCompleteProjectionBaseline;
+        ManualProjectionBaseline? manualBaseline = _combat.PendingManualProjectionBaseline;
         _combat.PendingCompleteProjectionBaseline = null;
+        _combat.PendingManualProjectionBaseline = null;
         if (recalculationBaseline != null
             && result.ProjectedBattleHpLost > recalculationBaseline.ProjectedBattleHpLost)
         {
@@ -936,6 +1029,13 @@ internal static class SolverController
                 $"previous_projected_battle_hp_lost={recalculationBaseline.ProjectedBattleHpLost} " +
                 $"current_projected_battle_hp_lost={result.ProjectedBattleHpLost} " +
                 $"increase={result.ProjectedBattleHpLossIncrease} {recalculationBaseline.StateDifference}");
+        }
+        if (manualBaseline != null)
+        {
+            RecordManualProjectionComparison(
+                manualBaseline,
+                result.StartTurnNumber,
+                result.ProjectedBattleHpLost);
         }
         result.MainThreadFrameCount = search.FrameCount;
         result.MainThreadFramesOver33Milliseconds = search.FramesOver33Milliseconds;
@@ -1282,7 +1382,7 @@ internal static class SolverController
         }
         catch (Exception ex)
         {
-            SolverOverlay.Show(host, $"[b]战斗路线求解器[/b]\n[color=red]自动执行中止：{ex.Message}[/color]");
+            SolverOverlay.Show(host, FormatDeploymentFailure(ex));
             Entry.Logger.Error($"[CombatSolver/Test] DEPLOY_FAILURE turn={turn} exception={ex}");
         }
         finally
@@ -1347,6 +1447,49 @@ internal static class SolverController
         _search?.Cancellation.Cancel();
         _search = null;
     }
+
+    private static void RecordManualProjectionComparison(
+        ManualProjectionBaseline baseline,
+        int currentTurnNumber,
+        int currentProjectedBattleHpLost)
+    {
+        ManualProjectionComparison comparison = new(
+            baseline.StartTurnNumber,
+            currentTurnNumber,
+            baseline.ProjectedBattleHpLost,
+            currentProjectedBattleHpLost,
+            baseline.StateDifference);
+        _combat.LastManualProjectionComparison = comparison;
+        string direction;
+        if (comparison.Difference < 0)
+        {
+            direction = "IMPROVED";
+            _combat.ManualRouteImprovementDetected = true;
+        }
+        else if (comparison.Difference > 0)
+        {
+            direction = "WORSENED";
+        }
+        else
+        {
+            direction = "UNCHANGED";
+        }
+
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] MANUAL_ROUTE_{direction} " +
+            $"original_turn={comparison.OriginalTurnNumber} current_turn={comparison.CurrentTurnNumber} " +
+            $"previous_projected_battle_hp_lost={comparison.PreviousProjectedBattleHpLost} " +
+            $"current_projected_battle_hp_lost={comparison.CurrentProjectedBattleHpLost} " +
+            $"difference={comparison.Difference} {comparison.StateDifference}");
+    }
+
+    private static string FormatSearchFailure(Exception exception)
+        => $"[color={SolverUiTokens.Palette.DangerHex}][b]计算失败[/b]\n" +
+           $"{EscapeRichText(exception.Message)}[/color]";
+
+    private static string FormatDeploymentFailure(Exception exception)
+        => $"[color={SolverUiTokens.Palette.DangerHex}][b]自动执行中止[/b]\n" +
+           $"{EscapeRichText(exception.Message)}[/color]";
 
     private static void CancelDeployment()
     {

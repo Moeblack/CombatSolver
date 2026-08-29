@@ -8,6 +8,7 @@ internal enum SolverButtonStyle
     Secondary,
     Primary,
     Positive,
+    Danger,
 }
 
 internal static class SolverUiTokens
@@ -199,6 +200,7 @@ internal static class SolverUiTokens
         {
             SolverButtonStyle.Primary => (Palette.Accent.Darkened(0.12f), Palette.Accent.Lightened(0.08f), Palette.AccentHover),
             SolverButtonStyle.Positive => (Palette.Positive, Palette.Success, Palette.PositiveHover),
+            SolverButtonStyle.Danger => (Palette.Danger.Darkened(0.22f), Palette.Danger, Palette.Danger.Lightened(0.08f)),
             _ => (Palette.SurfaceRaised, Palette.Border, Palette.SurfaceHover),
         };
         button.AddThemeStyleboxOverride("normal", CreateBox(background, border, Radius.Medium, Spacing.Sm, Spacing.Xs));
@@ -206,7 +208,9 @@ internal static class SolverUiTokens
         button.AddThemeStyleboxOverride("pressed", CreateBox(background.Darkened(0.16f), border, Radius.Medium, Spacing.Sm, Spacing.Xs));
         button.AddThemeStyleboxOverride("disabled", CreateBox(Palette.Background, Palette.BorderSubtle, Radius.Medium, Spacing.Sm, Spacing.Xs));
         button.ApplyLocaleFontSubstitution(
-            style is SolverButtonStyle.Primary or SolverButtonStyle.Positive ? FontType.Bold : FontType.Regular,
+            style is SolverButtonStyle.Primary or SolverButtonStyle.Positive or SolverButtonStyle.Danger
+                ? FontType.Bold
+                : FontType.Regular,
             "font");
     }
 

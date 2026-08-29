@@ -46,7 +46,8 @@ internal static class SolverOverlay
     private static Button? _fullAutoButton;
     private static Button? _collapseButton;
     private static Button? _settingsButton;
-    private static Label? _unexpectedReplanWarningLabel;
+    private static PanelContainer? _feedbackBanner;
+    private static Label? _feedbackBannerLabel;
     private static HBoxContainer? _theftPolicyControls;
     private static Button? _preserveResourcesButton;
     private static Button? _letEscapeButton;
@@ -57,6 +58,7 @@ internal static class SolverOverlay
     private static bool _dragging;
     private static bool _layoutQueued;
     private static bool? _renderedFullAutoStyle;
+    private static SolverButtonStyle? _renderedExecuteButtonStyle;
     private static SolverTheftPolicy? _renderedTheftPolicy;
     private static int _remainingLayoutPasses;
     private static Vector2 _dragOffset;
@@ -70,8 +72,14 @@ internal static class SolverOverlay
             && GodotObject.IsInstanceValid(_theftPolicyControls)
             && _theftPolicyControls.Visible;
     internal static bool UnexpectedReplanWarningVisibleForTesting
-        => _unexpectedReplanWarningLabel?.Visible == true
-            && _unexpectedReplanWarningLabel.Text.Contains("导出完整问题包", StringComparison.Ordinal);
+        => _feedbackBanner?.Visible == true
+            && _feedbackBannerLabel?.Text.Contains("计划外重算", StringComparison.Ordinal) == true;
+    internal static bool ManualRouteImprovementVisibleForTesting
+        => _feedbackBanner?.Visible == true
+            && _feedbackBannerLabel?.Text.Contains("比求解器更好的世界线", StringComparison.Ordinal) == true;
+    internal static string? ExecuteButtonTextForTesting => _executeButton?.Text;
+    internal static bool MessageWrappingEnabledForTesting
+        => _summaryText is { FitContent: true, AutowrapMode: TextServer.AutowrapMode.WordSmart };
 
     public static void Show(Node host, string text)
     {
@@ -90,6 +98,17 @@ internal static class SolverOverlay
         _deployQueued = false;
         SetStatus("求解器已禁用", TextMuted);
         SetMessageContent($"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动搜索和路线执行已暂停。[/color]");
+        ShowLayer();
+        RefreshControls();
+    }
+
+    public static void ShowSearchStopped(Node host)
+    {
+        EnsureCreated(host);
+        _deployQueued = false;
+        SetStatus("计算已停止", Danger);
+        SetMessageContent(
+            $"[color={SolverUiTokens.Palette.DangerHex}]本场自动计算已暂停。点击“重新计算”后恢复当前及后续回合搜索。[/color]");
         ShowLayer();
         RefreshControls();
     }
@@ -393,20 +412,27 @@ internal static class SolverOverlay
         if (_recalculateButton == null || _executeButton == null || _fullAutoButton == null)
             return;
 
-        if (_unexpectedReplanWarningLabel != null)
-            _unexpectedReplanWarningLabel.Visible = SolverController.UnexpectedReplanCount > 0;
+        RefreshFeedbackBanner();
 
         bool solverDisabled = SolverController.SolverDisabled;
         _recalculateButton.Disabled = solverDisabled || SolverController.IsSearching || SolverController.IsDeploying;
         _executeButton.Disabled = solverDisabled || SolverController.IsDeploying;
         if (SolverController.IsDeploying)
             _executeButton.Text = "执行中…";
+        else if (SolverController.IsSearching)
+            _executeButton.Text = "停止计算";
         else if (_deployQueued)
             _executeButton.Text = "已排队执行";
-        else if (SolverController.IsSearching)
-            _executeButton.Text = "完成后执行";
         else
             _executeButton.Text = "执行本回合";
+        SolverButtonStyle executeStyle = SolverController.IsSearching
+            ? SolverButtonStyle.Danger
+            : SolverButtonStyle.Primary;
+        if (_renderedExecuteButtonStyle != executeStyle)
+        {
+            SolverUiTokens.ApplyButtonStyle(_executeButton, executeStyle);
+            _renderedExecuteButtonStyle = executeStyle;
+        }
 
         _fullAutoButton.Text = SolverController.FullAutoEnabled ? "全自动：运行中" : "全自动：关";
         _fullAutoButton.Disabled = solverDisabled;
@@ -492,6 +518,7 @@ internal static class SolverOverlay
         panel.AddChild(root);
 
         root.AddChild(CreateHeader());
+        root.AddChild(CreateFeedbackBanner());
         root.AddChild(CreateDivider());
 
         VBoxContainer lowerStack = new()
@@ -612,8 +639,8 @@ internal static class SolverOverlay
         _dragging = false;
         _settingsVisible = false;
         SetCollapsed(false);
-        Entry.Logger.Info("[CombatSolver/Test] UI_CREATE responsive=true content_fit_height=true minimum_size_reflow=true draggable=true drag_coordinates=viewport drag_relayout=release_only max_width=820 max_height=440 route_row_height=44 route_viewport_height=148 visible_unwrapped_route_rows=3 cached_route_rows=16 all_searched_turns=true route_scroll=true persistent_status_card=true compact_title=true compact_footer=true collapsed_action_buttons=true footer_pause_toggles=false settings_pause_toggles=true footer_top_margin=8 details_in_status_row=true battle_hp_in_route_heading=true sold_hp_summary=false three_column_routes=true semantic_action_pills=true full_target_names=true whole_pill_kill_highlight=true text_outline_px=2 single_line_summary=true summary_bold_metric=true flat_collapse=true plain_details_button=true full_auto_positive_toggle=true no_middle_dot=true status_badge=true plain_action_buttons=true always_show_energy=true plain_route_heading=true settings_button=true settings_persisted=true settings_placeholder_defaults=true settings_layout=basic_execution+short_deep_table performance_presets=low+medium+high+custom kill_pill=green_with_target_names status_badge=content_width deployment_speed_settings=true search_status=fixed_columns_seconds only_death_marker=true relic_action_labels=true position_persisted=true theft_policy_buttons=contextual");
-        Entry.Logger.Info("[CombatSolver/Test] UI_UNEXPECTED_REPLAN_WARNING position=header_right manual_divergence_excluded=true export_prompt=full_bug_report");
+        Entry.Logger.Info("[CombatSolver/Test] UI_CREATE responsive=true content_fit_height=true minimum_size_reflow=true draggable=true drag_coordinates=viewport drag_relayout=release_only max_width=820 max_height=440 route_row_height=44 route_viewport_height=148 visible_unwrapped_route_rows=3 cached_route_rows=16 all_searched_turns=true route_scroll=true persistent_status_card=true compact_title=true compact_footer=true collapsed_action_buttons=true footer_pause_toggles=false settings_pause_toggles=true footer_top_margin=8 details_in_status_row=true battle_hp_in_route_heading=true sold_hp_summary=false three_column_routes=true semantic_action_pills=true full_target_names=true whole_pill_kill_highlight=true text_outline_px=2 wrapped_summary=true summary_bold_metric=true flat_collapse=true plain_details_button=true full_auto_positive_toggle=true no_middle_dot=true status_badge=true plain_action_buttons=true always_show_energy=true plain_route_heading=true settings_button=true settings_persisted=true settings_placeholder_defaults=true settings_layout=basic_execution+short_deep_table performance_presets=low+medium+high+very_high+custom kill_pill=green_with_target_names status_badge=content_width deployment_speed_settings=true search_status=fixed_columns_seconds only_death_marker=true relic_action_labels=true position_persisted=true theft_policy_buttons=contextual stop_search_button=true");
+        Entry.Logger.Info("[CombatSolver/Test] UI_FEEDBACK_BANNER position=full_width manual_improvement=green unexpected_replan=red export_prompt=full_bug_report");
     }
 
     private static Control CreateHeader()
@@ -641,16 +668,12 @@ internal static class SolverOverlay
         title.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
         header.AddChild(title);
 
-        _unexpectedReplanWarningLabel = CreateTextLabel(
-            "出现计划外重算，可能是模拟或算法问题。请在设置中导出完整问题包并反馈",
-            SolverUiTokens.Type.Caption,
-            Danger,
-            FontType.Bold);
-        _unexpectedReplanWarningLabel.Visible = false;
-        _unexpectedReplanWarningLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        _unexpectedReplanWarningLabel.HorizontalAlignment = HorizontalAlignment.Right;
-        _unexpectedReplanWarningLabel.ClipText = true;
-        header.AddChild(_unexpectedReplanWarningLabel);
+        Control spacer = new()
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        header.AddChild(spacer);
 
         _settingsButton = CreateHeaderButton("设置", 54);
         _settingsButton.Pressed += ToggleSettings;
@@ -660,6 +683,26 @@ internal static class SolverOverlay
         _collapseButton.Pressed += ToggleCollapsed;
         header.AddChild(_collapseButton);
         return header;
+    }
+
+    private static Control CreateFeedbackBanner()
+    {
+        _feedbackBanner = new PanelContainer
+        {
+            Name = "FeedbackBanner",
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        _feedbackBannerLabel = CreateTextLabel(
+            string.Empty,
+            SolverUiTokens.Type.Body,
+            Success,
+            FontType.Bold);
+        _feedbackBannerLabel.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _feedbackBannerLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _feedbackBanner.AddChild(_feedbackBannerLabel);
+        return _feedbackBanner;
     }
 
     private static Button CreateHeaderButton(string text, float minimumWidth)
@@ -735,11 +778,11 @@ internal static class SolverOverlay
         _summaryContextLabel.ClipText = true;
         statusRow.AddChild(_summaryContextLabel);
         _summaryText = CreateRichText(SolverUiTokens.Type.Metric);
-        _summaryText.AutowrapMode = TextServer.AutowrapMode.Off;
+        _summaryText.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _summaryText.FitContent = true;
         _summaryText.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _summaryText.CustomMinimumSize = new Vector2(0, 24);
         _summaryText.ApplyLocaleFontSubstitution(FontType.Bold, "normal_font");
-        statusRow.AddChild(_summaryText);
         _progressText = CreateTextLabel(string.Empty, SolverUiTokens.Type.Metric, TextPrimary, FontType.Bold);
         _progressText.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         _progressText.CustomMinimumSize = new Vector2(0, 24);
@@ -760,6 +803,7 @@ internal static class SolverOverlay
         detailsSlot.AddChild(_detailsButton);
         statusRow.AddChild(detailsSlot);
         layout.AddChild(statusRow);
+        layout.AddChild(_summaryText);
         _searchProgressBar = new ProgressBar
         {
             Name = "SearchProgress",
@@ -814,6 +858,7 @@ internal static class SolverOverlay
         footer.AddChild(_recalculateButton);
 
         _executeButton = CreateButton("执行本回合", true);
+        _renderedExecuteButtonStyle = SolverButtonStyle.Primary;
         _executeButton.CustomMinimumSize = new Vector2(132, SolverUiTokens.Size.ButtonHeight);
         _executeButton.Pressed += OnExecutePressed;
         footer.AddChild(_executeButton);
@@ -907,6 +952,46 @@ internal static class SolverOverlay
         if (_detailsButton != null)
             _detailsButton.Visible = false;
         SetDetailsVisible(false);
+    }
+
+    private static void RefreshFeedbackBanner()
+    {
+        if (_feedbackBanner == null || _feedbackBannerLabel == null)
+            return;
+
+        string? text;
+        Color tone;
+        if (SolverController.ManualRouteImprovementDetected)
+        {
+            text = "你打出了比求解器更好的世界线，建议在设置中导出完整包并上传到群里，这可以更好地推动算法进步！";
+            tone = Success;
+        }
+        else if (SolverController.UnexpectedReplanCount > 0)
+        {
+            text = "出现计划外重算，可能是模拟或算法问题。请在设置中导出完整问题包并反馈。";
+            tone = Danger;
+        }
+        else
+        {
+            text = null;
+            tone = TextMuted;
+        }
+
+        bool visibilityChanged = _feedbackBanner.Visible != (text != null);
+        _feedbackBanner.Visible = text != null;
+        if (text != null)
+        {
+            _feedbackBannerLabel.Text = text;
+            _feedbackBannerLabel.AddThemeColorOverride("font_color", tone);
+            _feedbackBanner.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
+                tone.Darkened(0.78f),
+                tone.Darkened(0.12f),
+                SolverUiTokens.Radius.Medium,
+                SolverUiTokens.Spacing.Md,
+                SolverUiTokens.Spacing.Sm));
+        }
+        if (visibilityChanged)
+            QueueResponsiveLayout();
     }
 
     private static void SetRouteVisibility(bool visible)
@@ -1115,8 +1200,15 @@ internal static class SolverOverlay
 
     private static void OnExecutePressed()
     {
-        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=deploy");
         NGame? host = NGame.Instance;
+        if (host != null && SolverController.IsSearching)
+        {
+            Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=stop_search");
+            SolverController.StopSearchByUser(host);
+            return;
+        }
+
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=deploy");
         CombatState? state = CombatManager.Instance.DebugOnlyGetState();
         if (host == null || state == null || !CombatManager.Instance.IsInProgress)
         {

@@ -158,6 +158,7 @@ internal static class PlayerTurnSetupCoordinator
         if (_invokingOriginalSetup
             || !Entry.Enabled
             || SolverController.SolverDisabled
+            || SolverController.AutomaticSearchPaused
             || !ReferenceEquals(LocalContext.GetMe(manager.DebugOnlyGetState()), player)
             || player.PlayerCombatState == null
             || player.PlayerCombatState.Phase != PlayerTurnPhase.Start
@@ -207,6 +208,9 @@ internal static class PlayerTurnSetupCoordinator
     public static bool IsManaging(CombatState combat)
         => _active is { } active && ReferenceEquals(active.Combat, combat);
 
+    public static bool IsSearching
+        => _active is { InitialSearch: not null, Result: null, SearchState: 1 };
+
     public static bool HasPendingPlannedChoice(CombatState combat)
         => _active is { ReplayChoices: not null } active
            && ReferenceEquals(active.Combat, combat)
@@ -246,6 +250,17 @@ internal static class PlayerTurnSetupCoordinator
     {
         _cancellation?.Cancel();
         _active?.Choices.ReleaseVisibleSurface();
+    }
+
+    public static bool StopSearchByUser()
+    {
+        if (_active is not { InitialSearch: not null, Result: null, SearchState: 1 } active)
+            return false;
+        Interlocked.Exchange(ref active.SearchState, 2);
+        _cancellation?.Cancel();
+        active.Choices.ReleaseVisibleSurface();
+        active.PlanReady.TrySetResult();
+        return true;
     }
 
     private static async Task RunSetupAsync(
@@ -319,7 +334,8 @@ internal static class PlayerTurnSetupCoordinator
                 await TryStartSearchAfterVisibleChoiceAsync(active, host, originalSetup, "setup");
             await active.Choices.AwaitPhaseAsync(originalSetup);
         }
-        catch (OperationCanceledException) when (SolverController.SolverDisabled)
+        catch (OperationCanceledException) when (
+            SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
         {
             active.Choices.ReleaseVisibleSurface();
             await originalSetup;
@@ -501,7 +517,8 @@ internal static class PlayerTurnSetupCoordinator
                 active.Token.ThrowIfCancellationRequested();
             }
         }
-        catch (OperationCanceledException) when (SolverController.SolverDisabled)
+        catch (OperationCanceledException) when (
+            SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
         {
             active.Choices.ReleaseVisibleSurface();
             active.PlanReady.TrySetResult();
@@ -514,7 +531,7 @@ internal static class PlayerTurnSetupCoordinator
         }
         SolverResult result = await solveTask;
 
-        if (SolverController.SolverDisabled)
+        if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
         {
             active.Choices.ReleaseVisibleSurface();
             active.PlanReady.TrySetResult();

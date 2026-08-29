@@ -115,7 +115,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             data => data.NoGcRegionBudgetGigabytes,
             (data, value) => AsCustomPerformance(data with { NoGcRegionBudgetGigabytes = value }),
             1d,
-            16d));
+            16d),
+            "搜索期间为延迟垃圾回收预留的内存预算。提高后可减少长搜索中的回收与卡顿，但需要更多可用内存；超过机器余量可能触发系统换页。");
         _exportBugReport = SolverUiTokens.CreateButton("导出问题包", SolverButtonStyle.Secondary);
         _exportBugReport.CustomMinimumSize = new Vector2(126, SolverUiTokens.Size.ButtonHeight);
         _exportBugReport.Pressed += OnExportBugReportPressed;
@@ -145,25 +146,29 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             data => data.DeepTimeLimitSeconds,
             (data, value) => AsCustomPerformance(data with { DeepTimeLimitSeconds = value }),
             0.1d,
-            120d);
+            600d,
+            "搜索达到该时间后停止当前阶段。提高后可搜索更久，可能找到更好路线，也会更晚显示结果；快搜负责先给结果，深搜负责继续优化。");
         AddIntRow(searchGrid, "Beam 宽度", SolverSearchProfile.Short.BeamWidth,
             data => data.ShortBeamWidth,
             (data, value) => AsCustomPerformance(data with { ShortBeamWidth = value }),
             SolverSearchProfile.Deep.BeamWidth,
             data => data.DeepBeamWidth,
-            (data, value) => AsCustomPerformance(data with { DeepBeamWidth = value }), 1, 512);
+            (data, value) => AsCustomPerformance(data with { DeepBeamWidth = value }), 1, 512,
+            "每层保留的候选路线数量。提高后更不容易过早淘汰好路线，但会明显增加计算量和内存占用。");
         AddIntRow(searchGrid, "节点上限", SolverSearchProfile.Short.MaxExpandedNodes,
             data => data.ShortMaxExpandedNodes,
             (data, value) => AsCustomPerformance(data with { ShortMaxExpandedNodes = value }),
             SolverSearchProfile.Deep.MaxExpandedNodes,
             data => data.DeepMaxExpandedNodes,
-            (data, value) => AsCustomPerformance(data with { DeepMaxExpandedNodes = value }), 100, 100_000);
+            (data, value) => AsCustomPerformance(data with { DeepMaxExpandedNodes = value }), 100, 100_000,
+            "单次搜索最多展开的状态数量。提高后搜索范围更大，也会增加耗时和内存占用。");
         AddIntRow(searchGrid, "单节点出牌分支", SolverSearchProfile.Short.MaxCardBranchesPerNode,
             data => data.ShortMaxCardBranchesPerNode,
             (data, value) => AsCustomPerformance(data with { ShortMaxCardBranchesPerNode = value }),
             SolverSearchProfile.Deep.MaxCardBranchesPerNode,
             data => data.DeepMaxCardBranchesPerNode,
-            (data, value) => AsCustomPerformance(data with { DeepMaxCardBranchesPerNode = value }), 1, 100);
+            (data, value) => AsCustomPerformance(data with { DeepMaxCardBranchesPerNode = value }), 1, 100,
+            "每个状态最多继续尝试的出牌动作数量。提高后能覆盖更多出牌顺序，但会放大后续搜索量。");
         settingsContent.AddChild(searchGrid);
         scroll.AddChild(settingsContent);
         root.AddChild(scroll);
@@ -221,11 +226,18 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         Func<SolverSettingsData, int?> getDeep,
         Func<SolverSettingsData, int?, SolverSettingsData> setDeep,
         int minimum,
-        int maximum)
+        int maximum,
+        string tooltip)
     {
-        grid.AddChild(CreateRowLabel(label));
-        grid.AddChild(CreateIntInput(shortDefault, getShort, setShort, minimum, maximum));
-        grid.AddChild(CreateIntInput(deepDefault, getDeep, setDeep, minimum, maximum));
+        Label rowLabel = CreateRowLabel(label);
+        LineEdit shortInput = CreateIntInput(shortDefault, getShort, setShort, minimum, maximum);
+        LineEdit deepInput = CreateIntInput(deepDefault, getDeep, setDeep, minimum, maximum);
+        ApplyTooltip(rowLabel, tooltip);
+        ApplyTooltip(shortInput, tooltip);
+        ApplyTooltip(deepInput, tooltip);
+        grid.AddChild(rowLabel);
+        grid.AddChild(shortInput);
+        grid.AddChild(deepInput);
     }
 
     private void AddDoubleRow(
@@ -238,11 +250,18 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         Func<SolverSettingsData, double?> getDeep,
         Func<SolverSettingsData, double?, SolverSettingsData> setDeep,
         double minimum,
-        double maximum)
+        double maximum,
+        string tooltip)
     {
-        grid.AddChild(CreateRowLabel(label));
-        grid.AddChild(CreateDoubleInput(shortDefault, getShort, setShort, minimum, maximum));
-        grid.AddChild(CreateDoubleInput(deepDefault, getDeep, setDeep, minimum, maximum));
+        Label rowLabel = CreateRowLabel(label);
+        LineEdit shortInput = CreateDoubleInput(shortDefault, getShort, setShort, minimum, maximum);
+        LineEdit deepInput = CreateDoubleInput(deepDefault, getDeep, setDeep, minimum, maximum);
+        ApplyTooltip(rowLabel, tooltip);
+        ApplyTooltip(shortInput, tooltip);
+        ApplyTooltip(deepInput, tooltip);
+        grid.AddChild(rowLabel);
+        grid.AddChild(shortInput);
+        grid.AddChild(deepInput);
     }
 
     private OptionButton CreateDeploymentFastModeInput()
@@ -337,9 +356,10 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
             MouseDefaultCursorShape = CursorShape.PointingHand,
         };
-        input.AddItem("低档（2 / 20 秒，4 GB）", (int)SolverPerformancePreset.Low);
-        input.AddItem("中档（5 / 60 秒，6 GB）", (int)SolverPerformancePreset.Medium);
-        input.AddItem("高档（8 / 120 秒，8 GB）", (int)SolverPerformancePreset.High);
+        input.AddItem("低档（5 / 60 秒，6 GB）", (int)SolverPerformancePreset.Low);
+        input.AddItem("中档（8 / 120 秒，8 GB）", (int)SolverPerformancePreset.Medium);
+        input.AddItem("高档（12 / 180 秒，12 GB）", (int)SolverPerformancePreset.High);
+        input.AddItem("极高（20 / 300 秒，16 GB）", (int)SolverPerformancePreset.VeryHigh);
         input.AddItem("自定义", (int)SolverPerformancePreset.Custom);
         input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
@@ -490,10 +510,27 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         return toggle;
     }
 
-    private static void AddBasicRow(GridContainer grid, string label, Control input)
+    private static void AddBasicRow(
+        GridContainer grid,
+        string label,
+        Control input,
+        string? tooltip = null)
     {
-        grid.AddChild(CreateRowLabel(label, 250));
+        Label rowLabel = CreateRowLabel(label, 250);
+        if (!string.IsNullOrEmpty(tooltip))
+        {
+            ApplyTooltip(rowLabel, tooltip);
+            ApplyTooltip(input, tooltip);
+        }
+        grid.AddChild(rowLabel);
         grid.AddChild(input);
+    }
+
+    private static void ApplyTooltip(Control control, string tooltip)
+    {
+        control.TooltipText = tooltip;
+        if (control is Label)
+            control.MouseFilter = MouseFilterEnum.Pass;
     }
 
     private static Control CreateSectionHeading(string text)

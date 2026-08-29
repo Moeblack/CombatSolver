@@ -159,7 +159,7 @@ param(
     [switch]$ExpectedPlayerDeath,
     [ValidateSet("", "FollowGame", "Normal", "Fast", "Instant")]
     [string]$DeploymentFastModeForTest = "",
-    [ValidateSet("", "Low", "Medium", "High", "Custom")]
+    [ValidateSet("", "Low", "Medium", "High", "VeryHigh", "Custom")]
     [string]$PerformancePresetForTest = "",
     [ValidateSet("", "Disabled", "Smart", "RequireAtLeastOne")]
     [string]$PotionPolicyForTest = "",

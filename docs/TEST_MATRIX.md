@@ -1,8 +1,15 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.17.1`（2026-08-29）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.17`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
+> 基线：CombatSolver `0.17.2`（2026-08-29）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.17`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
 
 同一版 DLL 的场景默认复用 marker 记录的 headless 游戏进程：首条命令直接启动游戏，完成后返回主菜单等待下一条请求；后续命令只向该测试 PID 投递。测试使用独立 `APPDATA/LOCALAPPDATA`、关闭 Steam，并只在隔离设置中确认允许加载 Mod；RitsuLib 在 headless 生命周期内从创意工坊版本目录临时投影到带所有权标记的本地目录，退出时删除。发现未由 marker 管理的塔 2 进程时拒绝运行。只有重新编译需要加载新 DLL，或最后一批显式传入 `-ExitOnComplete` 时才退出游戏。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
+
+## 0.17.2
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `QOL-CONTROLLER-STOP-172` | 通过 | 搜索时主操作按钮为“停止计算”；停止后当前搜索取消且自动回合入口不能重启，点击“重新计算”恢复。手操预计战损 `7 -> 3` 时记录差值并显示绿色反馈；消息区域启用整行自动换行。runId `bbbffd3cf1cd4d8686472175a44ed64e` | 2026-08-29 |
+| `PERFORMANCE-PRESET-LOW/MEDIUM/HIGH/VERY-HIGH-172` | 通过 | 四档固定解析依次为 `5/60s + 6GB`、`8/120s + 8GB`、`12/180s + 12GB`、`20/300s + 16GB`，Beam、节点与出牌分支均匹配规格并完成首回合战斗。runId `c18b796053064ffb89eebde8da49fa69`、`516c303b65d547fb9e60fa34d79ca3b5`、`ce61ed362f5143fc9d69ee8b9763eb2c`、`9791b831f1ac4b6ca296fe28811f81c4` | 2026-08-29 |
 
 ## 0.17.1
 
@@ -431,6 +438,11 @@
 运行命令：
 
 ```powershell
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId QOL-CONTROLLER-STOP-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-LOW-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Low -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-MEDIUM-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Medium -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-HIGH-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest High -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-VERY-HIGH-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest VeryHigh -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId CHOICES-PARADOX-SCROLLS-0160 -CharacterId SILENT -Seed YS41WKT7ZUXS -RunSnapshotPath '.local\issue-bundles\scrolls-of-biting-20260828-231054-924\raw\combat-solver\forensics\current\pre-combat\in-memory-current_run.save' -ProgressSnapshotPath '.local\issue-bundles\scrolls-of-biting-20260828-231054-924\raw\combat-solver\forensics\current\pre-combat\progress.save' -EncounterId SCROLLS_OF_BITING_NORMAL -Ascension 10 -ActIndexForTest 2 -InitialPlayerHp 60 -InitialEnemyCurrentHpsJson '[33,37,38,36]' -InitialEnemyMoveIdsJson '["CHEW","MORE_TEETH","CHOMP","MORE_TEETH"]' -ReloadRunRngAfterStateInjection -ForceShortSearchOnly -ShortSearchBudgetOverrideMilliseconds 8000 -ExpectedInitialSetupChoiceCountAtLeast 1 -ExpectedInitialSetupChoiceSourceId CHOICES_PARADOX -ExpectedInitialSetupChoiceTextStartsWith '选择悖论：选择 ' -ExpectedInitialChoiceBranchesEvaluatedAtLeast 5 -StopAfterInitialSetupAssertion -TimeoutSeconds 150 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId RINGING-HAVOC-AUTOPLAY-0160-FINAL -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\ringing-havoc-autoplay-0160.json -VerifyIncrementalSearch -ExitOnComplete -TimeoutSeconds 120
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId HEADBUTT-EMPTY-DISCARD-0160 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 50 -ClearPlayerPiles -CardsPath coverage\unattended\headbutt-empty-discard-0160-cards.json -ExpectedPlayedCardId HEADBUTT -ExpectedReusedTurn 2 -StopAfterExpectedReuse -ExpectedUnexpectedReplansAtMost 0 -DeploymentFastModeForTest Instant -DeploymentInterActionDelaySecondsForTest 0 -TimeoutSeconds 120
