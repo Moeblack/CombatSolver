@@ -1,3 +1,4 @@
+using System.Runtime;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Saves;
@@ -13,6 +14,8 @@ internal sealed partial class UnattendedTestRunner
             throw new PlatformNotSupportedException(
                 "DOP1/DOP2 搜索等价测试至少需要两个可用逻辑处理器。");
         }
+
+        await AssertNoGcBudgetTransitionAsync();
 
         SolverSettingsData originalSettings = SolverSettings.Current;
         SolverSettingsSnapshot settings = SolverSettings.Capture();
@@ -135,6 +138,105 @@ internal sealed partial class UnattendedTestRunner
         finally
         {
             rng.LoadFromSerializable(original);
+        }
+    }
+
+    private static async Task AssertNoGcBudgetTransitionAsync()
+    {
+        const long initialBudgetBytes = 1_000_000_000L;
+        const long changedBudgetBytes = 2_000_000_000L;
+        using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
+        using CancellationTokenSource firstSearchCancellation =
+            CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+        await SearchGcPolicy.ReclaimIfPendingAsync("unattended_no_gc_budget_transition_setup");
+        SearchGcPolicy.ResetCountersForTesting();
+
+        TaskCompletionSource firstSearchEntered = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Task? firstSearchTask = null;
+        IDisposable? changedScope = null;
+        Task<IDisposable>? changedScopeTask = null;
+        try
+        {
+            firstSearchTask = Task.Run(async () =>
+            {
+                using IDisposable scope = SearchGcPolicy.EnterLowLatencySearch(
+                    initialBudgetBytes,
+                    new SearchMemoryPressureSignal(),
+                    firstSearchCancellation.Token);
+                firstSearchEntered.SetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, firstSearchCancellation.Token);
+            });
+            await Task.WhenAny(firstSearchEntered.Task, firstSearchTask).WaitAsync(deadline.Token);
+            if (firstSearchTask.IsCompleted)
+                await firstSearchTask;
+            await firstSearchEntered.Task;
+            if (SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting != initialBudgetBytes)
+                throw new InvalidOperationException("No-GC 首次区域没有使用 1GB 测试预算。");
+            if (GCSettings.LatencyMode != GCLatencyMode.NoGCRegion)
+                throw new InvalidOperationException("No-GC 首次 1GB 测试区域没有由 CLR 实际建立。");
+
+            changedScopeTask = Task.Run(() => SearchGcPolicy.EnterLowLatencySearch(
+                changedBudgetBytes,
+                new SearchMemoryPressureSignal(),
+                deadline.Token));
+            while (SearchGcPolicy.BudgetChangeWaitCountForTesting == 0)
+            {
+                deadline.Token.ThrowIfCancellationRequested();
+                await Task.Delay(10, deadline.Token);
+            }
+            if (changedScopeTask.IsCompleted)
+                throw new InvalidOperationException("No-GC 改预算请求没有等待仍在使用旧区域的搜索退出。");
+
+            firstSearchCancellation.Cancel();
+            try
+            {
+                await firstSearchTask.WaitAsync(deadline.Token);
+            }
+            catch (OperationCanceledException) when (firstSearchCancellation.IsCancellationRequested)
+            {
+            }
+
+            changedScope = await changedScopeTask.WaitAsync(deadline.Token);
+            if (SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting != changedBudgetBytes)
+            {
+                throw new InvalidOperationException(
+                    "No-GC 改预算后没有按 2GB 测试值建立新区域。");
+            }
+            if (GCSettings.LatencyMode != GCLatencyMode.NoGCRegion)
+                throw new InvalidOperationException("No-GC 改预算后的 2GB 区域没有由 CLR 实际建立。");
+            if (SearchGcPolicy.BudgetChangeRebuildCountForTesting != 1)
+            {
+                throw new InvalidOperationException(
+                    $"No-GC 改预算后重建次数为 " +
+                    $"{SearchGcPolicy.BudgetChangeRebuildCountForTesting}，预期为 1。");
+            }
+        }
+        finally
+        {
+            firstSearchCancellation.Cancel();
+            if (firstSearchTask != null)
+            {
+                try
+                {
+                    await firstSearchTask;
+                }
+                catch (OperationCanceledException) when (firstSearchCancellation.IsCancellationRequested)
+                {
+                }
+            }
+            if (changedScope == null && changedScopeTask != null)
+            {
+                try
+                {
+                    changedScope = await changedScopeTask.WaitAsync(deadline.Token);
+                }
+                catch (OperationCanceledException) when (deadline.IsCancellationRequested)
+                {
+                }
+            }
+            changedScope?.Dispose();
+            await SearchGcPolicy.ReclaimIfPendingAsync("unattended_no_gc_budget_transition_cleanup");
         }
     }
 

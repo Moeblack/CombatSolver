@@ -138,13 +138,13 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             (data, value) => data with { DeploymentInterActionDelaySeconds = value },
             0d,
             3d));
-        AddBasicRow(basicGrid, "No-GC 预算（GB）", CreateDoubleInput(
+        AddBasicRow(basicGrid, "No-GC 单区预算（GB）", CreateDoubleInput(
             SolverSettings.DefaultNoGcRegionBudgetGigabytes,
             data => data.NoGcRegionBudgetGigabytes,
             (data, value) => AsCustomPerformance(data with { NoGcRegionBudgetGigabytes = value }),
             1d,
             16d),
-            "搜索期间为延迟垃圾回收预留的内存预算。提高后可减少长搜索中的回收与卡顿，但需要更多可用内存；超过机器余量可能触发系统换页。");
+            "这是单个 No-GC 区域的实际请求预算，不是进程总内存上限。设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存与系统换页风险。搜索在与该预算成比例的安全分配检查点保留活动 Beam、回收后继续。");
         HBoxContainer bugReportRow = new()
         {
             MouseFilter = MouseFilterEnum.Pass,

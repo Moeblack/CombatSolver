@@ -52,6 +52,35 @@ internal sealed partial class UnattendedTestRunner
             $"Branches={expected.ShortBranches}/{expected.DeepBranches}:NoGC={expected.NoGcBytes}");
     }
 
+    private void AssertAppliedNoGcRegionBudget()
+    {
+        if (!_request.PerformancePresetForTest.HasValue
+            && !_request.NoGcRegionBudgetGigabytesForTest.HasValue)
+        {
+            return;
+        }
+
+        long expected = _request.NoGcRegionBudgetGigabytesForTest is { } customGigabytes
+            ? checked((long)Math.Round(
+                customGigabytes * 1_000_000_000d,
+                MidpointRounding.AwayFromZero))
+            : _request.PerformancePresetForTest switch
+            {
+                SolverPerformancePreset.Low => 6_000_000_000L,
+                SolverPerformancePreset.Medium => 8_000_000_000L,
+                SolverPerformancePreset.High => 12_000_000_000L,
+                SolverPerformancePreset.VeryHigh => 16_000_000_000L,
+                _ => SolverSettings.Capture().NoGcRegionBudgetBytes,
+            };
+        long actual = SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting;
+        if (actual != expected)
+        {
+            throw new InvalidOperationException(
+                $"No-GC 设置没有原值应用到运行时区域：configured={expected} active={actual}。");
+        }
+        _completedChecks.Add($"NoGcRegionBudgetApplied:{actual}");
+    }
+
     private bool HasInitialSolverExpectation()
         => _request.ExpectedInitialSoldHp.HasValue
             || _request.ExpectedInitialSoldHpAtMost.HasValue
@@ -127,6 +156,8 @@ internal sealed partial class UnattendedTestRunner
             EnsureWithinDeadline();
             await NextFrameAsync();
         }
+
+        AssertAppliedNoGcRegionBudget();
 
         if (_request.ExpectedInitialSetupChoiceCountAtLeast is { } minimumTurnSetupChoices
             && result.TurnSetupChoices.Count < minimumTurnSetupChoices)

@@ -199,7 +199,7 @@ internal static class SolverController
         LastTurnSetupResultForTesting = null;
         LastReusedTurnForTesting = null;
         LastReusedProjectedBattleHpLostForTesting = null;
-        SearchGcPolicy.ResetRolloverCountForTesting();
+        SearchGcPolicy.ResetCountersForTesting();
         BattleDamageTracker.Begin(state);
         CombatBugReportExporter.BeginCombat(state);
         _combat.TheftPolicy = state is CombatState combat && TheftEncounterStrategy.IsApplicable(combat)
