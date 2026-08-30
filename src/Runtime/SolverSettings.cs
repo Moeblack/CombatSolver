@@ -67,6 +67,7 @@ internal sealed record SolverSettingsData
     public float? OverlayPositionX { get; init; }
     public float? OverlayPositionY { get; init; }
     public string? ReporterContactQq { get; init; }
+    public float OverlayOpacity { get; init; } = 1f;
 }
 
 internal sealed record SolverSettingsSnapshot(
@@ -187,7 +188,8 @@ internal static class SolverSettings
             $"deep_budget_ms={Capture().DeepProfile.SoftTimeBudgetMilliseconds} " +
             $"no_gc_budget_bytes={Capture().NoGcRegionBudgetBytes} " +
             $"deployment_fast_mode={loaded.DeploymentFastMode} " +
-            $"deployment_delay_seconds={loaded.DeploymentInterActionDelaySeconds ?? 0d:0.###}");
+            $"deployment_delay_seconds={loaded.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
+            $"overlay_opacity={loaded.OverlayOpacity:0.##}");
     }
 
     public static SolverSettingsSnapshot Capture()
@@ -375,6 +377,7 @@ internal static class SolverSettings
             throw new InvalidDataException("OverlayPositionX and OverlayPositionY must both be set or both be null.");
         ValidateRange(data.OverlayPositionX, -100_000f, 100_000f, nameof(data.OverlayPositionX));
         ValidateRange(data.OverlayPositionY, -100_000f, 100_000f, nameof(data.OverlayPositionY));
+        ValidateRange(data.OverlayOpacity, 0.25f, 1f, nameof(data.OverlayOpacity));
         if (data.ReporterContactQq is { Length: > 64 })
             throw new InvalidDataException($"{nameof(data.ReporterContactQq)} must be at most 64 characters.");
     }

@@ -138,6 +138,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             (data, value) => data with { DeploymentInterActionDelaySeconds = value },
             0d,
             3d));
+        AddBasicRow(basicGrid, "覆盖层透明度", CreateTransparencyInput());
         AddBasicRow(basicGrid, "No-GC 预算（GB）", CreateDoubleInput(
             SolverSettings.DefaultNoGcRegionBudgetGigabytes,
             data => data.NoGcRegionBudgetGigabytes,
@@ -383,19 +384,20 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Palette.Surface,
+            SolverUiTokens.Palette.Border,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.SurfaceHover,
             SolverUiTokens.Palette.Accent,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         SolverUiTokens.ApplyTextOutline(input);
         input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        input.AddThemeIconOverride("arrow", SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
         _reloadInputs.Add(data => input.Selected = (int)data.DeploymentFastMode);
         input.ItemSelected += index =>
         {
@@ -424,19 +426,20 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Palette.Surface,
+            SolverUiTokens.Palette.Border,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.SurfaceHover,
             SolverUiTokens.Palette.Accent,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         SolverUiTokens.ApplyTextOutline(input);
         input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        input.AddThemeIconOverride("arrow", SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
         _reloadInputs.Add(data => input.Selected = (int)data.PotionPolicy);
         input.ItemSelected += index =>
         {
@@ -465,19 +468,20 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Palette.Surface,
+            SolverUiTokens.Palette.Border,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.SurfaceHover,
             SolverUiTokens.Palette.Accent,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         SolverUiTokens.ApplyTextOutline(input);
         input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        input.AddThemeIconOverride("arrow", SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
         _reloadInputs.Add(data =>
         {
             int degree = data.SearchMaxDegreeOfParallelism
@@ -518,19 +522,20 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Palette.Surface,
+            SolverUiTokens.Palette.Border,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.SurfaceHover,
             SolverUiTokens.Palette.Accent,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         SolverUiTokens.ApplyTextOutline(input);
         input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        input.AddThemeIconOverride("arrow", SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
         input.ItemSelected += index =>
         {
             if (_loading)
@@ -542,6 +547,79 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             _status.Text = "性能预设已保存，下次搜索生效";
         };
         return input;
+    }
+
+    private Control CreateTransparencyInput()
+    {
+        HBoxContainer row = new()
+        {
+            MouseFilter = MouseFilterEnum.Pass,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        row.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+
+        HSlider slider = new()
+        {
+            MinValue = 0.25,
+            MaxValue = 1.0,
+            Step = 0.05,
+            Value = 1.0,
+            FocusMode = FocusModeEnum.None,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+            CustomMinimumSize = new Vector2(220, 24),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        StyleSlider(slider);
+
+        Label valueLabel = SolverUiTokens.CreateLabel(
+            "100%",
+            SolverUiTokens.Type.Body,
+            SolverUiTokens.Palette.TextPrimary,
+            FontType.Bold);
+        valueLabel.HorizontalAlignment = HorizontalAlignment.Right;
+        valueLabel.CustomMinimumSize = new Vector2(48, 24);
+
+        _reloadInputs.Add(data =>
+        {
+            slider.SetValueNoSignal(data.OverlayOpacity);
+            valueLabel.Text = $"{Math.Round(data.OverlayOpacity * 100d)}%";
+        });
+        slider.ValueChanged += value =>
+        {
+            valueLabel.Text = $"{Math.Round(value * 100d)}%";
+            if (_loading)
+                return;
+            SolverSettings.Update(SolverSettings.Current with { OverlayOpacity = (float)value });
+            SolverOverlay.ApplyOverlayOpacity();
+            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+            _status.Text = "已保存并立即生效";
+        };
+
+        row.AddChild(slider);
+        row.AddChild(valueLabel);
+        return row;
+    }
+
+    private static void StyleSlider(HSlider slider)
+    {
+        Color track = new(0.88f, 0.88f, 0.88f);
+        slider.AddThemeStyleboxOverride("slider", SolverUiTokens.CreateBox(
+            track,
+            track,
+            SolverUiTokens.Radius.Pill,
+            horizontalPadding: 0,
+            verticalPadding: 0));
+        slider.AddThemeStyleboxOverride("grabber_area", SolverUiTokens.CreateBox(
+            Godot.Colors.Transparent,
+            Godot.Colors.Transparent,
+            0,
+            horizontalPadding: 7,
+            verticalPadding: 0,
+            borderWidth: 0));
+        Texture2D grabber = SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.Accent, 14);
+        slider.AddThemeIconOverride("grabber", grabber);
+        slider.AddThemeIconOverride("grabber_highlight", grabber);
+        slider.AddThemeIconOverride("grabber_disabled", SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.TextMuted, 14));
     }
 
     private LineEdit CreateIntInput(
@@ -652,13 +730,13 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         input.AddThemeColorOverride("font_placeholder_color", SolverUiTokens.Palette.TextMuted);
         input.AddThemeColorOverride("caret_color", SolverUiTokens.Palette.Accent);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Palette.Surface,
+            SolverUiTokens.Palette.Border,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
         input.AddThemeStyleboxOverride("focus", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.SurfaceHover,
             SolverUiTokens.Palette.Accent,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
@@ -686,11 +764,30 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         {
             FocusMode = FocusModeEnum.None,
             MouseDefaultCursorShape = CursorShape.PointingHand,
-            CustomMinimumSize = new Vector2(126, 32),
+            CustomMinimumSize = new Vector2(40, 20),
             SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
         };
+        Color trackOff = new(0.85f, 0.85f, 0.85f);
+        Color trackOn = SolverUiTokens.Palette.Accent;
+        toggle.AddThemeStyleboxOverride("base", SolverUiTokens.CreateBox(
+            trackOff,
+            trackOff,
+            SolverUiTokens.Radius.Pill,
+            horizontalPadding: 4,
+            verticalPadding: 3));
+        Texture2D knob = SolverUiTokens.CreateCircleTexture(Colors.White);
+        toggle.AddThemeIconOverride("checked", knob);
+        toggle.AddThemeIconOverride("unchecked", knob);
         toggle.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
-        toggle.AddThemeColorOverride("font_hover_color", Colors.White);
+        toggle.AddThemeColorOverride("font_hover_color", SolverUiTokens.Palette.TextPrimary);
+        toggle.Toggled += enabled => toggle.AddThemeStyleboxOverride(
+            "base",
+            SolverUiTokens.CreateBox(
+                enabled ? trackOn : trackOff,
+                enabled ? trackOn : trackOff,
+                SolverUiTokens.Radius.Pill,
+                horizontalPadding: 4,
+                verticalPadding: 3));
         SolverUiTokens.ApplyTextOutline(toggle);
         return toggle;
     }

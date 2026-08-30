@@ -21,7 +21,6 @@ internal static class SolverUiTokens
     public static string SearchFailureInstructionRichText(bool parallelSearchWasEnabled)
         => $"[color={Palette.WarningHex}]" +
            $"{(parallelSearchWasEnabled ? ParallelSearchFailureInstruction : BugReportUploadInstruction)}[/color]";
-
     public static class Spacing
     {
         public const int Xxs = 2;
@@ -33,7 +32,7 @@ internal static class SolverUiTokens
 
     public static class Radius
     {
-        public const int Small = 6;
+        public const int Small = 4;
         public const int Medium = 8;
         public const int Pill = 10;
         public const int Large = 12;
@@ -45,7 +44,7 @@ internal static class SolverUiTokens
         public const int Metric = 14;
         public const int Body = 13;
         public const int Caption = 12;
-        public const int Outline = 2;
+        public const int Outline = 0;
     }
 
     public static class Size
@@ -62,47 +61,48 @@ internal static class SolverUiTokens
         public const float ActionPillHeight = 28f;
         public const float TurnColumnWidth = 88f;
         public const float OutcomeColumnWidth = 146f;
-        public const float ButtonHeight = 34f;
+        public const float ButtonHeight = 32f;
     }
 
     public static class Palette
     {
-        public static readonly Color Background = Color.FromHtml("101216f5");
-        public static readonly Color Surface = Color.FromHtml("191c22fa");
-        public static readonly Color SurfaceRaised = Color.FromHtml("23272ffb");
-        public static readonly Color SurfaceHover = Color.FromHtml("2b3039ff");
-        public static readonly Color Border = Color.FromHtml("3a404aeb");
-        public static readonly Color BorderSubtle = Color.FromHtml("2a2f38cc");
-        public static readonly Color Accent = Color.FromHtml("5c9fc7ff");
-        public static readonly Color AccentHover = Color.FromHtml("73b4d8ff");
-        public static readonly Color TextPrimary = Color.FromHtml("eef1f6ff");
-        public static readonly Color TextSecondary = Color.FromHtml("b8c0ccff");
-        public static readonly Color TextMuted = Color.FromHtml("858f9fff");
-        public static readonly Color TextOutline = Color.FromHtml("080a0de6");
-        public static readonly Color Warning = Color.FromHtml("d6a34cff");
-        public static readonly Color Danger = Color.FromHtml("e26666ff");
-        public static readonly Color Success = Color.FromHtml("69b77dff");
-        public static readonly Color Positive = Color.FromHtml("34764fff");
-        public static readonly Color PositiveHover = Color.FromHtml("428d60ff");
+        // 浅色主题
+        public static readonly Color Background = Color.FromHtml("f3f3f3ff");
+        public static readonly Color Surface = Color.FromHtml("ffffffff");
+        public static readonly Color SurfaceRaised = Color.FromHtml("f7f9fbff");
+        public static readonly Color SurfaceHover = Color.FromHtml("efefefff");
+        public static readonly Color Border = Color.FromHtml("e0e0e0ff");
+        public static readonly Color BorderSubtle = Color.FromHtml("eaeaeaff");
+        public static readonly Color Accent = Color.FromHtml("0078d4ff");
+        public static readonly Color AccentHover = Color.FromHtml("106ebeff");
+        public static readonly Color TextPrimary = Color.FromHtml("1b1b1bff");
+        public static readonly Color TextSecondary = Color.FromHtml("5f5f5fff");
+        public static readonly Color TextMuted = Color.FromHtml("8a8a8aff");
+        public static readonly Color TextOutline = Color.FromHtml("ffffff00");
+        public static readonly Color Warning = Color.FromHtml("9d5d00ff");
+        public static readonly Color Danger = Color.FromHtml("c42b1cff");
+        public static readonly Color Success = Color.FromHtml("0f7b0fff");
+        public static readonly Color Positive = Color.FromHtml("107c10ff");
+        public static readonly Color PositiveHover = Color.FromHtml("0e6e0eff");
 
-        public static readonly Color Attack = Color.FromHtml("d96363ff");
-        public static readonly Color AttackBackground = Color.FromHtml("2b171bf8");
-        public static readonly Color Skill = Color.FromHtml("5b91d1ff");
-        public static readonly Color SkillBackground = Color.FromHtml("172235f8");
-        public static readonly Color Power = Color.FromHtml("d7a84fff");
-        public static readonly Color PowerBackground = Color.FromHtml("2b2417f8");
-        public static readonly Color Negative = Color.FromHtml("9b70c9ff");
-        public static readonly Color NegativeBackground = Color.FromHtml("241b30f8");
-        public static readonly Color Potion = Color.FromHtml("55b9a5ff");
-        public static readonly Color PotionBackground = Color.FromHtml("152a27f8");
-        public static readonly Color KillBackground = Color.FromHtml("14291ffb");
+        public static readonly Color Attack = Color.FromHtml("c42b1cff");
+        public static readonly Color AttackBackground = Color.FromHtml("fce9e7ff");
+        public static readonly Color Skill = Color.FromHtml("0067c0ff");
+        public static readonly Color SkillBackground = Color.FromHtml("eaf2faff");
+        public static readonly Color Power = Color.FromHtml("9d5d00ff");
+        public static readonly Color PowerBackground = Color.FromHtml("fbf1dcff");
+        public static readonly Color Negative = Color.FromHtml("6b4fa0ff");
+        public static readonly Color NegativeBackground = Color.FromHtml("f1ebf8ff");
+        public static readonly Color Potion = Color.FromHtml("00786cff");
+        public static readonly Color PotionBackground = Color.FromHtml("e5f4f1ff");
+        public static readonly Color KillBackground = Color.FromHtml("e7f4ecff");
 
-        public const string TextSecondaryHex = "#b8c0cc";
-        public const string TextMutedHex = "#858f9f";
-        public const string AccentHex = "#5c9fc7";
-        public const string WarningHex = "#d6a34c";
-        public const string DangerHex = "#e26666";
-        public const string SuccessHex = "#69b77d";
+        public const string TextSecondaryHex = "#5f5f5f";
+        public const string TextMutedHex = "#8a8a8a";
+        public const string AccentHex = "#0078d4";
+        public const string WarningHex = "#9d5d00";
+        public const string DangerHex = "#c42b1c";
+        public const string SuccessHex = "#0f7b0f";
     }
 
     public static StyleBoxFlat CreateBox(
@@ -130,8 +130,8 @@ internal static class SolverUiTokens
             ContentMarginTop = verticalPadding,
             ContentMarginRight = horizontalPadding,
             ContentMarginBottom = verticalPadding,
-            ShadowColor = shadow ? new Color(0f, 0f, 0f, 0.52f) : Godot.Colors.Transparent,
-            ShadowSize = shadow ? 10 : 0,
+            ShadowColor = shadow ? new Color(0f, 0f, 0f, 0.14f) : Godot.Colors.Transparent,
+            ShadowSize = shadow ? 16 : 0,
         };
     }
 
@@ -195,8 +195,8 @@ internal static class SolverUiTokens
         };
         button.AddThemeFontSizeOverride("font_size", Type.Body);
         button.AddThemeColorOverride("font_color", Palette.TextPrimary);
-        button.AddThemeColorOverride("font_hover_color", Godot.Colors.White);
-        button.AddThemeColorOverride("font_pressed_color", Godot.Colors.White);
+        button.AddThemeColorOverride("font_hover_color", Palette.TextPrimary);
+        button.AddThemeColorOverride("font_pressed_color", Palette.TextPrimary);
         button.AddThemeColorOverride("font_disabled_color", Palette.TextMuted);
         ApplyTextOutline(button);
         ApplyButtonStyle(button, style);
@@ -205,22 +205,78 @@ internal static class SolverUiTokens
 
     public static void ApplyButtonStyle(Button button, SolverButtonStyle style)
     {
-        (Color background, Color border, Color hover) = style switch
+        (Color background, Color border, Color hover, Color pressed, Color font) = style switch
         {
-            SolverButtonStyle.Primary => (Palette.Accent.Darkened(0.12f), Palette.Accent.Lightened(0.08f), Palette.AccentHover),
-            SolverButtonStyle.Positive => (Palette.Positive, Palette.Success, Palette.PositiveHover),
-            SolverButtonStyle.Danger => (Palette.Danger.Darkened(0.22f), Palette.Danger, Palette.Danger.Lightened(0.08f)),
-            _ => (Palette.SurfaceRaised, Palette.Border, Palette.SurfaceHover),
+            SolverButtonStyle.Primary => (
+                Palette.Accent,
+                Palette.Accent,
+                Palette.AccentHover,
+                Palette.Accent.Darkened(0.22f),
+                Godot.Colors.White),
+            SolverButtonStyle.Positive => (
+                Palette.Positive,
+                Palette.Positive,
+                Palette.PositiveHover,
+                Palette.Positive.Darkened(0.18f),
+                Godot.Colors.White),
+            SolverButtonStyle.Danger => (
+                Palette.Danger,
+                Palette.Danger,
+                Palette.Danger.Lightened(0.08f),
+                Palette.Danger.Darkened(0.18f),
+                Godot.Colors.White),
+            _ => (
+                Palette.Surface,
+                Color.FromHtml("8a8a8aff"),
+                Palette.SurfaceHover,
+                Palette.Border,
+                Palette.TextPrimary),
         };
-        button.AddThemeStyleboxOverride("normal", CreateBox(background, border, Radius.Medium, Spacing.Sm, Spacing.Xs));
-        button.AddThemeStyleboxOverride("hover", CreateBox(hover, border.Lightened(0.12f), Radius.Medium, Spacing.Sm, Spacing.Xs));
-        button.AddThemeStyleboxOverride("pressed", CreateBox(background.Darkened(0.16f), border, Radius.Medium, Spacing.Sm, Spacing.Xs));
-        button.AddThemeStyleboxOverride("disabled", CreateBox(Palette.Background, Palette.BorderSubtle, Radius.Medium, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("normal", CreateBox(background, border, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("hover", CreateBox(hover, border, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("pressed", CreateBox(pressed, border, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("disabled", CreateBox(Palette.Background, Palette.BorderSubtle, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeColorOverride("font_color", font);
+        button.AddThemeColorOverride("font_hover_color", font);
+        button.AddThemeColorOverride("font_pressed_color", font);
         button.ApplyLocaleFontSubstitution(
             style is SolverButtonStyle.Primary or SolverButtonStyle.Positive or SolverButtonStyle.Danger
                 ? FontType.Bold
                 : FontType.Regular,
             "font");
+    }
+
+    public static Texture2D CreateCircleTexture(Color color, int size = 12)
+    {
+        Image image = Image.CreateEmpty(size, size, false, Image.Format.Rgba8);
+        float center = (size - 1) / 2f;
+        float radius = center;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x - center;
+                float dy = y - center;
+                if (dx * dx + dy * dy <= radius * radius)
+                    image.SetPixel(x, y, color);
+            }
+        }
+        return ImageTexture.CreateFromImage(image);
+    }
+
+    public static Texture2D CreateChevronTexture(Color color, int width = 10, int height = 5)
+    {
+        Image image = Image.CreateEmpty(width, height, false, Image.Format.Rgba8);
+        int half = width / 2;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (x >= half - 1 - y && x <= half + y)
+                    image.SetPixel(x, y, color);
+            }
+        }
+        return ImageTexture.CreateFromImage(image);
     }
 
     public static void ApplyTextOutline(
@@ -234,3 +290,4 @@ internal static class SolverUiTokens
         control.AddThemeColorOverride("font_outline_color", outlineColor ?? Palette.TextOutline);
     }
 }
+

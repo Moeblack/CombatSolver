@@ -30,7 +30,7 @@ internal sealed partial class SolverDetailsButton : Button
             "▾",
             SolverUiTokens.Type.Caption,
             SolverUiTokens.Palette.TextSecondary,
-            outlineSize: 1);
+            outlineSize: 0);
         layout.AddChild(_arrowLabel);
         AddChild(layout);
     }

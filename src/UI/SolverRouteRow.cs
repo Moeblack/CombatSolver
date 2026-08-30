@@ -21,7 +21,7 @@ internal sealed partial class SolverRouteRow : PanelContainer
         MouseFilter = MouseFilterEnum.Ignore;
         AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
             index == 0 ? SolverUiTokens.Palette.SurfaceRaised : SolverUiTokens.Palette.Surface,
-            index == 0 ? SolverUiTokens.Palette.Accent : SolverUiTokens.Palette.BorderSubtle,
+            index == 0 ? SolverUiTokens.Palette.Border : SolverUiTokens.Palette.BorderSubtle,
             SolverUiTokens.Radius.Medium,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Sm));
@@ -88,8 +88,7 @@ internal sealed partial class SolverRouteRow : PanelContainer
             string.Empty,
             SolverUiTokens.Type.Caption,
             SolverUiTokens.Palette.TextSecondary,
-            FontType.Bold,
-            outlineSize: 1);
+            FontType.Bold);
         EnergyLabel.HorizontalAlignment = HorizontalAlignment.Right;
         EnergyLabel.AutowrapMode = TextServer.AutowrapMode.Off;
         EnergyLabel.CustomMinimumSize = new Vector2(54, SolverUiTokens.Size.ActionPillHeight);
@@ -147,9 +146,9 @@ internal sealed partial class SolverRouteRow : PanelContainer
         for (int index = 0; index < _deploymentActions.Count; index++)
         {
             _deploymentActions[index].Modulate = index < completedActions
-                ? new Color(0.54f, 0.58f, 0.66f, 0.52f)
+                ? new Color(0.66f, 0.68f, 0.72f, 0.55f)
                 : index == activeActionIndex
-                    ? new Color(1f, 0.88f, 0.48f, 1f)
+                    ? new Color(0.45f, 0.72f, 0.98f, 1f)
                     : Colors.White;
         }
     }
@@ -159,9 +158,9 @@ internal sealed partial class SolverRouteRow : PanelContainer
         if (_endTurnAction == null)
             return;
         _endTurnAction.Modulate = completed
-            ? new Color(0.54f, 0.58f, 0.66f, 0.52f)
+            ? new Color(0.66f, 0.68f, 0.72f, 0.55f)
             : active
-                ? new Color(1f, 0.88f, 0.48f, 1f)
+                ? new Color(0.45f, 0.72f, 0.98f, 1f)
                 : Colors.White;
     }
 

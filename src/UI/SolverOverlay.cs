@@ -455,7 +455,9 @@ internal static class SolverOverlay
             SolverUiTokens.ApplyButtonStyle(
                 _fullAutoButton,
                 SolverController.FullAutoEnabled ? SolverButtonStyle.Positive : SolverButtonStyle.Secondary);
-            _fullAutoButton.AddThemeColorOverride("font_color", TextPrimary);
+            _fullAutoButton.AddThemeColorOverride(
+                "font_color",
+                SolverController.FullAutoEnabled ? Colors.White : TextPrimary);
             _renderedFullAutoStyle = SolverController.FullAutoEnabled;
         }
 
@@ -494,6 +496,14 @@ internal static class SolverOverlay
     {
         if (_layer != null && GodotObject.IsInstanceValid(_layer))
             _layer.Visible = false;
+    }
+
+    public static void ApplyOverlayOpacity()
+    {
+        if (_panel == null || !GodotObject.IsInstanceValid(_panel))
+            return;
+        float opacity = Math.Clamp(SolverSettings.Current.OverlayOpacity, 0.25f, 1f);
+        _panel.Modulate = new Color(1f, 1f, 1f, opacity);
     }
 
     private static void EnsureCreated(Node host)
@@ -640,6 +650,7 @@ internal static class SolverOverlay
         host.AddChild(layer);
         _layer = layer;
         _panel = panel;
+        ApplyOverlayOpacity();
         if (_viewport != null && GodotObject.IsInstanceValid(_viewport))
             _viewport.SizeChanged -= ApplyResponsiveLayout;
         _viewport = host.GetViewport();
@@ -669,13 +680,20 @@ internal static class SolverOverlay
         header.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
         header.GuiInput += OnHeaderGuiInput;
 
-        ColorRect marker = new()
+        PanelContainer marker = new()
         {
-            Color = Accent,
-            CustomMinimumSize = new Vector2(4, 24),
+            Name = "AppIcon",
+            CustomMinimumSize = new Vector2(16, 16),
             SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
+        marker.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
+            Accent,
+            Accent,
+            SolverUiTokens.Radius.Small,
+            0,
+            0,
+            borderWidth: 0));
         header.AddChild(marker);
 
         Label title = CreateTextLabel("战斗路线求解器", SolverUiTokens.Type.Title, TextPrimary, FontType.Bold);
@@ -691,10 +709,16 @@ internal static class SolverOverlay
 
         _settingsButton = CreateHeaderButton("设置", 54);
         _settingsButton.Pressed += ToggleSettings;
+        _settingsButton.AddThemeColorOverride("font_color", Accent);
+        _settingsButton.AddThemeColorOverride("font_hover_color", Accent);
+        _settingsButton.AddThemeColorOverride("font_pressed_color", Accent);
         header.AddChild(_settingsButton);
 
         _collapseButton = CreateHeaderButton("−  收起", 54);
         _collapseButton.Pressed += ToggleCollapsed;
+        _collapseButton.AddThemeColorOverride("font_color", Danger);
+        _collapseButton.AddThemeColorOverride("font_hover_color", Danger);
+        _collapseButton.AddThemeColorOverride("font_pressed_color", Danger);
         header.AddChild(_collapseButton);
         return header;
     }
@@ -829,9 +853,9 @@ internal static class SolverOverlay
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _searchProgressBar.AddThemeStyleboxOverride("background",
-            SolverUiTokens.CreateBox(Background, SolverUiTokens.Palette.BorderSubtle, SolverUiTokens.Radius.Small, 0, 0));
+            SolverUiTokens.CreateBox(new Color(0.91f, 0.91f, 0.91f), Godot.Colors.Transparent, SolverUiTokens.Radius.Small, 0, 0, borderWidth: 0));
         _searchProgressBar.AddThemeStyleboxOverride("fill",
-            SolverUiTokens.CreateBox(Accent.Darkened(0.12f), Accent, SolverUiTokens.Radius.Small, 0, 0));
+            SolverUiTokens.CreateBox(Accent, Accent, SolverUiTokens.Radius.Small, 0, 0));
         layout.AddChild(_searchProgressBar);
         _summaryPanel.AddChild(layout);
         return _summaryPanel;
@@ -937,8 +961,8 @@ internal static class SolverOverlay
         if (_summaryStatusBadge != null)
         {
             _summaryStatusBadge.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
-                color.Darkened(0.76f),
-                color.Darkened(0.18f),
+                color.Lightened(0.86f),
+                new Color(color, 0.5f),
                 SolverUiTokens.Radius.Pill,
                 horizontalPadding: SolverUiTokens.Spacing.Sm,
                 verticalPadding: 2));
@@ -1007,8 +1031,8 @@ internal static class SolverOverlay
             _feedbackBannerLabel.Text = text;
             _feedbackBannerLabel.AddThemeColorOverride("font_color", tone);
             _feedbackBanner.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
-                tone.Darkened(0.78f),
-                tone.Darkened(0.12f),
+                tone.Lightened(0.86f),
+                new Color(tone, 0.45f),
                 SolverUiTokens.Radius.Medium,
                 SolverUiTokens.Spacing.Md,
                 SolverUiTokens.Spacing.Sm));
@@ -1127,9 +1151,7 @@ internal static class SolverOverlay
         if (_settingsButton != null)
         {
             _settingsButton.Text = _settingsVisible ? "返回" : "设置";
-            _settingsButton.AddThemeColorOverride(
-                "font_color",
-                _settingsVisible ? Accent : SolverUiTokens.Palette.TextSecondary);
+            _settingsButton.AddThemeColorOverride("font_color", Accent);
         }
     }
 
