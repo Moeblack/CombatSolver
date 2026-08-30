@@ -1886,5 +1886,29 @@
     "expected": "并行搜索与串行搜索政策等价，BaseLib 克隆不发生共享弱表异常；CardPlay 无论完成或中止都不把临时出牌引用带入后续分支。",
     "observed": "runId 9678ee908aac427e9fbc5a6d7b17e4cf Passed，DOP1/DOP2 完整政策一致并形成真实并发，两个 CardPlay 边界均稳定 Fork。",
     "evidence": "src/Engine/Common/BaseLibCloneConcurrency.cs；src/Testing/UnattendedTestRunner.ForkBoundaries.cs；runId 9678ee908aac427e9fbc5a6d7b17e4cf；验证日期 2026-08-30。"
+  },
+  "BATCH-193556-RNG-IDENTITY": {
+    "status": "Passed",
+    "level": "HeadlessFullRngIdentityAndParallelSearchPolicyEquivalence",
+    "procedure": "在同一战斗根内把 CombatCardSelection RNG 改为计数相同、内部状态不同的值，比较 live 续用文本和搜索 RNG 指纹；随后以固定 250 节点分别运行 DOP1/DOP2。",
+    "expected": "RNG 计数相同但四段内部状态不同的节点不得复用或进入同一转置身份；完整 RNG 身份不得改变固定预算下的并行搜索政策。",
+    "observed": "修复前 runId ee4e6b4e16054d42b05dc50a423f1a47 在续用身份断言失败；修复后 runId 8d6ae9a5647240a5846a2549cb06c369 Passed，续用文本与状态键均区分内部状态，DOP1/DOP2 完整结果一致。",
+    "evidence": "src/Runtime/ContinuationStamp.cs；src/Search/CombatBeamSolver.StateEvaluation.cs；上述 runId；验证日期 2026-08-30。"
+  },
+  "BATCH-193556-TURN-SETUP-FALLBACK": {
+    "status": "Passed",
+    "level": "ProblemBundlePreCombatTurnSetupSearchBoundary",
+    "procedure": "从 SOUL_NEXUS 问题包的战前跑局存档进入赌博筹码原生页面，限制单线程与 8 秒短搜，在首个求解结果处停止。",
+    "expected": "历史候选快照释放后，重建必须先重放该候选的开局选择，再回放动作；已被赌博筹码换走的牌不得被当作仍在手牌。",
+    "observed": "runId 1ec4e296e601422b86674f7f7d3d35df Passed，搜索返回 6 回合候选，未再出现“回放时找不到手牌 BOOT_SEQUENCE”。",
+    "evidence": "CombatSolver-SOUL_NEXUS_ELITE-20260830-182424-235.zip 的 current 战前存档；src/Search/CombatBeamSolver.Retention.cs；runId 1ec4e296e601422b86674f7f7d3d35df；验证日期 2026-08-30。"
+  },
+  "BATCH-193556-SEEKER-CHOICE-ACTION-SCOPE": {
+    "status": "Passed",
+    "level": "HeadlessCardPlayChoiceRiskLifecycleAndStrictDifferential",
+    "procedure": "用同一张卡依次建立两个 CardPlay，第一动作记录未解决选牌，核对第二动作不会继承该风险；另运行探寻打击随机候选和移入手牌的原版/预测严格差分。",
+    "expected": "未解决选择只阻止同一个 CardPlay 内的后续重放层；同一卡牌在以后再次打出时必须生成新的随机候选和计划选牌。",
+    "observed": "生命周期 runId 7fcf4d2c016f40a6aeeaf6f314b9cf3e Passed；探寻打击严格差分 runId cac18e0431be4bc2a06b474da84460dc Passed。",
+    "evidence": "coverage/unattended/seeker-strike-choice-audit-308.json；src/Engine/InCombat/Mirrors/Cards/OnPlay/CardSelectionCardMirrors.cs；上述 runId；验证日期 2026-08-30。"
   }
 }

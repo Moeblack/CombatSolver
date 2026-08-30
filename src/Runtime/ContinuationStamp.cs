@@ -98,15 +98,15 @@ internal sealed record ContinuationStamp(string StateText)
         RelicPredictionStateSupport.AppendLiveContinuation(text, player);
         AppendPowers(text, state.Creatures.SelectMany(creature => creature.Powers));
         AppendRng(text,
-            state.RunState.Rng.Shuffle.ToSerializable().counter,
-            state.RunState.Rng.CombatCardGeneration.ToSerializable().counter,
-            state.RunState.Rng.CombatPotionGeneration.ToSerializable().counter,
-            state.RunState.Rng.CombatCardSelection.ToSerializable().counter,
-            state.RunState.Rng.CombatEnergyCosts.ToSerializable().counter,
-            state.RunState.Rng.CombatTargets.ToSerializable().counter,
-            state.RunState.Rng.CombatOrbGeneration.ToSerializable().counter,
-            state.RunState.Rng.MonsterAi.ToSerializable().counter,
-            state.RunState.Rng.Niche.ToSerializable().counter);
+            state.RunState.Rng.Shuffle.CaptureState(),
+            state.RunState.Rng.CombatCardGeneration.CaptureState(),
+            state.RunState.Rng.CombatPotionGeneration.CaptureState(),
+            state.RunState.Rng.CombatCardSelection.CaptureState(),
+            state.RunState.Rng.CombatEnergyCosts.CaptureState(),
+            state.RunState.Rng.CombatTargets.CaptureState(),
+            state.RunState.Rng.CombatOrbGeneration.CaptureState(),
+            state.RunState.Rng.MonsterAi.CaptureState(),
+            state.RunState.Rng.Niche.CaptureState());
         return new ContinuationStamp(text.ToString());
     }
 
@@ -157,15 +157,15 @@ internal sealed record ContinuationStamp(string StateText)
             combat.RelicsOf(player));
         AppendPowers(text, combat.EffectivePowers());
         AppendRng(text,
-            simulator.Rng.Shuffle.ToSerializable().counter,
-            simulator.Rng.CombatCardGeneration.ToSerializable().counter,
-            simulator.Rng.CombatPotionGeneration.ToSerializable().counter,
-            simulator.Rng.CombatCardSelection.ToSerializable().counter,
-            simulator.Rng.CombatEnergyCosts.ToSerializable().counter,
-            simulator.Rng.CombatTargets.ToSerializable().counter,
-            simulator.Rng.CombatOrbGeneration.ToSerializable().counter,
-            simulator.Rng.MonsterAi.ToSerializable().counter,
-            simulator.Rng.Niche.ToSerializable().counter);
+            simulator.Rng.Shuffle.CaptureState(),
+            simulator.Rng.CombatCardGeneration.CaptureState(),
+            simulator.Rng.CombatPotionGeneration.CaptureState(),
+            simulator.Rng.CombatCardSelection.CaptureState(),
+            simulator.Rng.CombatEnergyCosts.CaptureState(),
+            simulator.Rng.CombatTargets.CaptureState(),
+            simulator.Rng.CombatOrbGeneration.CaptureState(),
+            simulator.Rng.MonsterAi.CaptureState(),
+            simulator.Rng.Niche.CaptureState());
         return new ContinuationStamp(text.ToString());
     }
 
@@ -421,19 +421,30 @@ internal sealed record ContinuationStamp(string StateText)
 
     private static void AppendRng(
         StringBuilder text,
-        int shuffle,
-        int generation,
-        int potionGeneration,
-        int selection,
-        int energy,
-        int targets,
-        int orbs,
-        int monsterAi,
-        int niche)
+        PredictionRngState shuffle,
+        PredictionRngState generation,
+        PredictionRngState potionGeneration,
+        PredictionRngState selection,
+        PredictionRngState energy,
+        PredictionRngState targets,
+        PredictionRngState orbs,
+        PredictionRngState monsterAi,
+        PredictionRngState niche)
     {
-        text.Append(";R=").Append(shuffle).Append('/')
-            .Append(generation).Append('/').Append(potionGeneration).Append('/').Append(selection).Append('/')
-            .Append(energy).Append('/').Append(targets).Append('/')
-            .Append(orbs).Append('/').Append(monsterAi).Append('/').Append(niche);
+        text.Append(";R=");
+        AppendRngState(text, shuffle).Append('/');
+        AppendRngState(text, generation).Append('/');
+        AppendRngState(text, potionGeneration).Append('/');
+        AppendRngState(text, selection).Append('/');
+        AppendRngState(text, energy).Append('/');
+        AppendRngState(text, targets).Append('/');
+        AppendRngState(text, orbs).Append('/');
+        AppendRngState(text, monsterAi).Append('/');
+        AppendRngState(text, niche);
     }
+
+    private static StringBuilder AppendRngState(StringBuilder text, PredictionRngState state)
+        => text.Append(state.Counter).Append(':')
+            .Append(state.State0).Append(':').Append(state.State1).Append(':')
+            .Append(state.State2).Append(':').Append(state.State3);
 }

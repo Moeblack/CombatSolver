@@ -28,7 +28,22 @@ internal sealed partial class CombatBeamSolver
     {
         if (fallback.Snapshot.HasSimulator)
             return fallback;
-        SimulationSnapshot snapshot = Replay(fallback.Actions);
+        SimulationSnapshot? turnSetupRoot = _includeTurnSetup
+            ? ReplayTurnSetup(fallback.GetTurnSetupChoices())
+            : null;
+        SimulationSnapshot snapshot;
+        try
+        {
+            snapshot = Replay(
+                fallback.Actions,
+                turnSetupRoot,
+                _startTurnNumber,
+                priorActionCount: 0);
+        }
+        finally
+        {
+            turnSetupRoot?.ReleaseSimulator();
+        }
         return fallback with
         {
             Score = snapshot.Score,

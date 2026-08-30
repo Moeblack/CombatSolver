@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Models.Relics;
 using STS2RitsuLib.Models.Capabilities;
 using System.Reflection;
 using CombatSolver.Engine.Common;
+using CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Simulation;
 
@@ -20,6 +21,7 @@ internal sealed partial class UnattendedTestRunner
         SimulatedCombatState simulatedCombat = new(combat);
         CombatPredictionSimulator simulator = new(simulatedCombat);
         AssertRitsuCapabilityFastPath(simulator, player, card);
+        AssertChoiceRiskScopedToCardPlay(simulator, card);
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -110,6 +112,23 @@ internal sealed partial class UnattendedTestRunner
         fork.State.GetPlayerCombatState(player).GainEnergy(1);
         if (simulator.State.GetPlayerCombatState(player).Energy != originalEnergy)
             throw new InvalidOperationException("稳定边界 Fork 没有隔离玩家能量状态。");
+    }
+
+    private static void AssertChoiceRiskScopedToCardPlay(
+        CombatPredictionSimulator simulator,
+        CardModel card)
+    {
+        using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
+        {
+            simulator.History.RecordRisk(PredictionRiskReason.UnresolvedPlayerChoice);
+            if (!CardSelectionCardMirrors.HasUnresolvedChoiceInCurrentAction(simulator))
+                throw new InvalidOperationException("同一次出牌没有识别自己尚未解决的选牌。");
+        }
+        using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
+        {
+            if (CardSelectionCardMirrors.HasUnresolvedChoiceInCurrentAction(simulator))
+                throw new InvalidOperationException("上一轮同一卡牌的选牌错误污染了新的出牌动作。");
+        }
     }
 
     private static void AssertRitsuCapabilityFastPath(

@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
+using CombatSolver.Engine.InCombat.Extensions;
 using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
@@ -169,12 +170,7 @@ internal static class CardSelectionCardMirrors
     {
         context.AttackSingle();
 
-        var hasUnresolvedChoice = context.Simulator.History
-            .OfType<CombatPredictionRiskEntry>()
-            .Any(entry =>
-                entry.Reason is PredictionRiskReason.UnresolvedPlayerChoice &&
-                ReferenceEquals(entry.Trace?.Source, context.OriginalCard));
-        if (hasUnresolvedChoice)
+        if (HasUnresolvedChoiceInCurrentAction(context.Simulator))
         {
             // The first unresolved choice changes the draw pile, so later replay options and their
             // CombatCardSelection RNG consumption cannot be predicted from the current shadow state.
@@ -195,6 +191,17 @@ internal static class CardSelectionCardMirrors
         // Vanilla next asks the player to choose an option and moves it to hand. Record the options
         // first so that this unresolved choice falls after their risk boundary.
         context.History.RecordRisk(PredictionRiskReason.UnresolvedPlayerChoice);
+    }
+
+    internal static bool HasUnresolvedChoiceInCurrentAction(CombatPredictionSimulator simulator)
+    {
+        PredictionTraceFrame actionFrame = simulator.CurrentFrame?.FindOriginatingAction()
+            ?? throw new InvalidOperationException("探寻打击预测缺少当前出牌动作帧。");
+        return simulator.History
+            .OfType<CombatPredictionRiskEntry>()
+            .Any(entry =>
+                entry.Reason is PredictionRiskReason.UnresolvedPlayerChoice &&
+                ReferenceEquals(entry.Trace?.FindOriginatingAction(), actionFrame));
     }
 
     public static void ThrashOnPlay(Thrash card, CardOnPlayMirrorContext context)

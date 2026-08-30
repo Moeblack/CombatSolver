@@ -1,4 +1,6 @@
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Random;
+using MegaCrit.Sts2.Core.Saves;
 
 namespace CombatSolver;
 
@@ -33,6 +35,7 @@ internal sealed partial class UnattendedTestRunner
         };
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
+        AssertFullRngStateIdentity(combat);
         CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(combat);
 
         SearchPolicySnapshot serialPolicy = capturedPolicy with { MaxDegreeOfParallelism = 1 };
@@ -101,6 +104,37 @@ internal sealed partial class UnattendedTestRunner
         finally
         {
             SolverSettings.ApplyForTesting(originalSettings);
+        }
+    }
+
+    private static void AssertFullRngStateIdentity(CombatState combat)
+    {
+        Rng rng = combat.RunState.Rng.CombatCardSelection;
+        SerializableRng original = rng.ToSerializable();
+        try
+        {
+            ContinuationStamp originalContinuation = ContinuationStamp.CaptureLive(combat);
+            StateFingerprint originalFingerprint =
+                CombatBeamSolver.CaptureRngStateFingerprintForTesting(rng);
+            rng.LoadFromSerializable(new SerializableRng
+            {
+                counter = original.counter,
+                state0 = original.state0 ^ 0x9E3779B97F4A7C15UL,
+                state1 = original.state1,
+                state2 = original.state2,
+                state3 = original.state3,
+            });
+            ContinuationStamp changedContinuation = ContinuationStamp.CaptureLive(combat);
+            StateFingerprint changedFingerprint =
+                CombatBeamSolver.CaptureRngStateFingerprintForTesting(rng);
+            if (originalContinuation == changedContinuation)
+                throw new InvalidOperationException("续用状态没有区分计数相同但内部状态不同的 RNG。");
+            if (originalFingerprint == changedFingerprint)
+                throw new InvalidOperationException("搜索状态键没有区分计数相同但内部状态不同的 RNG。");
+        }
+        finally
+        {
+            rng.LoadFromSerializable(original);
         }
     }
 

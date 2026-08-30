@@ -14,6 +14,7 @@ using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
+using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
@@ -765,15 +766,15 @@ internal sealed partial class CombatBeamSolver
         AppendPile(ref key, playerState.ExhaustPile, 'X');
         AppendOrbs(ref key, simulator, playerState.OrbQueue);
         _run.Performance.End(SearchMetricPhase.PileFingerprint, pileFingerprintMeasurement);
-        key.Add(simulator.Rng.Shuffle.Counter());
-        key.Add(simulator.Rng.CombatCardGeneration.Counter());
-        key.Add(simulator.Rng.CombatPotionGeneration.Counter());
-        key.Add(simulator.Rng.CombatCardSelection.Counter());
-        key.Add(simulator.Rng.CombatEnergyCosts.Counter());
-        key.Add(simulator.Rng.CombatTargets.Counter());
-        key.Add(simulator.Rng.CombatOrbGeneration.Counter());
-        key.Add(simulator.Rng.MonsterAi.Counter());
-        key.Add(simulator.Rng.Niche.Counter());
+        AppendRngState(ref key, simulator.Rng.Shuffle);
+        AppendRngState(ref key, simulator.Rng.CombatCardGeneration);
+        AppendRngState(ref key, simulator.Rng.CombatPotionGeneration);
+        AppendRngState(ref key, simulator.Rng.CombatCardSelection);
+        AppendRngState(ref key, simulator.Rng.CombatEnergyCosts);
+        AppendRngState(ref key, simulator.Rng.CombatTargets);
+        AppendRngState(ref key, simulator.Rng.CombatOrbGeneration);
+        AppendRngState(ref key, simulator.Rng.MonsterAi);
+        AppendRngState(ref key, simulator.Rng.Niche);
         ulong deathsFirst = 0;
         ulong deathsSecond = 0;
         foreach (uint combatId in processedEnemyDeaths)
@@ -787,6 +788,23 @@ internal sealed partial class CombatBeamSolver
         SearchMeasurement combatFingerprintMeasurement = _run.Performance.Begin();
         simulatedCombat.AppendFingerprint(ref key, simulator);
         _run.Performance.End(SearchMetricPhase.CombatFingerprint, combatFingerprintMeasurement);
+        return key.Finish();
+    }
+
+    private static void AppendRngState(ref StateFingerprintBuilder key, Rng rng)
+    {
+        PredictionRngState state = rng.CaptureState();
+        key.Add(state.Counter);
+        key.Add(state.State0);
+        key.Add(state.State1);
+        key.Add(state.State2);
+        key.Add(state.State3);
+    }
+
+    internal static StateFingerprint CaptureRngStateFingerprintForTesting(Rng rng)
+    {
+        StateFingerprintBuilder key = new();
+        AppendRngState(ref key, rng);
         return key.Finish();
     }
 

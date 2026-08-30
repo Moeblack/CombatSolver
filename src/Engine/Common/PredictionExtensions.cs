@@ -8,6 +8,13 @@ using MegaCrit.Sts2.Core.Runs;
 
 namespace CombatSolver.Engine.Common;
 
+internal readonly record struct PredictionRngState(
+    int Counter,
+    ulong State0,
+    ulong State1,
+    ulong State2,
+    ulong State3);
+
 internal static class PredictionExtensions
 {
     public static Rng Clone(this Rng rng)
@@ -22,6 +29,14 @@ internal static class PredictionExtensions
     }
 
     public static int Counter(this Rng rng) => rng._counter;
+
+    public static PredictionRngState CaptureState(this Rng rng)
+        => new(
+            rng._counter,
+            rng._random._s0,
+            rng._random._s1,
+            rng._random._s2,
+            rng._random._s3);
 
     public static void Advance(this Rng rng, int count)
     {
