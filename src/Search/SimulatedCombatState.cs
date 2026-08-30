@@ -132,6 +132,11 @@ internal sealed partial class SimulatedCombatState
     private static readonly FieldInfo AllCombatCardsField =
         typeof(CombatState).GetField("_allCards", BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new MissingFieldException(typeof(CombatState).FullName, "_allCards");
+    private static readonly PropertyInfo MonsterMaxHpBeforeModificationProperty =
+        typeof(Creature).GetProperty(
+            nameof(Creature.MonsterMaxHpBeforeModification),
+            BindingFlags.Instance | BindingFlags.Public)
+        ?? throw new MissingMemberException(typeof(Creature).FullName, nameof(Creature.MonsterMaxHpBeforeModification));
     private static readonly FieldInfo MultiplayerScalingRunStateField =
         typeof(MultiplayerScalingModel).GetField("_runState", BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new MissingFieldException(typeof(MultiplayerScalingModel).FullName, "_runState");
@@ -156,7 +161,6 @@ internal sealed partial class SimulatedCombatState
     private IReadOnlyList<PowerModel>? _effectivePowers;
     private Action? _invalidateBaseHookListenersObserver;
     private ForkableDictionary<Player, int>? _drawNextTurn;
-    private ForkableDictionary<Creature, int>? _temporaryDexterity;
     private ForkableSet<(Creature Owner, Type Type)>? _skipNextDurationTick;
     private ForkableSet<Creature>? _skipNextMove;
     private ForkableDictionary<Creature, int>? _pressureGunBonus;
@@ -898,8 +902,6 @@ internal sealed partial class SimulatedCombatState
         if (applied <= 0)
             return;
         Apply<DexterityPower>(creature, applied, applier);
-        _temporaryDexterity ??= [];
-        _temporaryDexterity[creature] = _temporaryDexterity.GetValueOrDefault(creature) + applied;
     }
 
     public void ApplyTemporaryFocus<T>(Creature creature, int amount, Creature? applier)
@@ -930,23 +932,22 @@ internal sealed partial class SimulatedCombatState
         if (applied <= 0)
             return;
         Apply<DexterityPower>(creature, applied, applier);
-        _temporaryDexterity ??= [];
-        _temporaryDexterity[creature] = _temporaryDexterity.GetValueOrDefault(creature) + applied;
     }
 
     public void RestoreTemporaryDexterity()
     {
-        if (_temporaryDexterity == null)
-            return;
-        foreach ((Creature creature, int amount) in _temporaryDexterity)
+        foreach (IGrouping<Creature, TemporaryDexterityPower> group in EffectivePowers()
+                     .OfType<TemporaryDexterityPower>()
+                     .Where(static power => power.Amount > 0)
+                     .GroupBy(static power => power.Owner)
+                     .ToArray())
         {
+            Creature creature = group.Key;
+            int amount = group.Sum(static power => power.Amount);
             Apply<DexterityPower>(creature, -amount);
-            SetAmount<AnticipatePower>(creature, 0);
-            SetAmount<SpeedPotionPower>(creature, 0);
-            SetAmount<HelicalDartPower>(creature, 0);
-            SetAmount<FadePower>(creature, 0);
+            foreach (TemporaryDexterityPower power in group)
+                SetPowerAmount(power, 0);
         }
-        _temporaryDexterity.Clear();
     }
 
     public void RestoreTemporaryStrength(IEnumerable<Creature> participants)
@@ -1771,7 +1772,6 @@ internal sealed partial class SimulatedCombatState
         AddUnordered(ref fingerprint, 'P', powerCount, powersFirst, powersSecond);
 
         AddPlayerIntMap(ref fingerprint, 'D', _drawNextTurn);
-        AddCreatureIntMap(ref fingerprint, 'd', _temporaryDexterity);
         AddCreatureTypeSet(ref fingerprint, 'K', _skipNextDurationTick);
         AddCreatureSet(ref fingerprint, 'S', _skipNextMove);
         AddCreatureIntMap(ref fingerprint, 'G', _pressureGunBonus);
@@ -2209,7 +2209,16 @@ internal sealed partial class SimulatedCombatState
         Creature creature = CreateCreature(monster, side, slot);
         if (side == CombatSide.Enemy)
         {
-            creature.SetUniqueMonsterHpValue(_enemies, simulator.Rng.Niche);
+            int minimum = monster.MinInitialHp;
+            int maximumExclusive = monster.MaxInitialHp + 1;
+            HashSet<int> available = Enumerable.Range(minimum, maximumExclusive - minimum).ToHashSet();
+            available.ExceptWith(_enemies.Select(enemy => simulator.State.GetCreature(enemy).MaxHp));
+            int baseHp = available.Count == 0
+                ? simulator.Rng.Niche.NextInt(minimum, maximumExclusive)
+                : simulator.Rng.Niche.NextItem(available);
+            MonsterMaxHpBeforeModificationProperty.SetValue(creature, baseHp);
+            creature.SetMaxHpInternal(baseHp);
+            creature.SetCurrentHpInternal(baseHp);
             creature.ScaleMonsterHpForMultiplayer(Encounter, Players.Count, _currentActIndex);
         }
         _ = simulator.State.GetCreature(creature);

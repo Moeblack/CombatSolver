@@ -226,6 +226,25 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidDataException("问题包存在不安全或重复的条目名。");
         }
+        string otherForensicSlot = forensicSlot == "current" ? "recent" : "current";
+        if (archive.Entries.Any(entry =>
+                entry.FullName.StartsWith($"combat-solver/forensics/{otherForensicSlot}/", StringComparison.Ordinal)))
+            throw new InvalidDataException("问题包同时包含当前战斗和此前战斗。");
+        if (archive.GetEntry("screenshot.png") != null
+            || archive.Entries.Any(entry => entry.FullName.StartsWith("saves/", StringComparison.Ordinal)))
+        {
+            throw new InvalidDataException("精简问题包仍包含截图或整批磁盘存档。");
+        }
+        if (archive.Entries.Count(entry =>
+                entry.FullName.StartsWith($"combat-solver/forensics/{forensicSlot}/checkpoints/", StringComparison.Ordinal)) > 6)
+        {
+            throw new InvalidDataException("精简问题包归档了超过 6 个战斗检查点。");
+        }
+        ZipArchiveEntry[] generalLogs = archive.Entries
+            .Where(entry => entry.FullName.StartsWith("logs/", StringComparison.Ordinal))
+            .ToArray();
+        if (generalLogs.Length > 1 || generalLogs.Any(entry => entry.Length > 2L * 1024 * 1024))
+            throw new InvalidDataException("精简问题包的常规日志数量或大小超过上限。");
 
         using Stream settingsStream = archive.GetEntry("combat-solver/settings.json")!.Open();
         using JsonDocument settingsDocument = JsonDocument.Parse(settingsStream);

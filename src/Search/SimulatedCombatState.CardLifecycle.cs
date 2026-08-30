@@ -435,7 +435,7 @@ internal sealed partial class SimulatedCombatState
                 return true;
             }
         }
-        TriggerWhisperingEarring(simulator, player, processedEnemyDeaths);
+        TriggerWhisperingEarring(simulator, player, turnNumber, processedEnemyDeaths);
         return false;
     }
 

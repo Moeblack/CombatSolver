@@ -89,8 +89,12 @@ internal sealed partial class SimulatedCombatState
     public void TriggerWhisperingEarring(
         CombatPredictionSimulator simulator,
         Player player,
+        int turnNumber,
         ISet<uint> processedEnemyDeaths)
     {
+        if (turnNumber > 1)
+            return;
+
         foreach (WhisperingEarring relic in RelicsOf(player)
                      .OfType<WhisperingEarring>()
                      .Where(static relic => !relic.IsMelted))

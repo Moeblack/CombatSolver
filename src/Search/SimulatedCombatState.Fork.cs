@@ -13,7 +13,6 @@ internal sealed partial class SimulatedCombatState
         SimulatedCombatState fork = new(this)
         {
             _drawNextTurn = _drawNextTurn?.Fork(),
-            _temporaryDexterity = _temporaryDexterity?.Fork(),
             _skipNextDurationTick = _skipNextDurationTick?.Fork(),
             _skipNextMove = _skipNextMove?.Fork(),
             _pressureGunBonus = _pressureGunBonus?.Fork(),

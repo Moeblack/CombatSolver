@@ -1,5 +1,6 @@
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Models;
@@ -124,8 +125,72 @@ internal sealed partial class UnattendedTestRunner
         AssertAmountOnTurnStartCacheReuse(combat, player);
         AssertSparsePowerAfflictionCardTracking(combat, player, card);
         AssertProjectedShuffleEquivalence(simulator, player);
+        AssertSpawnHpUsesSimulatedCreatureState(combat);
+        AssertWhisperingEarringOnlyRunsOnFirstTurn(simulator, simulatedCombat, player);
         AssertPredictionForkContextIdentityIndex();
         AssertForkableListEnumeration();
+    }
+
+    private static void AssertSpawnHpUsesSimulatedCreatureState(CombatState combat)
+    {
+        MegaCrit.Sts2.Core.Models.Monsters.ToughEgg canonical =
+            ModelDb.Monster<MegaCrit.Sts2.Core.Models.Monsters.ToughEgg>();
+        int minimum = canonical.MinInitialHp;
+        int maximum = canonical.MaxInitialHp;
+        int reserved = Math.Clamp(17, minimum, maximum);
+        if (combat.Enemies.Any(enemy => enemy.MaxHp >= minimum && enemy.MaxHp <= maximum))
+            return;
+
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        Creature existing = simulatedCombat.CreatePredictedMonster(
+            simulator,
+            (MegaCrit.Sts2.Core.Models.Monsters.ToughEgg)ModelDb
+                .Monster<MegaCrit.Sts2.Core.Models.Monsters.ToughEgg>()
+                .ToMutable(),
+            CombatSide.Enemy,
+            slot: null);
+        simulatedCombat.AddPredictedMonster(existing);
+        simulator.State.GetCreature(existing).SetMaxHp(reserved);
+        existing.SetMaxHpInternal(minimum);
+        if (simulator.State.GetCreature(existing).MaxHp != reserved)
+            throw new InvalidOperationException("产卵生命判重夹具没有建立模拟/原生最大生命差异。");
+
+        HashSet<int> spawned = [];
+        for (int index = 0; index < maximum - minimum; index++)
+        {
+            Creature creature = simulatedCombat.CreatePredictedMonster(
+                simulator,
+                (MegaCrit.Sts2.Core.Models.Monsters.ToughEgg)ModelDb
+                    .Monster<MegaCrit.Sts2.Core.Models.Monsters.ToughEgg>()
+                    .ToMutable(),
+                CombatSide.Enemy,
+                slot: null);
+            simulatedCombat.AddPredictedMonster(creature);
+            spawned.Add(simulator.State.GetCreature(creature).MaxHp);
+        }
+        HashSet<int> expected = Enumerable.Range(minimum, maximum - minimum + 1)
+            .Where(value => value != reserved)
+            .ToHashSet();
+        if (!spawned.SetEquals(expected))
+        {
+            throw new InvalidOperationException(
+                $"新怪物生命判重没有采用模拟状态；actual={string.Join(',', spawned.Order())}。");
+        }
+    }
+
+    private static void AssertWhisperingEarringOnlyRunsOnFirstTurn(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        Player player)
+    {
+        if (!combat.RelicsOf(player).Any(static relic => relic is WhisperingEarring && !relic.IsMelted))
+            return;
+        int cardsBefore = simulator.State.GetPlayerCombatState(player).Hand.Cards.Count;
+        combat.TriggerWhisperingEarring(simulator, player, 2, new HashSet<uint>());
+        int cardsAfter = simulator.State.GetPlayerCombatState(player).Hand.Cards.Count;
+        if (cardsAfter != cardsBefore)
+            throw new InvalidOperationException("低语耳饰在第二回合再次自动出牌。");
     }
 
     private static void AssertPredictedCardForkOwnershipAndObservers(
