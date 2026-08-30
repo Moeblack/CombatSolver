@@ -25,14 +25,25 @@ internal static class LiveEndTurnRiskEvaluator
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("结束回合复核找不到本地玩家。");
         SimulatedCombatState combat = new(state);
-        PlanCardChoice[] roundChoices = turnStartChoices?
+        return Evaluate(player, combat, turnStartChoices);
+    }
+
+    internal static LiveEndTurnRiskProjection Evaluate(
+        Player player,
+        SimulatedCombatState combat,
+        IReadOnlyList<PlanCardChoice>? turnStartChoices)
+    {
+        PlanCardChoice[] endTurnChoices = turnStartChoices?
             .Where(choice => choice.Timing is PlanChoiceTiming.PlayerTurnEnd or PlanChoiceTiming.EnemyTurn)
             .ToArray() ?? [];
-        combat.BeginActionChoices(roundChoices);
+        PlanCardChoice[] cursorChoices = endTurnChoices
+            .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse)
+            .ToArray();
+        combat.BeginActionChoices(cursorChoices);
         combat.SetActionChoiceTiming(PlanChoiceTiming.PlayerTurnEnd);
         try
         {
-            LiveEndTurnRiskProjection projection = Evaluate(player, combat);
+            LiveEndTurnRiskProjection projection = EvaluateCore(player, combat, endTurnChoices);
             if (combat.HasPendingChoice)
                 throw new InvalidOperationException("结束回合复核产生了路线未提供的选牌。");
             return projection;
@@ -43,9 +54,10 @@ internal static class LiveEndTurnRiskEvaluator
         }
     }
 
-    private static LiveEndTurnRiskProjection Evaluate(
+    private static LiveEndTurnRiskProjection EvaluateCore(
         Player player,
-        SimulatedCombatState combat)
+        SimulatedCombatState combat,
+        IReadOnlyList<PlanCardChoice> endTurnChoices)
     {
         CombatPredictionSimulator simulator = new(combat);
         SimCreatureState simulatedPlayer = simulator.State.GetCreature(player.Creature);
@@ -154,7 +166,8 @@ internal static class LiveEndTurnRiskEvaluator
                     combat,
                     move,
                     player.Creature,
-                    processedEnemyDeaths))
+                    processedEnemyDeaths,
+                    endTurnChoices))
             {
                 break;
             }

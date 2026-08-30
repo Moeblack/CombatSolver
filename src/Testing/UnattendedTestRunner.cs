@@ -973,6 +973,8 @@ internal sealed partial class UnattendedTestRunner
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         if (check.LiveEndTurnRiskCardId != null)
             AssertLiveEndTurnRiskChoices(combatState, player, check);
+        if (check.LiveEndTurnRiskKnowledgeChoiceCardId != null)
+            AssertLiveEndTurnRiskKnowledgeChoice(combatState, player, enemy, check);
         foreach (UnattendedPowerInjection injectedPowerAfterMove in check.PowersAfterMove)
         {
             await InjectPowerAsync(combatState, player, injectedPowerAfterMove, enemy);
@@ -1624,6 +1626,31 @@ internal sealed partial class UnattendedTestRunner
             Timing = PlanChoiceTiming.PlayerTurnStart,
         };
         _ = LiveEndTurnRiskEvaluator.Evaluate(combatState, [choice, futureTurnChoice]);
+    }
+
+    private static void AssertLiveEndTurnRiskKnowledgeChoice(
+        CombatState combatState,
+        Player player,
+        Creature enemy,
+        UnattendedMonsterMoveCheck check)
+    {
+        SimulatedCombatState combat = new(combatState);
+        combat.ForceMonsterMove(enemy, "CURSE_OF_KNOWLEDGE_MOVE");
+        int counterBefore = combat.GetKnowledgeDemonCurseCounter(enemy);
+        string cardId = check.LiveEndTurnRiskKnowledgeChoiceCardId!;
+        PlanCardChoice choice = new(
+            PlanChoiceEffect.ApplyKnowledgeCurse,
+            PileType.None,
+            [new PlanCardToken(cardId, 0, string.Empty, 0, 0, cardId)],
+            $"KNOWLEDGE_DEMON:{enemy.CombatId ?? uint.MaxValue}:{counterBefore}",
+            Timing: PlanChoiceTiming.EnemyTurn);
+        _ = LiveEndTurnRiskEvaluator.Evaluate(player, combat, [choice]);
+        int counterAfter = combat.GetKnowledgeDemonCurseCounter(enemy);
+        if (counterAfter != counterBefore + 1)
+        {
+            throw new InvalidOperationException(
+                $"结束回合风险复核没有消费知识恶魔诅咒计划：{counterBefore} -> {counterAfter}。");
+        }
     }
 
     private static void AssertSimulatedCardPileAfterPlay(
