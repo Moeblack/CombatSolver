@@ -8,6 +8,7 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `V0211-PARALLEL-OFF-RECOVERY-UI` | 通过 | 设置面板成功创建并行度选择框；并行搜索失败提示同时包含上传问题包与切换“关闭（单线程）”，串行搜索失败只提示上传，不误报并行恢复建议。控制器停止/恢复生命周期和首回合自动战斗同时通过。runId `598166aaeb19404fa75603c35a5921fa` | 2026-08-30 |
 | `POST021-SMARTFORMAT-DIRECT-PATCH-ATTEMPT` | 失败实验，已撤回 | `LocManager.SmartFormat` 含异常过滤器，Harmony 无法生成 Prefix/Finalizer 或 Prefix-only 改写，CombatSolver patch 整体回滚；runId `f15cebdaa235481d970942bbdf5c7232`、`b8f16a2de9ea4779a738604ab8a247c9`、`0e0f3425cc104417bdf083ccf6cdcca0`，不计回归通过 | 2026-08-30 |
 | `POST021-POWER-DYNAMIC-WARMUP-SMOKE` | 通过 | 主线程物化与 Power 惰性变量 guard 正常加载；铁甲战士首回合自动结束 1 HP 小爬虫战斗，没有 patch 回滚。runId `8b4446b6e4a34fa9b68bcdbd971441af` | 2026-08-30 |
 | `POST021-INFESTED-PRISM-SMARTFORMAT-DOP4` | 通过 | 从玩家包恢复受感染棱镜战前存档、手牌与 RNG；DOP4 短搜约 `2976.8 ms` 返回 5 个可执行动作和第 4 回合路线，没有集合并发异常。runId `cb71d23a0baf4046b65dc0348c355041` | 2026-08-30 |

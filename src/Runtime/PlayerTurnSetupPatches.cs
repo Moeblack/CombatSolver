@@ -358,7 +358,9 @@ internal static class PlayerTurnSetupCoordinator
         }
         catch (Exception ex)
         {
-            SolverController.RecordTurnSetupFailure(ex);
+            SolverController.RecordTurnSetupFailure(
+                ex,
+                initialSearch?.SearchPolicy.MaxDegreeOfParallelism > 1);
             DisposeActive();
             throw;
         }
@@ -471,7 +473,9 @@ internal static class PlayerTurnSetupCoordinator
         }
         catch (Exception ex)
         {
-            SolverController.RecordTurnSetupFailure(ex);
+            SolverController.RecordTurnSetupFailure(
+                ex,
+                active.InitialSearch?.SearchPolicy.MaxDegreeOfParallelism > 1);
             throw;
         }
         finally

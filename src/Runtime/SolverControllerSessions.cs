@@ -59,6 +59,7 @@ internal sealed class SolverSearchSession(
     public LiveCombatStamp Stamp { get; } = stamp;
     public CancellationTokenSource Cancellation { get; } = new();
     public bool DeployWhenReady { get; set; } = deployWhenReady;
+    public int MaxDegreeOfParallelism { get; set; } = 1;
     public SolverProgress? Progress;
     public SolverProgress? RenderedProgress { get; set; }
     public long LastProgressRenderAt { get; set; } = Environment.TickCount64;

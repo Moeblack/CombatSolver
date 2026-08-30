@@ -126,13 +126,15 @@ internal static class SolverController
             currentProjectedBattleHpLost);
     }
 
-    internal static void RecordTurnSetupFailure(Exception exception)
+    internal static void RecordTurnSetupFailure(
+        Exception exception,
+        bool parallelSearchWasEnabled = false)
     {
         _combat.BugReportIssues.RecordFailure(
             CombatBugReportIssueKind.TurnSetupFailure,
             exception);
         if (NGame.Instance is { } host)
-            SolverOverlay.Show(host, FormatTurnSetupFailure(exception));
+            SolverOverlay.Show(host, FormatTurnSetupFailure(exception, parallelSearchWasEnabled));
     }
 
     internal static void RecordTurnSetupStateMismatch(string difference)
@@ -564,6 +566,7 @@ internal static class SolverController
                 settings,
                 includeTurnSetup: false,
                 theftPolicy: theftPolicy);
+            search.MaxDegreeOfParallelism = searchPolicy.MaxDegreeOfParallelism;
             setupStage = "combat_root_snapshot";
             CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(state);
             Entry.Logger.Info(
@@ -690,6 +693,11 @@ internal static class SolverController
                $"建议卸载该 Mod 并重启游戏后再使用求解器。[/color]\n" +
                SolverUiTokens.BugReportUploadInstructionRichText;
     }
+
+    internal static string FormatSearchFailureForTesting(
+        Exception exception,
+        bool parallelSearchWasEnabled)
+        => FormatSearchFailure(exception, parallelSearchWasEnabled);
 
     private static string EscapeRichText(string value)
         => value.Replace('[', '［').Replace(']', '］');
@@ -1122,7 +1130,9 @@ internal static class SolverController
                 _combat.FullAutoEnabled = false;
                 SolverOverlay.RefreshControls();
             }
-            SolverOverlay.Show(host, FormatSearchFailure(ex));
+            SolverOverlay.Show(
+                host,
+                FormatSearchFailure(ex, search.MaxDegreeOfParallelism > 1));
             Entry.Logger.Error($"[CombatSolver/Test] SEARCH_FAILURE generation={generation} exception={ex}");
             return;
         }
@@ -1687,20 +1697,24 @@ internal static class SolverController
             $"difference={comparison.Difference} {comparison.StateDifference}");
     }
 
-    private static string FormatSearchFailure(Exception exception)
+    private static string FormatSearchFailure(
+        Exception exception,
+        bool parallelSearchWasEnabled)
         => $"[color={SolverUiTokens.Palette.DangerHex}][b]计算失败[/b]\n" +
            $"{EscapeRichText(exception.Message)}[/color]\n" +
-           SolverUiTokens.BugReportUploadInstructionRichText;
+           SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled);
 
     private static string FormatDeploymentFailure(Exception exception)
         => $"[color={SolverUiTokens.Palette.DangerHex}][b]自动执行中止[/b]\n" +
            $"{EscapeRichText(exception.Message)}[/color]\n" +
            SolverUiTokens.BugReportUploadInstructionRichText;
 
-    private static string FormatTurnSetupFailure(Exception exception)
+    private static string FormatTurnSetupFailure(
+        Exception exception,
+        bool parallelSearchWasEnabled)
         => $"[color={SolverUiTokens.Palette.DangerHex}][b]回合准备选牌失败[/b]\n" +
            $"{EscapeRichText(exception.GetBaseException().Message)}[/color]\n" +
-           SolverUiTokens.BugReportUploadInstructionRichText;
+           SolverUiTokens.SearchFailureInstructionRichText(parallelSearchWasEnabled);
 
     private static void CancelDeployment()
     {

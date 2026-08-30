@@ -23,6 +23,19 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
         if (!SolverOverlay.ExerciseUploadCompletionTransitionForTesting())
             throw new InvalidOperationException("上传任务结束前按钮状态提前切回空闲，可能重新打开确认弹窗。");
+        string parallelFailure = SolverController.FormatSearchFailureForTesting(
+            new InvalidOperationException("parallel failure"),
+            parallelSearchWasEnabled: true);
+        string serialFailure = SolverController.FormatSearchFailureForTesting(
+            new InvalidOperationException("serial failure"),
+            parallelSearchWasEnabled: false);
+        if (!parallelFailure.Contains("上传问题包", StringComparison.Ordinal)
+            || !parallelFailure.Contains("关闭（单线程）", StringComparison.Ordinal)
+            || !serialFailure.Contains("上传问题包", StringComparison.Ordinal)
+            || serialFailure.Contains("关闭（单线程）", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("搜索失败提示没有按本次请求的并行状态提供恢复建议。");
+        }
 
         SolverController.StopSearchByUser(host);
         if (SolverController.IsSearching

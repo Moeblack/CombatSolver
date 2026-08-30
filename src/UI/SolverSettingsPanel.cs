@@ -129,13 +129,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         AddBasicRow(
             basicGrid,
             "搜索并行度",
-            CreateIntInput(
-                SolverWeights.DefaultSearchMaxDegreeOfParallelism,
-                data => data.SearchMaxDegreeOfParallelism,
-                (data, value) => data with { SearchMaxDegreeOfParallelism = value },
-                1,
-                SolverWeights.MaximumSearchMaxDegreeOfParallelism),
-            "同时展开的候选数量；实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。留空使用默认值。");
+            CreateSearchParallelismInput(),
+            "关闭时使用纯单线程搜索；2–8 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。默认值为 2；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
         AddBasicRow(basicGrid, "自动出牌速度", CreateDeploymentFastModeInput());
         AddBasicRow(basicGrid, "牌间额外停顿（秒）", CreateDoubleInput(
             0d,
@@ -430,6 +425,57 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             SolverSettings.Update(SolverSettings.Current with { PotionPolicy = policy });
             _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
             _status.Text = "已保存，下次搜索生效";
+        };
+        return input;
+    }
+
+    private OptionButton CreateSearchParallelismInput()
+    {
+        OptionButton input = new()
+        {
+            FocusMode = FocusModeEnum.None,
+            CustomMinimumSize = new Vector2(126, 32),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+        };
+        input.AddItem("关闭（单线程）", 1);
+        for (int degree = 2; degree <= SolverWeights.MaximumSearchMaxDegreeOfParallelism; degree++)
+            input.AddItem(degree.ToString(CultureInfo.InvariantCulture), degree);
+        input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
+        input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
+        input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.Background,
+            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Radius.Small,
+            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Xs));
+        input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.Accent,
+            SolverUiTokens.Radius.Small,
+            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Xs));
+        SolverUiTokens.ApplyTextOutline(input);
+        input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        _reloadInputs.Add(data =>
+        {
+            int degree = data.SearchMaxDegreeOfParallelism
+                ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism;
+            input.Selected = input.GetItemIndex(degree);
+        });
+        input.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            int degree = input.GetItemId((int)index);
+            SolverSettings.Update(SolverSettings.Current with
+            {
+                SearchMaxDegreeOfParallelism = degree,
+            });
+            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+            _status.Text = degree == 1
+                ? "并行搜索已关闭，下次搜索使用单线程"
+                : $"搜索并行度已设为 {degree}，下次搜索生效";
         };
         return input;
     }
