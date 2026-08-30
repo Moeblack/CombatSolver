@@ -1,4 +1,12 @@
 {
+  "NEXT-SEARCH-COMPLETION-NOTIFICATION": {
+    "status": "PassedWithVisibleWindowsLimitation",
+    "level": "HeadlessRuntimeSettingsLifecycleAndNativePlatformGuard",
+    "procedure": "在最小活动战斗中验证通知设置默认值和前台决策，启动后由玩家停止搜索，并检查通知请求计数与 headless 原生调用计数。",
+    "expected": "默认开启且仅后台通知；关闭时不通知，始终模式忽略前台状态；成功、失败、停止和过期共用受平台保护的通知入口；headless 与非 Windows 不调用 Win32。",
+    "observed": "runId 99e510b870fc4ad6ab0611ce36f8f3b1 Passed；设置 UI、四组决策和用户停止搜索通知均通过，headless 原生通知计数保持不变。Windows 可见通知外观和实际提示音未由本场景验证。",
+    "evidence": "src/Runtime/SearchCompletionNotifier.cs；src/Runtime/SolverController.cs；src/Runtime/PlayerTurnSetupPatches.cs；src/UI/SolverSettingsPanel.cs；上述 runId；验证日期 2026-08-30。"
+  },
   "V0216-BUG-REPORT-BACKGROUND-FIFO-AND-VERSION": {
     "status": "Passed",
     "level": "HeadlessRuntimeBackgroundForensicsQueueAndOnlineDescriptionVersion",

@@ -655,6 +655,20 @@ if (Select-String -LiteralPath $bugReportUploaderPath -SimpleMatch "using Godot"
     $violations.Add("${bugReportUploaderPath}: uploader must not own Godot UI state")
 }
 
+$searchCompletionNotifierPath = Join-Path $repositoryRoot "src\Runtime\SearchCompletionNotifier.cs"
+foreach ($check in @(
+    @{ Path = $searchCompletionNotifierPath; Text = "if (!OperatingSystem.IsWindows())" },
+    @{ Path = $searchCompletionNotifierPath; Text = "DisplayServer.GetName()" },
+    @{ Path = $searchCompletionNotifierPath; Text = "GetWindowThreadProcessId(foreground, out uint processId)" },
+    @{ Path = $searchCompletionNotifierPath; Text = "ShellNotifyIcon(NotifyIconDelete, ref data)" },
+    @{ Path = $controllerPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)" },
+    @{ Path = $turnSetupPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed)" },
+    @{ Path = $solverSettingsPanelPath; Text = "CreateSearchCompletionNotificationModeInput()" })) {
+    if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
+        $violations.Add("$($check.Path): missing search completion notification boundary '$($check.Text)'")
+    }
+}
+
 $mirrorRegistryPath = Join-Path $repositoryRoot "src\Engine\Common\Mirrors\MethodMirrorRegistry.cs"
 $mirrorDescriptorPath = Join-Path $repositoryRoot "src\Engine\Common\Mirrors\MethodMirrorRegistryDescriptor.cs"
 $coverageCatalogPath = Join-Path $repositoryRoot "tools\CoverageCatalog\Program.cs"

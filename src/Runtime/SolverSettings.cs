@@ -13,6 +13,12 @@ internal enum SolverDeploymentFastMode
     Instant,
 }
 
+internal enum SolverSearchCompletionNotificationMode
+{
+    OnlyWhenGameInBackground,
+    Always,
+}
+
 internal enum SolverPerformancePreset
 {
     Low,
@@ -41,6 +47,9 @@ internal sealed record SolverSettingsData
     public bool StopFullAutoOnDeathTurn { get; init; } = true;
     public bool StopFullAutoOnWorseRecalculation { get; init; } = true;
     public bool EnableDetailedDiagnosticLogs { get; init; }
+    public bool SearchCompletionNotificationsEnabled { get; init; } = true;
+    public SolverSearchCompletionNotificationMode SearchCompletionNotificationMode { get; init; }
+        = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
     public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
     public SolverPerformancePreset? PerformancePreset { get; init; }
     public int? SearchMaxDegreeOfParallelism { get; init; }
@@ -180,6 +189,8 @@ internal static class SolverSettings
             $"stop_on_death_turn={loaded.StopFullAutoOnDeathTurn} " +
             $"stop_on_worse_recalculation={loaded.StopFullAutoOnWorseRecalculation} " +
             $"detailed_diagnostic_logs={loaded.EnableDetailedDiagnosticLogs} " +
+            $"search_notifications_enabled={loaded.SearchCompletionNotificationsEnabled} " +
+            $"search_notification_mode={loaded.SearchCompletionNotificationMode} " +
             $"potion_policy={loaded.PotionPolicy} " +
             $"performance_preset={ResolvePerformancePreset(loaded)} " +
             $"max_dop={Capture().SearchMaxDegreeOfParallelism} " +
@@ -365,6 +376,11 @@ internal static class SolverSettings
             nameof(data.DeepMaxHandChoiceBranchesPerAction));
         if (!Enum.IsDefined(data.DeploymentFastMode))
             throw new InvalidDataException($"Unknown deployment fast mode {data.DeploymentFastMode}.");
+        if (!Enum.IsDefined(data.SearchCompletionNotificationMode))
+        {
+            throw new InvalidDataException(
+                $"Unknown search completion notification mode {data.SearchCompletionNotificationMode}.");
+        }
         if (!Enum.IsDefined(data.PotionPolicy))
             throw new InvalidDataException($"Unknown potion policy {data.PotionPolicy}.");
         ValidateRange(data.DeploymentInterActionDelaySeconds, 0d, 3d,

@@ -267,6 +267,7 @@ internal static class SolverController
         SolverOverlay.ShowResult(
             host,
             SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0));
+        SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_RESULT_PREVIEW turn={result.StartTurnNumber} " +
             "native_choice_pending=true");
@@ -673,6 +674,7 @@ internal static class SolverController
             SolverOverlay.Show(
                 host,
                 FormatSearchSetupFailure(ex));
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
             Entry.Logger.Error(
                 $"[CombatSolver/Test] SEARCH_SETUP_FAILURE stage={setupStage} " +
                 $"reason={reason} exception={ex}");
@@ -829,8 +831,11 @@ internal static class SolverController
         Entry.Logger.Info($"[CombatSolver/Test] SOLVER_DISABLED disabled={disabled}");
         if (disabled)
         {
+            bool controllerSearchCanceled = _search != null;
             PlayerTurnSetupCoordinator.CancelForSolverDisabled();
             CancelSearch();
+            if (controllerSearchCanceled)
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
             CancelDeployment();
             _combat.FullAutoEnabled = false;
             _combat.State = null;
@@ -863,11 +868,14 @@ internal static class SolverController
         if (!IsSearching)
             return;
 
+        bool controllerSearchCanceled = _search != null;
         int? generation = _search?.Generation;
         _combat.FullAutoEnabled = false;
         _combat.AutomaticSearchPaused = true;
         CancelSearch();
         bool stoppedTurnSetupSearch = PlayerTurnSetupCoordinator.StopSearchByUser();
+        if (controllerSearchCanceled || stoppedTurnSetupSearch)
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
         _combat.PendingCompleteProjectionBaseline = null;
         _combat.PendingManualProjectionBaseline = null;
         SolverOverlay.ShowSearchStopped(host);
@@ -954,6 +962,7 @@ internal static class SolverController
     public static void Reset(string reason = "unspecified")
     {
         AssertMainThread();
+        bool searchCanceled = _search != null || PlayerTurnSetupCoordinator.IsSearching;
         PlayerTurnSetupCoordinator.Reset(reason);
         CombatBugReportExporter.CompleteCombat(
             reason,
@@ -968,6 +977,8 @@ internal static class SolverController
             Entry.Logger.Info($"[CombatSolver/Test] REPLAN_SUMMARY reason={reason} {DescribeReplanCounts()}");
         _lastBugReportClassification = CaptureBugReportClassification();
         CancelSearch();
+        if (searchCanceled)
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
         CancelDeployment();
         _combat = new SolverCombatSession();
         LastFullAutoStoppedForWorseRecalculationForTesting = false;
@@ -1115,6 +1126,7 @@ internal static class SolverController
         {
             _combat.PendingCompleteProjectionBaseline = null;
             _combat.PendingManualProjectionBaseline = null;
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_CANCELED generation={generation}");
             return;
         }
@@ -1133,6 +1145,7 @@ internal static class SolverController
             SolverOverlay.Show(
                 host,
                 FormatSearchFailure(ex, search.MaxDegreeOfParallelism > 1));
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
             Entry.Logger.Error($"[CombatSolver/Test] SEARCH_FAILURE generation={generation} exception={ex}");
             return;
         }
@@ -1155,6 +1168,7 @@ internal static class SolverController
                 host,
                 "[b]战斗路线求解器[/b]\n战斗状态在计算期间发生变化，已丢弃过期结果。\n" +
                 SolverUiTokens.BugReportUploadInstructionRichText);
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale);
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_STALE generation={generation}");
             return;
         }
@@ -1209,6 +1223,7 @@ internal static class SolverController
         SolverOverlay.ShowResult(
             host,
             SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0));
+        SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
         if (search.DeployWhenReady)
         {

@@ -21,6 +21,52 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("求解器消息区域没有启用自动换行。");
         if (!SolverOverlay.UploadProgressConfiguredForTesting)
             throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
+        if (!SolverOverlay.SearchCompletionNotificationSettingsConfiguredForTesting)
+            throw new InvalidOperationException("搜索结束通知的开关或通知时机没有按持久化设置加载。");
+        SolverSettingsData notificationDefaults = new();
+        if (!notificationDefaults.SearchCompletionNotificationsEnabled
+            || notificationDefaults.SearchCompletionNotificationMode
+            != SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground
+            || SearchCompletionNotifier.ShouldNotifyForTesting(
+                enabled: false,
+                mode: SolverSearchCompletionNotificationMode.Always,
+                gameForeground: false)
+            || SearchCompletionNotifier.ShouldNotifyForTesting(
+                enabled: true,
+                mode: SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
+                gameForeground: true)
+            || !SearchCompletionNotifier.ShouldNotifyForTesting(
+                enabled: true,
+                mode: SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
+                gameForeground: false)
+            || !SearchCompletionNotifier.ShouldNotifyForTesting(
+                enabled: true,
+                mode: SolverSearchCompletionNotificationMode.Always,
+                gameForeground: true))
+        {
+            throw new InvalidOperationException("搜索结束通知的默认值或前台判断不正确。");
+        }
+        SolverSettingsData originalNotificationSettings = SolverSettings.Current;
+        try
+        {
+            SolverSettings.ApplyForTesting(originalNotificationSettings with
+            {
+                SearchCompletionNotificationsEnabled = true,
+                SearchCompletionNotificationMode = SolverSearchCompletionNotificationMode.Always,
+            });
+            int requestsBefore = SearchCompletionNotifier.RequestCountForTesting;
+            int nativeBefore = SearchCompletionNotifier.NativeNotificationCountForTesting;
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
+            if (SearchCompletionNotifier.RequestCountForTesting != requestsBefore + 1
+                || SearchCompletionNotifier.NativeNotificationCountForTesting != nativeBefore)
+            {
+                throw new InvalidOperationException("Headless 搜索结束通知没有停在原生平台调用之前。");
+            }
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(originalNotificationSettings);
+        }
         if (!SolverOverlay.ExerciseUploadCompletionTransitionForTesting())
             throw new InvalidOperationException("上传任务结束前按钮状态提前切回空闲，可能重新打开确认弹窗。");
         if (!SolverOverlay.ExercisePerformancePresetPersistenceForTesting())
@@ -47,6 +93,8 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("搜索失败提示没有按本次请求的并行状态提供恢复建议。");
         }
 
+        int stopNotificationRequestsBefore = SearchCompletionNotifier.RequestCountForTesting;
+        int stopNativeNotificationsBefore = SearchCompletionNotifier.NativeNotificationCountForTesting;
         SolverController.StopSearchByUser(host);
         if (SolverController.IsSearching
             || SolverController.IsDeploying
@@ -55,6 +103,12 @@ internal sealed partial class UnattendedTestRunner
             || SolverController.CurrentResultForBugReport != null)
         {
             throw new InvalidOperationException("用户停止搜索后仍残留活动会话、路线或自动计算状态。");
+        }
+        if (SearchCompletionNotifier.RequestCountForTesting != stopNotificationRequestsBefore + 1
+            || SearchCompletionNotifier.NativeNotificationCountForTesting
+            != stopNativeNotificationsBefore)
+        {
+            throw new InvalidOperationException("用户停止搜索后没有产生一次受 headless 保护的结束通知。");
         }
 
         SolverController.RequestSearch(host, combat, SearchReason.AutoTurnStart);

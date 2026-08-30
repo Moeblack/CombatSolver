@@ -12,6 +12,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private readonly CheckButton _stopOnDeathTurn;
     private readonly CheckButton _stopOnWorseRecalculation;
     private readonly CheckButton _detailedDiagnosticLogs;
+    private readonly CheckButton _searchCompletionNotificationsEnabled;
+    private readonly OptionButton _searchCompletionNotificationMode;
     private readonly OptionButton _potionPolicy;
     private readonly OptionButton _performancePreset;
     private readonly Button _exportBugReport;
@@ -44,6 +46,12 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                "等待服务器确认",
                StringComparison.Ordinal)
            && _uploadBugReport.Text == "上传问题包";
+    internal bool SearchCompletionNotificationSettingsConfiguredForTesting
+        => _searchCompletionNotificationsEnabled.ButtonPressed
+           == SolverSettings.Current.SearchCompletionNotificationsEnabled
+           && _searchCompletionNotificationMode.GetItemId(
+               _searchCompletionNotificationMode.Selected)
+           == (int)SolverSettings.Current.SearchCompletionNotificationMode;
 
     public SolverSettingsPanel()
     {
@@ -122,6 +130,19 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         _detailedDiagnosticLogs = CreateToggle();
         _detailedDiagnosticLogs.Toggled += OnDetailedDiagnosticLogsToggled;
         AddBasicRow(basicGrid, "详细诊断日志", _detailedDiagnosticLogs);
+        _searchCompletionNotificationsEnabled = CreateToggle();
+        _searchCompletionNotificationsEnabled.Toggled += OnSearchCompletionNotificationsToggled;
+        AddBasicRow(
+            basicGrid,
+            "搜索结束通知",
+            _searchCompletionNotificationsEnabled,
+            "搜索成功、失败、停止或结果过期时发送系统通知。Windows 使用原生通知及系统提示音；其他平台不会调用 Windows 通知接口。");
+        _searchCompletionNotificationMode = CreateSearchCompletionNotificationModeInput();
+        AddBasicRow(
+            basicGrid,
+            "通知时机",
+            _searchCompletionNotificationMode,
+            "“仅游戏不在前台”适合切到其他窗口等待计算；“始终通知”在游戏位于前台时也会显示并播放系统通知音。默认仅在游戏不在前台时通知。");
         _potionPolicy = CreatePotionPolicyInput();
         AddBasicRow(basicGrid, "本场药水策略", _potionPolicy);
         _performancePreset = CreatePerformancePresetInput();
@@ -280,6 +301,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         _stopOnDeathTurn.ButtonPressed = data.StopFullAutoOnDeathTurn;
         _stopOnWorseRecalculation.ButtonPressed = data.StopFullAutoOnWorseRecalculation;
         _detailedDiagnosticLogs.ButtonPressed = data.EnableDetailedDiagnosticLogs;
+        _searchCompletionNotificationsEnabled.ButtonPressed = data.SearchCompletionNotificationsEnabled;
+        _searchCompletionNotificationMode.Selected = (int)data.SearchCompletionNotificationMode;
         _potionPolicy.Selected = (int)data.PotionPolicy;
         _performancePreset.Selected = (int)SolverSettings.ResolvePerformancePreset(data);
         foreach (Action<SolverSettingsData> reload in _reloadInputs)
@@ -405,6 +428,51 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             SolverSettings.Update(SolverSettings.Current with { DeploymentFastMode = mode });
             _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
             _status.Text = "已保存，下次执行生效";
+        };
+        return input;
+    }
+
+    private OptionButton CreateSearchCompletionNotificationModeInput()
+    {
+        OptionButton input = new()
+        {
+            FocusMode = FocusModeEnum.None,
+            CustomMinimumSize = new Vector2(126, 32),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+        };
+        input.AddItem(
+            "仅游戏不在前台（默认）",
+            (int)SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground);
+        input.AddItem("始终通知", (int)SolverSearchCompletionNotificationMode.Always);
+        input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
+        input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
+        input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.Background,
+            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Radius.Small,
+            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Xs));
+        input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.Accent,
+            SolverUiTokens.Radius.Small,
+            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Xs));
+        SolverUiTokens.ApplyTextOutline(input);
+        input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        input.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            SolverSearchCompletionNotificationMode mode =
+                (SolverSearchCompletionNotificationMode)input.GetItemId((int)index);
+            SolverSettings.Update(SolverSettings.Current with
+            {
+                SearchCompletionNotificationMode = mode,
+            });
+            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+            _status.Text = "已保存并立即生效";
         };
         return input;
     }
@@ -814,6 +882,18 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         SolverSettings.Update(SolverSettings.Current with { EnableDetailedDiagnosticLogs = enabled });
         _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
         _status.Text = "已保存，下次搜索生效";
+    }
+
+    private void OnSearchCompletionNotificationsToggled(bool enabled)
+    {
+        if (_loading)
+            return;
+        SolverSettings.Update(SolverSettings.Current with
+        {
+            SearchCompletionNotificationsEnabled = enabled,
+        });
+        _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+        _status.Text = "已保存并立即生效";
     }
 
     private void OnStopOnWorseRecalculationToggled(bool enabled)

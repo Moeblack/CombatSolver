@@ -513,6 +513,19 @@ $solver_settings_panel_path	等待服务器确认
 EOF
 forbid_fixed "$bug_report_uploader_path" 'using Godot' 'uploader must not own Godot UI state:'
 
+search_completion_notifier_path="$repository_root/src/Runtime/SearchCompletionNotifier.cs"
+while IFS=$'\t' read -r path text; do
+    require_fixed "$path" "$text" 'missing search completion notification boundary'
+done <<EOF
+$search_completion_notifier_path	if (!OperatingSystem.IsWindows())
+$search_completion_notifier_path	DisplayServer.GetName()
+$search_completion_notifier_path	GetWindowThreadProcessId(foreground, out uint processId)
+$search_completion_notifier_path	ShellNotifyIcon(NotifyIconDelete, ref data)
+$repository_root/src/Runtime/SolverController.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)
+$repository_root/src/Runtime/PlayerTurnSetupPatches.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed)
+$solver_settings_panel_path	CreateSearchCompletionNotificationModeInput()
+EOF
+
 mirror_registry_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistry.cs"
 mirror_descriptor_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistryDescriptor.cs"
 coverage_catalog_path="$repository_root/tools/CoverageCatalog/Program.cs"

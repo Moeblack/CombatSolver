@@ -295,16 +295,24 @@ internal static class PlayerTurnSetupCoordinator
         InitialSearchContext? initialSearch = null;
         if (replayChoices == null)
         {
-            SolverSettingsSnapshot settings = SolverSettings.Capture();
-            initialSearch = new InitialSearchContext(
-                SolverDisplayNames.Capture(combat),
-                settings,
-                BattleDamageTracker.Observe(combat),
-                SolverController.CaptureSearchPolicy(
+            try
+            {
+                SolverSettingsSnapshot settings = SolverSettings.Capture();
+                initialSearch = new InitialSearchContext(
+                    SolverDisplayNames.Capture(combat),
                     settings,
-                    includeTurnSetup: true,
-                    theftPolicy: SolverController.ResolveTheftPolicy(combat)),
-                CombatRootSnapshot.Capture(combat));
+                    BattleDamageTracker.Observe(combat),
+                    SolverController.CaptureSearchPolicy(
+                        settings,
+                        includeTurnSetup: true,
+                        theftPolicy: SolverController.ResolveTheftPolicy(combat)),
+                    CombatRootSnapshot.Capture(combat));
+            }
+            catch
+            {
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
+                throw;
+            }
         }
         NativeChoiceSession choices = NativeChoiceRuntime.Begin(
             combat,
@@ -508,10 +516,10 @@ internal static class PlayerTurnSetupCoordinator
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_SEARCH_START turn={turn} phase={phase} " +
             "after_native_choice_visible=true");
-        Task<SolverResult> solveTask;
+        SolverResult result;
         try
         {
-            solveTask = Task.Run(() =>
+            Task<SolverResult> solveTask = Task.Run(() =>
             {
                 Thread worker = Thread.CurrentThread;
                 ThreadPriority previousPriority = worker.Priority;
@@ -546,29 +554,43 @@ internal static class PlayerTurnSetupCoordinator
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 active.Token.ThrowIfCancellationRequested();
             }
+            result = await solveTask;
         }
-        catch (OperationCanceledException) when (
-            SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
+        catch (OperationCanceledException)
         {
-            active.Choices.ReleaseVisibleSurface();
-            active.PlanReady.TrySetResult();
-            return;
+            if (active.SearchState != 2 && ReferenceEquals(_active, active))
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
+            if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
+            {
+                active.Choices.ReleaseVisibleSurface();
+                active.PlanReady.TrySetResult();
+                return;
+            }
+            active.PlanReady.TrySetCanceled(active.Token);
+            throw;
         }
         catch (Exception ex)
         {
+            if (ReferenceEquals(_active, active))
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
             active.PlanReady.TrySetException(ex);
             throw;
         }
-        SolverResult result = await solveTask;
 
         if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
         {
+            if (active.SearchState != 2 && ReferenceEquals(_active, active))
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
             active.Choices.ReleaseVisibleSurface();
             active.PlanReady.TrySetResult();
             return;
         }
         if (result.TurnSetupChoices.Count == 0)
+        {
+            if (ReferenceEquals(_active, active))
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
             throw new InvalidOperationException("原生页面已经请求选牌，但回合准备搜索没有返回计划选择。");
+        }
         active.Result = result;
         active.Choices.RecordPlanReady();
         SolverController.ShowTurnSetupResultPreview(host, result);
