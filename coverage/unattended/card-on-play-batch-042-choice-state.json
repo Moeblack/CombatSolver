@@ -38,7 +38,7 @@
       "Discard:SCAVENGE": 1
     },
     "expectedPlayerCardStates": {
-      "Hand:STRIKE_IRONCLAD:-:0:-:R1:XFalse:SFalse:TFalse": 1
+      "Hand:STRIKE_IRONCLAD:-:0:-:R1:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     },
     "expectedPlayerCardCosts": {
       "Hand:STRIKE_IRONCLAD:2": 1

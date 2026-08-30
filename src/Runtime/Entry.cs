@@ -84,7 +84,10 @@ public static class Entry
             return;
         int turn = LocalContext.GetMe(state)?.PlayerCombatState?.TurnNumber ?? -1;
         Logger.Info($"[CombatSolver/Test] AUTO_SEARCH_DEFERRED turn={turn} frames=3");
-        TaskHelper.RunSafely(RequestAutoSearchAfterVisualSetup(state, turn));
+        Task deferredSearch = RequestAutoSearchAfterVisualSetup(state, turn);
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            deferredSearch = UnattendedAsyncActivityTracker.Track(deferredSearch);
+        TaskHelper.RunSafely(deferredSearch);
     }
 
     private static async Task RequestAutoSearchAfterVisualSetup(CombatState state, int turn)

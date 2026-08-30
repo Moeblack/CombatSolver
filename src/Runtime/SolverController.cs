@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
@@ -210,7 +211,12 @@ internal static class SolverController
             $"[CombatSolver/Test] TURN_SETUP_RESULT_ACCEPTED turn={player.PlayerCombatState.TurnNumber}");
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
         if (_combat.FullAutoEnabled)
-            TaskHelper.RunSafely(StartFullAutoAfterTurnSetupAsync(host, state, result));
+        {
+            Task fullAutoTask = StartFullAutoAfterTurnSetupAsync(host, state, result);
+            if (UnattendedAsyncActivityTracker.IsRequestActive)
+                fullAutoTask = UnattendedAsyncActivityTracker.Track(fullAutoTask);
+            TaskHelper.RunSafely(fullAutoTask);
+        }
         return true;
     }
 
@@ -551,7 +557,7 @@ internal static class SolverController
                 settings.DeepProfile));
 
             setupStage = "worker_schedule";
-            Task.Run(() =>
+            Task<SolverResult> solveTask = Task.Run(() =>
             {
                 Entry.Logger.Info($"[CombatSolver/Test] SEARCH_WORKER_START generation={generation} thread={System.Environment.CurrentManagedThreadId} main_thread={NGame.IsMainThread()}");
                 Thread worker = Thread.CurrentThread;
@@ -575,9 +581,40 @@ internal static class SolverController
                 {
                     worker.Priority = previousPriority;
                 }
-            }, token).ContinueWith(task =>
+            }, token);
+            if (!UnattendedAsyncActivityTracker.IsRequestActive)
             {
-                SolverDispatcher.Post(() => CompleteSearch(host, search, task));
+                // Preserve the production continuation path exactly. The extra lifecycle
+                // ownership is needed only while a reusable unattended request is active.
+                solveTask.ContinueWith(task =>
+                {
+                    SolverDispatcher.Post(() => CompleteSearch(host, search, task));
+                }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                return;
+            }
+
+            IDisposable? unattendedActivity = UnattendedAsyncActivityTracker.BeginActivity();
+            solveTask.ContinueWith(task =>
+            {
+                try
+                {
+                    SolverDispatcher.Post(() =>
+                    {
+                        try
+                        {
+                            CompleteSearch(host, search, task);
+                        }
+                        finally
+                        {
+                            unattendedActivity?.Dispose();
+                        }
+                    });
+                }
+                catch
+                {
+                    unattendedActivity?.Dispose();
+                    throw;
+                }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
         catch (Exception ex)
@@ -882,7 +919,11 @@ internal static class SolverController
         LastSearchFailureForTesting = null;
         BattleDamageTracker.Reset();
         SolverOverlay.Hide();
-        TaskHelper.RunSafely(SearchGcPolicy.ReclaimIfPendingAsync(reason));
+        // The unattended protocol performs one reclaim only after the game and every tracked
+        // callback are quiescent. Starting a fire-and-forget reclaim here would make the 0.18
+        // serialized reclaim chain request a second collection when the protocol joins it.
+        if (!UnattendedAsyncActivityTracker.IsRequestActive)
+            TaskHelper.RunSafely(SearchGcPolicy.ReclaimIfPendingAsync(reason));
         if (hadState)
             Entry.Logger.Info($"[CombatSolver/Test] RESET reason={reason}");
     }
@@ -1176,13 +1217,16 @@ internal static class SolverController
             action.Turn == result.StartTurnNumber && action.IsExecutable);
         SolverSettingsSnapshot deploymentSettings = SolverSettings.Capture();
         SolverOverlay.ShowDeploying(host, result.StartTurnNumber, actionCount);
-        TaskHelper.RunSafely(DeployCurrentTurn(
+        Task deploymentTask = DeployCurrentTurn(
             host,
             state,
             result,
             deploymentSettings,
             deployment,
-            deployment.Cancellation.Token));
+            deployment.Cancellation.Token);
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            deploymentTask = UnattendedAsyncActivityTracker.Track(deploymentTask);
+        TaskHelper.RunSafely(deploymentTask);
     }
 
     private static async Task DeployCurrentTurn(
@@ -1194,6 +1238,10 @@ internal static class SolverController
         CancellationToken token)
     {
         AssertMainThread();
+        bool measureDeploymentTiming = UnattendedTestRunner.IsActive;
+        long deploymentStartedAt = measureDeploymentTiming
+            ? Stopwatch.GetTimestamp()
+            : 0;
         int turn = result.StartTurnNumber;
         List<PlanAction> actions = result.BestNode.Actions
             .Where(action => action.Turn == turn && action.IsExecutable)
@@ -1240,6 +1288,9 @@ internal static class SolverController
                     player,
                     $"deployment:{turn}:{actionIndex}:{action.CardId ?? action.PotionId}");
                 choiceSession.SetPlanAndStartDriving(host, actionChoices, token);
+                long actionStartedAt = measureDeploymentTiming
+                    ? Stopwatch.GetTimestamp()
+                    : 0;
                 Task actionCompletion;
                 if (action.Kind == PlanActionKind.UsePotion)
                 {
@@ -1306,6 +1357,13 @@ internal static class SolverController
                     Entry.Logger.Info($"[CombatSolver/Test] DEPLOY_ACTION turn={turn} card={action.CardId} target_index={action.TargetIndex} target_combat_id={action.TargetCombatId?.ToString() ?? "-"} choice={action.Choice?.Effect.ToString() ?? "-"}");
                 }
                 await choiceSession.AwaitProducerAndCompleteAsync(actionCompletion);
+                if (measureDeploymentTiming)
+                {
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] DEPLOY_ACTION_COMPLETE turn={turn} action_index={actionIndex} " +
+                        $"action={action.CardId ?? action.PotionId ?? action.Kind.ToString()} " +
+                        $"elapsed_ms={Stopwatch.GetElapsedTime(actionStartedAt).TotalMilliseconds:F1}");
+                }
                 if (deploymentSettings.EnableDetailedDiagnosticLogs)
                 {
                     PlayerCombatState liveState = player.PlayerCombatState!;
@@ -1410,16 +1468,30 @@ internal static class SolverController
                     RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, turn));
                 }
                 SolverOverlay.ShowDeploymentComplete(host, turn, actions.Count, endedTurn: true);
-                Entry.Logger.Info(
+                string deploymentEndMessage =
                     $"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} end_turn=true " +
                     $"forecast_turn_start_choices={plannedEndTurn.TurnStartChoices?.Count ?? 0} " +
-                    $"end_turn_choices={endTurnChoices.Length}");
+                    $"end_turn_choices={endTurnChoices.Length}";
+                if (measureDeploymentTiming)
+                {
+                    deploymentEndMessage +=
+                        $" elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}";
+                }
+                Entry.Logger.Info(deploymentEndMessage);
                 _combat.LastSolverDeployedTurn = turn;
             }
             else
             {
                 SolverOverlay.ShowDeploymentComplete(host, turn, actions.Count, endedTurn: false);
-                Entry.Logger.Info($"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} end_turn=false combat_or_turn_finished=true");
+                string deploymentEndMessage =
+                    $"[CombatSolver/Test] DEPLOY_END turn={turn} action_count={actions.Count} " +
+                    $"end_turn=false combat_or_turn_finished=true";
+                if (measureDeploymentTiming)
+                {
+                    deploymentEndMessage +=
+                        $" elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}";
+                }
+                Entry.Logger.Info(deploymentEndMessage);
                 _combat.LastSolverDeployedTurn = turn;
             }
         }
@@ -1439,6 +1511,12 @@ internal static class SolverController
                 SaveManager.Instance.PrefsSave.FastMode = originalFastMode;
                 Entry.Logger.Info(
                     $"[CombatSolver/Test] DEPLOY_SPEED_RESTORED turn={turn} restored={originalFastMode}");
+            }
+            if (measureDeploymentTiming)
+            {
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] DEPLOY_FINISH turn={turn} " +
+                    $"elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}");
             }
             CompleteDeployment(deployment);
             SolverOverlay.RefreshControls();

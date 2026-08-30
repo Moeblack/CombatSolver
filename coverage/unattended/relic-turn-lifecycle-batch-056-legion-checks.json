@@ -9,7 +9,8 @@
     "cardPlayChecksAfterMove": [
       { "cardId": "DEFEND_IRONCLAD", "target": "None" }
     ],
-    "expectedPlayerBlock": 10,
+    "expectedPlayerBlockAfterMoveActions": 10,
+    "expectedPlayerBlock": 0,
     "triggerPlayerTurnEndAfterMove": true,
     "triggerPlayerSetupAfterMove": true
   },
@@ -23,7 +24,8 @@
     "cardPlayChecksAfterMove": [
       { "cardId": "DEFEND_IRONCLAD", "target": "None" }
     ],
-    "expectedPlayerBlock": 5,
+    "expectedPlayerBlockAfterMoveActions": 5,
+    "expectedPlayerBlock": 0,
     "triggerPlayerTurnEndAfterMove": true,
     "triggerPlayerSetupAfterMove": true
   },

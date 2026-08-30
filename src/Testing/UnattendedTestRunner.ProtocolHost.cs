@@ -6,6 +6,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace CombatSolver;
@@ -84,47 +85,217 @@ internal sealed partial class UnattendedTestRunner
         {
             string runningPath = UnattendedTestFiles.GlobalPath(UnattendedTestFiles.RunningUri);
             string requestPath = UnattendedTestFiles.GlobalPath(UnattendedTestFiles.RequestUri);
-            while (true)
+            try
             {
-                if (!File.Exists(requestPath))
+                while (true)
                 {
-                    for (int frame = 0; frame < 10; frame++)
-                        await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                    if (!File.Exists(requestPath))
+                    {
+                        for (int frame = 0; frame < 10; frame++)
+                            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                        continue;
+                    }
+
+                    string json = File.ReadAllText(requestPath);
+                    UnattendedTestRequest request = JsonSerializer.Deserialize<UnattendedTestRequest>(
+                        json,
+                        UnattendedTestFiles.JsonOptions)
+                        ?? throw new InvalidOperationException("无人测试请求为空。");
+                    if (request.SchemaVersion != 1)
+                        throw new InvalidOperationException($"不支持的无人测试协议版本 {request.SchemaVersion}。");
+                    if (request.HoldAfterInitialSearch && request.ExitOnComplete)
+                    {
+                        throw new InvalidOperationException(
+                            "无人测试请求不能同时暂停初始搜索并在完成后退出。");
+                    }
+
+                    File.Move(requestPath, runningPath, true);
+                    Activate(request);
+                    int requestSequence = ++_acceptedRequestCount;
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Unattended] REQUEST_ACCEPTED run_id={request.RunId} " +
+                        $"scenario={request.ScenarioId} process_sequence={requestSequence} reused_process={requestSequence > 1}");
+                    RunCompletion completion;
+                    try
+                    {
+                        completion = await new UnattendedTestRunner(host, request, this).RunAsync();
+                    }
+                    finally
+                    {
+                        Reset();
+                    }
+                    if (completion == RunCompletion.Failed)
+                    {
+                        UnattendedAsyncActivityTracker.AbortRequest();
+                        Entry.Logger.Warn(
+                            "[CombatSolver/Unattended] PROCESS_NOT_REUSABLE reason=failed_request exit=true");
+                        host.GetTree().Quit(1);
+                        return;
+                    }
+                    if (completion == RunCompletion.InitialSearchHeld)
+                    {
+                        if (!request.HoldAfterInitialSearch || request.ExitOnComplete)
+                        {
+                            throw new InvalidOperationException(
+                                "执行器暂停了初始搜索，但请求没有声明合法的暂停生命周期。");
+                        }
+                        // The launcher intentionally keeps this live combat attached to a profiler
+                        // until its release marker is written, then terminates the owned process.
+                        await WaitUntilHeldAsync(host);
+                        WriteReady(request.RunId, held: true);
+                        return;
+                    }
+                    if (completion != RunCompletion.Passed)
+                        throw new InvalidOperationException($"未知的无人测试完成状态 {completion}。");
+                    if (request.HoldAfterInitialSearch)
+                    {
+                        throw new InvalidOperationException(
+                            "请求暂停初始搜索，但执行器已在未暂停搜索的情况下完成。该进程不可复用。");
+                    }
+                    if (request.ExitOnComplete)
+                    {
+                        UnattendedAsyncActivityTracker.AbortRequest();
+                        return;
+                    }
+                    await WaitUntilReusableAsync(host);
+                    WriteReady(request.RunId, held: false);
+                }
+            }
+            catch (Exception ex)
+            {
+                Reset();
+                UnattendedAsyncActivityTracker.AbortRequest();
+                Entry.Logger.Error(
+                    $"[CombatSolver/Unattended] PROCESS_NOT_REUSABLE exit=true exception={ex}");
+                host.GetTree().Quit(1);
+            }
+        }
+
+        private static async Task WaitUntilReusableAsync(NGame host)
+        {
+            const int quiescenceTimeoutMilliseconds = 90_000;
+            long deadline = System.Environment.TickCount64 + quiescenceTimeoutMilliseconds;
+            int consecutiveIdleFrames = 0;
+            bool reclaimedAfterQuiescence = false;
+            while (System.Environment.TickCount64 < deadline)
+            {
+                bool gameIdle = !RunManager.Instance.IsInProgress
+                    && !RunManager.Instance.IsCleaningUp
+                    && !RunManager.Instance.ActionExecutor.IsRunning
+                    && RunManager.Instance.ActionQueueSet.IsEmpty
+                    && !CombatManager.Instance.IsStarting
+                    && !CombatManager.Instance.IsInProgress
+                    && CombatManager.Instance.DebugOnlyGetState() == null
+                    && CardSelectCmd.Selector == null
+                    && !SolverController.IsSearching
+                    && !SolverController.IsDeploying
+                    && host.RootSceneContainer.CurrentScene is NMainMenu;
+                bool idle = UnattendedAsyncActivityTracker.IsIdle && gameIdle;
+                if (!idle)
+                {
+                    consecutiveIdleFrames = 0;
+                    reclaimedAfterQuiescence = false;
+                    await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                     continue;
                 }
 
-                string json = File.ReadAllText(requestPath);
-                UnattendedTestRequest request = JsonSerializer.Deserialize<UnattendedTestRequest>(
-                    json,
-                    UnattendedTestFiles.JsonOptions)
-                    ?? throw new InvalidOperationException("无人测试请求为空。");
-                if (request.SchemaVersion != 1)
-                    throw new InvalidOperationException($"不支持的无人测试协议版本 {request.SchemaVersion}。");
+                consecutiveIdleFrames++;
+                if (consecutiveIdleFrames < 2)
+                {
+                    await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                    continue;
+                }
 
-                File.Move(requestPath, runningPath, true);
-                Activate(request);
-                int requestSequence = ++_acceptedRequestCount;
-                Entry.Logger.Info(
-                    $"[CombatSolver/Unattended] REQUEST_ACCEPTED run_id={request.RunId} " +
-                    $"scenario={request.ScenarioId} process_sequence={requestSequence} reused_process={requestSequence > 1}");
-                try
+                if (!reclaimedAfterQuiescence)
                 {
-                    await new UnattendedTestRunner(host, request, this).RunAsync();
+                    int remainingMilliseconds = checked((int)Math.Max(
+                        1,
+                        deadline - System.Environment.TickCount64));
+                    consecutiveIdleFrames = 0;
+                    await SearchGcPolicy.ReclaimIfPendingAsync("unattended_reuse")
+                        .WaitAsync(TimeSpan.FromMilliseconds(remainingMilliseconds));
+                    reclaimedAfterQuiescence = true;
+                    continue;
                 }
-                finally
+
+                if (UnattendedAsyncActivityTracker.TryEndRequest())
                 {
-                    Reset();
+                    Entry.Logger.Info(
+                        "[CombatSolver/Unattended] PROCESS_QUIESCENT reuse_process=true");
+                    return;
                 }
-                if (!request.ExitOnComplete)
-                {
-                    for (int frame = 0; frame < 180; frame++)
-                        await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
-                }
+                consecutiveIdleFrames = 0;
+                reclaimedAfterQuiescence = false;
+                await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
             }
+
+            throw new TimeoutException(
+                $"无人测试进程在 {quiescenceTimeoutMilliseconds} ms 内没有完成场景清理。");
+        }
+
+        private static async Task WaitUntilHeldAsync(NGame host)
+        {
+            const int quiescenceTimeoutMilliseconds = 90_000;
+            long deadline = System.Environment.TickCount64 + quiescenceTimeoutMilliseconds;
+            int consecutiveIdleFrames = 0;
+            while (System.Environment.TickCount64 < deadline)
+            {
+                bool idle = UnattendedAsyncActivityTracker.IsIdle
+                    && RunManager.Instance.IsInProgress
+                    && !RunManager.Instance.IsCleaningUp
+                    && !RunManager.Instance.ActionExecutor.IsRunning
+                    && RunManager.Instance.ActionQueueSet.IsEmpty
+                    && !CombatManager.Instance.IsStarting
+                    && CombatManager.Instance.IsInProgress
+                    && !CombatManager.Instance.IsOverOrEnding
+                    && CombatManager.Instance.DebugOnlyGetState() != null
+                    && CardSelectCmd.Selector == null
+                    && !SolverController.IsSearching
+                    && !SolverController.IsDeploying;
+                if (!idle)
+                {
+                    consecutiveIdleFrames = 0;
+                    await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                    continue;
+                }
+
+                consecutiveIdleFrames++;
+                if (consecutiveIdleFrames < 2)
+                {
+                    await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                    continue;
+                }
+                if (UnattendedAsyncActivityTracker.TryEndRequest())
+                {
+                    Entry.Logger.Info(
+                        "[CombatSolver/Unattended] PROCESS_QUIESCENT held_search=true");
+                    return;
+                }
+                consecutiveIdleFrames = 0;
+            }
+
+            throw new TimeoutException(
+                $"无人测试暂停进程在 {quiescenceTimeoutMilliseconds} ms 内没有完成异步活动。");
+        }
+
+        private static void WriteReady(string runId, bool held)
+        {
+            string readyPath = UnattendedTestFiles.GlobalPath(UnattendedTestFiles.ReadyUri);
+            string tempPath = readyPath + ".tmp";
+            File.WriteAllText(
+                tempPath,
+                JsonSerializer.Serialize(
+                    new { SchemaVersion = 1, RunId = runId, Held = held },
+                    UnattendedTestFiles.JsonOptions));
+            File.Move(tempPath, readyPath, true);
         }
 
         private void Activate(UnattendedTestRequest request)
         {
+            // Exit requests never expose this process for reuse, so tracking their background
+            // continuations would add work without strengthening the process boundary.
+            if (!request.ExitOnComplete)
+                UnattendedAsyncActivityTracker.BeginRequest();
             IsActive = true;
             _injectPlayerHpLossTurn = request.InjectPlayerHpLossBeforeAutoSearchTurn ?? 0;
             _injectPlayerHpLossAmount = request.InjectPlayerHpLossAmount;

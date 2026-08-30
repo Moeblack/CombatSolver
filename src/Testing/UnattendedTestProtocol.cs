@@ -113,6 +113,8 @@ internal sealed class UnattendedTestRequest
     public bool? ExpectedInitialOnlyDeathRoutesFound { get; init; }
     public int? ExpectedInitialCombatEndedTurn { get; init; }
     public int? ExpectedInitialDeathTurn { get; init; }
+    public int? ExpectedInitialDeathTurnAtLeast { get; init; }
+    public int? ExpectedInitialFinalEnemyHpAtMost { get; init; }
     public bool? ExpectedInitialActEndingBoss { get; init; }
     public string? ExpectedInitialPlannedChoiceCardId { get; init; }
     public int? ExpectedInitialTurnStartChoiceTurn { get; init; }
@@ -144,6 +146,7 @@ internal sealed class UnattendedTestRequest
     public int? ExpectedNativeChoiceSearchStartedAtMost { get; init; }
     public bool StopAfterExpectedPlayerPower { get; init; }
     public bool ExpectedPlayerDeath { get; init; }
+    public SolverDeploymentFastMode? HeadlessFastModeForTest { get; init; }
     public SolverDeploymentFastMode? DeploymentFastModeForTest { get; init; }
     public SolverPerformancePreset? PerformancePresetForTest { get; init; }
     public int? ShortMaxCardBranchesPerNodeForTest { get; init; }
@@ -295,6 +298,7 @@ internal sealed class UnattendedMonsterMoveCheck
     public int? ExpectedOstyMaxHp { get; init; }
     public Dictionary<string, int> ExpectedOstyPowers { get; init; } = new(StringComparer.Ordinal);
     public int? ExpectedPlayerBlock { get; init; }
+    public int? ExpectedPlayerBlockAfterMoveActions { get; init; }
     public int? ExpectedPlayerBlockGain { get; init; }
     public int? ExpectedPlayerEnergy { get; init; }
     public int? ExpectedPlayerStars { get; init; }
@@ -391,6 +395,7 @@ internal sealed class UnattendedTestResult
     public required string CharacterId { get; init; }
     public required string EncounterId { get; init; }
     public required string Seed { get; init; }
+    public DateTimeOffset StartedAtUtc { get; init; }
     public double ElapsedMilliseconds { get; init; }
     public bool MainThread { get; init; }
     public bool CombatEnded { get; init; }
@@ -400,9 +405,17 @@ internal sealed class UnattendedTestResult
     public long ManagedFragmentedBytes { get; init; }
     public long WorkingSetBytes { get; init; }
     public long PrivateMemoryBytes { get; init; }
+    public UnattendedStageTiming[] StageTimings { get; init; } = [];
     public string[] CompletedChecks { get; init; } = [];
     public string? Error { get; init; }
     public DateTimeOffset FinishedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
+internal sealed class UnattendedStageTiming
+{
+    public required string Stage { get; init; }
+    public double StartedMilliseconds { get; init; }
+    public double DurationMilliseconds { get; init; }
 }
 
 internal static class UnattendedTestFiles
@@ -410,6 +423,7 @@ internal static class UnattendedTestFiles
     public const string RequestUri = "user://combat_solver_test_request.json";
     public const string RunningUri = "user://combat_solver_test_running.json";
     public const string ResultUri = "user://combat_solver_test_result.json";
+    public const string ReadyUri = "user://combat_solver_test_ready.json";
 
     public static readonly JsonSerializerOptions JsonOptions = new()
     {

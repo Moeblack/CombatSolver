@@ -224,8 +224,10 @@ internal static partial class MonsterMoveEffects
         SimulatedCombatState combat,
         ForecastMove move,
         Creature player,
+        out bool killedOwner,
         IReadOnlyList<PlanCardChoice>? plannedChoices = null)
     {
+        killedOwner = false;
         MonsterModel monster = move.Owner.Monster!;
         string type = monster.GetType().Name;
         string id = move.Move.Id;
@@ -381,6 +383,7 @@ internal static partial class MonsterMoveEffects
                 return true;
             case ("GasBomb", "EXPLODE_MOVE"):
                 simulator.Kill(move.Owner, force: true);
+                killedOwner = true;
                 return true;
             case ("GlobeHead", "SHOCKING_SLAP"):
                 Debuff<FrailPower>(combat, player, 2, move.Owner);
@@ -879,6 +882,7 @@ internal static partial class MonsterMoveEffects
                 return true;
             case ("WaterfallGiant", "EXPLODE_MOVE"):
                 simulator.Kill(move.Owner, force: true);
+                killedOwner = true;
                 return true;
             case ("DecimillipedeSegmentBack", "BULK_MOVE"):
             case ("DecimillipedeSegmentFront", "BULK_MOVE"):

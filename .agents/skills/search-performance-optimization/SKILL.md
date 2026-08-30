@@ -35,7 +35,7 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 
 路线质量的首要基线是同一起点、同牌序与 RNG 下的整场战损。回合数、击杀速度和展开深度只作次级信息，除非用户明确把它们设为目标；不得用更少回合替代更低战损宣称优化。
 
-`-VerifyIncrementalSearch` 会逐转移执行完整回放，只用于正确性，不能与性能门槛组合，也不能引用其时间或分配作为生产性能。
+`-VerifyIncrementalSearch`（PowerShell）/ `--verify-incremental-search`（Bash）会逐转移执行完整回放，只用于正确性，不能与性能门槛组合，也不能引用其时间或分配作为生产性能。
 
 ## 2. 判断瓶颈所在职责
 

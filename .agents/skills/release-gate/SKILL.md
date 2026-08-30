@@ -34,9 +34,18 @@ description: 用户要求准备或发布 CombatSolver 版本、生成 ZIP、创�
 
 ## 2. 一次 Release 构建
 
+Windows（PowerShell 7）：
+
 ```powershell
 dotnet clean -c Release
 pwsh -NoProfile -File tools\build-local-stack.ps1 -Configuration Release
+```
+
+Linux（Bash）：
+
+```bash
+dotnet clean -c Release
+./tools/build-local-stack.sh --configuration Release
 ```
 
 从 release source commit 构建，不从游戏 Mods 目录反向复制 DLL，不复用未知来源旧构建。构建成功后不再反射 DLL 版本、重复构建、再次复制部署或重跑已经通过的行为场景。
@@ -70,12 +79,14 @@ ZIP 创建命令成功就是完成证据。不要重新打开、解压、枚举�
 - `D:\Desktop\sts2mod\ModUploader-win-x64\ModUploader.exe`；
 - `D:\Desktop\sts2mod\ModUploader-win-x64\CombatSolverWorkshop`。
 
+Linux 不使用上述 Windows 路径。上传前必须设置 `COMBATSOLVER_MOD_UPLOADER` 和 `COMBATSOLVER_WORKSHOP_DIR`；任一路径未设置、不可执行或不存在时原样报告阻塞，不猜测其他目录或兼容层。
+
 上传前只做一次本地暂存：
 
 1. 用当前 release source 的 `CombatSolver.json`、刚完成的 Release DLL 和根目录 `THIRD_PARTY_NOTICES.md` 覆盖 `CombatSolverWorkshop/content/`；
 2. 保留标题、长描述、作者、封面、效果图、标签、依赖和可见性，除非用户明确要求修改或兼容性事实已经变化；
 3. 将该版本玩家更新日志提炼为 `workshop.json` 的 `changeNote`；
-4. 执行一次 `ModUploader.exe upload -w .\CombatSolverWorkshop`。
+4. Windows 执行一次 `ModUploader.exe upload -w .\CombatSolverWorkshop`；Linux 执行一次 `"$COMBATSOLVER_MOD_UPLOADER" upload -w "$COMBATSOLVER_WORKSHOP_DIR"`。
 
 更新说明只写新增功能、实战结果修复、路线质量、UI/操作、兼容性和玩家能感知的性能变化。不要写类名、方法名、Beam/Mirror/GC 实现、runId、提交、构建、测试或打包过程。
 

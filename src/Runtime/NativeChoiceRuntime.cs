@@ -31,11 +31,17 @@ internal enum NativeChoiceSurfaceKind
     HandUpgrade,
 }
 
+internal readonly record struct NativeChoiceObservedOption(
+    string CardId,
+    int UpgradeLevel,
+    string StateKey);
+
 internal sealed record NativeChoiceRequest(
     long Sequence,
     NativeChoiceSurfaceKind Surface,
     Player Player,
     IReadOnlyList<CardModel> Options,
+    IReadOnlyList<NativeChoiceObservedOption>? ObservedOptions,
     int MinSelect,
     int MaxSelect,
     bool RequiresSurface,
@@ -108,12 +114,22 @@ internal static class NativeChoiceRuntime
             return;
         }
 
-        int optionCount = options.Count;
+        CardModel[] observedOptions = options.ToArray();
+        NativeChoiceObservedOption[]? observedIdentities = requiresSurface
+            ? null
+            : observedOptions
+                .Select(option => new NativeChoiceObservedOption(
+                    option.Id.Entry,
+                    option.CurrentUpgradeLevel,
+                    CardChoiceSupport.ChoiceCardKey(option)))
+                .ToArray();
+        int optionCount = observedOptions.Length;
         session.Enqueue(new NativeChoiceRequest(
             Interlocked.Increment(ref _nextSequence),
             surface,
             player,
-            options.ToArray(),
+            observedOptions,
+            observedIdentities,
             Math.Min(minSelect, optionCount),
             Math.Min(maxSelect, optionCount),
             requiresSurface,
@@ -255,6 +271,8 @@ internal sealed class NativeChoiceSession : IDisposable
             _allPlansConsumed.TrySetResult();
         _driverCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
         _driver = DriveAsync(host, _driverCancellation.Token);
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            _driver = UnattendedAsyncActivityTracker.Track(_driver);
     }
 
     public async Task WaitForAllPlansConsumedAsync(CancellationToken token)
@@ -355,7 +373,7 @@ internal sealed class NativeChoiceSession : IDisposable
             }
 
             PlanCardChoice plan = plans[planIndex];
-            IReadOnlyList<CardModel> selected = ResolvePlannedCards(plan, request);
+            IReadOnlyList<CardModel> selected;
             if (request.RequiresSurface)
             {
                 NativeChoiceSurfaceLock surfaceLock;
@@ -369,11 +387,17 @@ internal sealed class NativeChoiceSession : IDisposable
                     surfaceLock = await NativeChoiceSurface.WaitAndLockAsync(host, request, token);
                 }
                 RecordVisibleOnce(request);
+                // A visible page can remain open while the search runs. Match only after the page
+                // is locked, against its current semantic identity, so stale plans fail safely.
+                selected = ResolvePlannedCards(plan, request, useObservedIdentity: false);
                 using (surfaceLock)
                     await NativeChoiceSurface.SelectAsync(host, surfaceLock, request, selected, token);
             }
             else
             {
+                // An implicit all-card selection can mutate each selected card before the driver
+                // consumes the request. Preserve the identity seen at the actual choice boundary.
+                selected = ResolvePlannedCards(plan, request, useObservedIdentity: true);
                 ValidateImplicitSelection(request, selected);
                 Entry.Logger.Info(
                     $"[CombatSolver/Test] NATIVE_CHOICE_IMPLICIT owner={Owner} sequence={request.Sequence} " +
@@ -404,17 +428,35 @@ internal sealed class NativeChoiceSession : IDisposable
 
     private static IReadOnlyList<CardModel> ResolvePlannedCards(
         PlanCardChoice plan,
-        NativeChoiceRequest request)
+        NativeChoiceRequest request,
+        bool useObservedIdentity)
     {
+        if (useObservedIdentity && request.ObservedOptions == null)
+            throw new InvalidOperationException("隐式原生选牌请求缺少冻结候选身份。");
+
         List<CardModel> selected = [];
         foreach (PlanCardToken token in plan.Cards)
         {
-            CardModel card = request.Options.Where(option => CardChoiceSupport.MatchesToken(option, token))
-                .Skip(token.OptionOccurrence)
-                .FirstOrDefault()
-                ?? throw new InvalidOperationException(
+            CardModel? card = useObservedIdentity
+                ? request.Options
+                    .Select((option, index) => (Option: option, Observed: request.ObservedOptions![index]))
+                    .Where(option => option.Observed.CardId == token.CardId
+                        && option.Observed.UpgradeLevel == token.UpgradeLevel
+                        && (token.StateKey.Length == 0 || option.Observed.StateKey == token.StateKey))
+                    .Skip(token.OptionOccurrence)
+                    .Select(static option => option.Option)
+                    .FirstOrDefault()
+                : request.Options
+                    .Where(option => CardChoiceSupport.MatchesToken(option, token))
+                    .Skip(token.OptionOccurrence)
+                    .FirstOrDefault();
+            if (card == null)
+            {
+                throw new InvalidOperationException(
                     $"原生选牌页面找不到 {token.CardId}+{token.UpgradeLevel}#{token.OptionOccurrence}；" +
-                    $"候选={string.Join(',', request.Options.Select(CardChoiceSupport.ChoiceCardKey))}。");
+                    $"观测候选={(request.ObservedOptions == null ? "-" : string.Join(',', request.ObservedOptions.Select(option => option.StateKey)))}；" +
+                    $"当前候选={string.Join(',', request.Options.Select(CardChoiceSupport.ChoiceCardKey))}。");
+            }
             if (selected.Contains(card))
                 throw new InvalidOperationException($"原生选牌计划重复选择了 {token.CardId}。");
             selected.Add(card);

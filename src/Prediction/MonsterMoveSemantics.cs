@@ -67,7 +67,23 @@ internal static class MonsterMoveSemantics
                 combat.ForceStunnedMove(move.Owner, "HEADBUTT_MOVE");
             combat.StunNextMove(move.Owner);
         }
-        MonsterMoveEffects.Apply(simulator, combat, move, player, plannedChoices);
+        MonsterMoveEffects.Apply(
+            simulator,
+            combat,
+            move,
+            player,
+            out bool killedOwner,
+            plannedChoices);
+        if (killedOwner
+            && move.Owner.CombatId is uint moveOwnerCombatId
+            && !processedEnemyDeaths.Contains(moveOwnerCombatId))
+        {
+            CorePowerSupport.ApplyEnemyDeathPowers(
+                simulator,
+                combat,
+                combat.KnownEnemies,
+                processedEnemyDeaths);
+        }
         simulator.SynchronizePowerAmountPredictionStates();
         PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, combat);
         combat.NormalizeAeonglassWithers(simulator);

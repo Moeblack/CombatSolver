@@ -5,6 +5,8 @@ param(
     [string]$CharacterId = "IRONCLAD",
     [string]$Seed = "COMBATSOLVER",
     [string]$EncounterId = "FUZZY_WURM_CRAWLER_WEAK",
+    [string]$Sts2GameRoot = "D:\Steam\steamapps\common\Slay the Spire 2",
+    [string]$RitsuWorkshopRoot = "D:\Steam\steamapps\workshop\content\2868840\3747602295",
     [string]$RunSnapshotPath = "",
     [string]$ProgressSnapshotPath = "",
     [ValidateRange(0, 10)]
@@ -125,6 +127,8 @@ param(
     [int]$ExpectedInitialOnlyDeathRoutesFound = -1,
     [int]$ExpectedInitialCombatEndedTurn = 0,
     [int]$ExpectedInitialDeathTurn = 0,
+    [int]$ExpectedInitialDeathTurnAtLeast = 0,
+    [int]$ExpectedInitialFinalEnemyHpAtMost = -1,
     [ValidateSet(-1, 0, 1)]
     [int]$ExpectedInitialActEndingBoss = -1,
     [string]$ExpectedInitialPlannedChoiceCardId = "",
@@ -158,6 +162,8 @@ param(
     [int]$ExpectedNativeChoiceSearchStartedAtMost = -1,
     [switch]$StopAfterExpectedPlayerPower,
     [switch]$ExpectedPlayerDeath,
+    [ValidateSet("", "FollowGame", "Normal", "Fast", "Instant")]
+    [string]$HeadlessFastModeForTest = "",
     [ValidateSet("", "FollowGame", "Normal", "Fast", "Instant")]
     [string]$DeploymentFastModeForTest = "",
     [ValidateSet("", "Low", "Medium", "High", "VeryHigh", "Custom")]
@@ -198,12 +204,54 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$gameExe = "D:\Steam\steamapps\common\Slay the Spire 2\SlayTheSpire2.exe"
-$gameRoot = Split-Path -Parent $gameExe
+
+if ($null -eq ("CombatSolverUnattendedLauncherCancellation" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Threading;
+
+public static class CombatSolverUnattendedLauncherCancellation
+{
+    private static int requested;
+    private static int installed;
+
+    public static bool IsCancellationRequested => Volatile.Read(ref requested) != 0;
+
+    public static void Install()
+    {
+        Interlocked.Exchange(ref requested, 0);
+        if (Interlocked.Exchange(ref installed, 1) == 0)
+            Console.CancelKeyPress += HandleCancelKeyPress;
+    }
+
+    public static void Uninstall()
+    {
+        if (Interlocked.Exchange(ref installed, 0) != 0)
+            Console.CancelKeyPress -= HandleCancelKeyPress;
+    }
+
+    private static void HandleCancelKeyPress(object sender, ConsoleCancelEventArgs args)
+    {
+        args.Cancel = true;
+        Interlocked.Exchange(ref requested, 1);
+    }
+}
+"@
+}
+
+function Assert-LauncherNotCancelled {
+    if ([CombatSolverUnattendedLauncherCancellation]::IsCancellationRequested) {
+        throw [OperationCanceledException]::new("Unattended launcher cancellation was requested.")
+    }
+}
+$gameRoot = [IO.Path]::GetFullPath($Sts2GameRoot)
+$gameExe = Join-Path $gameRoot "SlayTheSpire2.exe"
 $gameModsRoot = Join-Path $gameRoot "mods"
-$ritsuWorkshopRoot = "D:\Steam\steamapps\workshop\content\2868840\3747602295"
-$ritsuVariantDll = Join-Path $ritsuWorkshopRoot "lib\0.111.0\STS2-RitsuLib.dll"
-$ritsuManifestSource = Join-Path $ritsuWorkshopRoot "mod_manifest.json"
+$combatSolverDll = Join-Path $gameModsRoot "CombatSolver\CombatSolver.dll"
+$combatSolverManifest = Join-Path $gameModsRoot "CombatSolver\CombatSolver.json"
+$resolvedRitsuWorkshopRoot = [IO.Path]::GetFullPath($RitsuWorkshopRoot)
+$ritsuVariantDll = Join-Path $resolvedRitsuWorkshopRoot "lib\0.111.0\STS2-RitsuLib.dll"
+$ritsuManifestSource = Join-Path $resolvedRitsuWorkshopRoot "mod_manifest.json"
 $headlessDependencyDir = Join-Path $gameModsRoot ".combatsolver-headless-ritsulib"
 $headlessDependencyMarker = Join-Path $headlessDependencyDir ".combatsolver-headless-only"
 $interactiveDataDir = Join-Path ([Environment]::GetFolderPath("ApplicationData")) "SlayTheSpire2"
@@ -216,13 +264,25 @@ $holdReleasePath = Join-Path $headlessRoot "release-held-search"
 $headlessLogPath = Join-Path $headlessRoot "godot-headless.log"
 $requestPath = Join-Path $dataDir "combat_solver_test_request.json"
 $resultPath = Join-Path $dataDir "combat_solver_test_result.json"
+$readyPath = Join-Path $dataDir "combat_solver_test_ready.json"
+$launcherLockPath = Join-Path $headlessRoot "launcher.lock"
 
 if (-not (Test-Path -LiteralPath $gameExe -PathType Leaf)) {
     throw "Game executable not found: $gameExe"
 }
+if (-not (Test-Path -LiteralPath $combatSolverDll -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $combatSolverManifest -PathType Leaf)) {
+    throw "Built CombatSolver mod not found under: $(Join-Path $gameModsRoot 'CombatSolver')"
+}
 if (-not (Test-Path -LiteralPath $ritsuVariantDll -PathType Leaf) -or
     -not (Test-Path -LiteralPath $ritsuManifestSource -PathType Leaf)) {
-    throw "Headless RitsuLib source not found under: $ritsuWorkshopRoot"
+    throw "Headless RitsuLib source not found under: $resolvedRitsuWorkshopRoot"
+}
+if ([string]::Equals(
+        [IO.Path]::GetFullPath($dataDir),
+        [IO.Path]::GetFullPath($interactiveDataDir),
+        [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Isolated and interactive data directories resolve to the same path: $dataDir"
 }
 if ($KeepGameOpen.IsPresent -and $ExitOnComplete.IsPresent) {
     throw "KeepGameOpen and ExitOnComplete cannot be used together."
@@ -236,6 +296,37 @@ if ($StopAfterExpectedReuse.IsPresent -and $ExpectedReusedTurn -le 0) {
 if ($StopAfterExpectedPlayerPower.IsPresent -and [string]::IsNullOrWhiteSpace($ExpectedObservedPlayerPowerId)) {
     throw "StopAfterExpectedPlayerPower requires ExpectedObservedPlayerPowerId."
 }
+
+New-Item -ItemType Directory -Path $headlessRoot -Force | Out-Null
+$launcherLock = $null
+$launcherLockDeadline = (Get-Date).AddSeconds(15)
+while ($null -eq $launcherLock) {
+    try {
+        $launcherLock = [IO.File]::Open(
+            $launcherLockPath,
+            [IO.FileMode]::OpenOrCreate,
+            [IO.FileAccess]::ReadWrite,
+            [IO.FileShare]::None)
+    } catch [IO.IOException] {
+        if ((Get-Date) -ge $launcherLockDeadline) {
+            throw "Another unattended launcher owns $launcherLockPath."
+        }
+        Start-Sleep -Milliseconds 100
+    }
+}
+
+$process = $null
+$processSafeHandle = $null
+$processIdentityStartTimeUtc = ""
+$cleanupProcessOnExit = $false
+$startedHere = $false
+$launcherCancellationInstalled = $false
+$launcherFailure = $null
+$launcherWasCancelled = $false
+try {
+[CombatSolverUnattendedLauncherCancellation]::Install()
+$launcherCancellationInstalled = $true
+Assert-LauncherNotCancelled
 if ($HoldAfterInitialSearch.IsPresent -and (Test-Path -LiteralPath $holdReleasePath -PathType Leaf)) {
     Remove-Item -LiteralPath $holdReleasePath -Force
 }
@@ -254,12 +345,15 @@ function Install-HeadlessDependency {
         if (-not (Test-Path -LiteralPath $headlessDependencyMarker -PathType Leaf)) {
             throw "Headless dependency target already exists without the ownership marker: $headlessDependencyDir"
         }
-        Remove-Item -LiteralPath $headlessDependencyDir -Recurse -Force
+        Remove-HeadlessDependency
     }
     New-Item -ItemType Directory -Path $headlessDependencyDir -Force | Out-Null
+    # Publish ownership before either loadable file. If a supervising matrix
+    # must hard-stop this launcher, it can still identify and remove a partial
+    # projection without guessing whether the directory belongs to the user.
+    Set-Content -LiteralPath $headlessDependencyMarker -Value "CombatSolver isolated headless dependency" -Encoding UTF8
     Copy-Item -LiteralPath $ritsuVariantDll -Destination (Join-Path $headlessDependencyDir "STS2-RitsuLib.dll")
     Copy-Item -LiteralPath $ritsuManifestSource -Destination (Join-Path $headlessDependencyDir "STS2-RitsuLib.json")
-    Set-Content -LiteralPath $headlessDependencyMarker -Value "CombatSolver isolated headless dependency" -Encoding UTF8
 }
 
 function Remove-HeadlessDependency {
@@ -270,17 +364,147 @@ function Remove-HeadlessDependency {
     if (-not (Test-Path -LiteralPath $headlessDependencyMarker -PathType Leaf)) {
         throw "Refusing to remove a headless dependency without the ownership marker: $headlessDependencyDir"
     }
-    Remove-Item -LiteralPath $headlessDependencyDir -Recurse -Force
-}
-
-function Stop-TestProcessAndRemoveDependency([Diagnostics.Process]$TestProcess) {
-    if ($null -ne $TestProcess) {
-        $TestProcess.Refresh()
-        if (-not $TestProcess.HasExited) {
-            Stop-Process -Id $TestProcess.Id
-            $TestProcess.WaitForExit(10000) | Out-Null
+    $knownPayloads = @(
+        (Join-Path $headlessDependencyDir "STS2-RitsuLib.dll"),
+        (Join-Path $headlessDependencyDir "STS2-RitsuLib.json")
+    )
+    $knownPaths = @($headlessDependencyMarker) + $knownPayloads
+    $unexpected = @(Get-ChildItem -LiteralPath $headlessDependencyDir -Force |
+        Where-Object { $_.FullName -notin $knownPaths })
+    if ($unexpected.Count -gt 0) {
+        throw "Headless dependency target contains unexpected files: $($unexpected.Name -join ',')"
+    }
+    foreach ($payload in $knownPayloads) {
+        if (-not (Test-Path -LiteralPath $payload -PathType Leaf)) {
+            continue
+        }
+        $deadline = (Get-Date).AddSeconds(5)
+        while ($true) {
+            try {
+                Remove-Item -LiteralPath $payload -Force
+                break
+            } catch {
+                if (($_.Exception -isnot [System.IO.IOException] -and
+                        $_.Exception -isnot [System.UnauthorizedAccessException]) -or
+                    (Get-Date) -ge $deadline) {
+                    throw
+                }
+                Start-Sleep -Milliseconds 100
+            }
         }
     }
+    Remove-Item -LiteralPath $headlessDependencyMarker -Force
+    Remove-Item -LiteralPath $headlessDependencyDir -Force
+}
+
+function Get-ProcessStartTimeUtc([Diagnostics.Process]$TestProcess) {
+    $TestProcess.Refresh()
+    return $TestProcess.StartTime.ToUniversalTime().ToString(
+        "O",
+        [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function ConvertTo-NormalizedUtcTimestamp([object]$Value) {
+    if ($null -eq $Value) {
+        return $null
+    }
+    if ($Value -is [DateTimeOffset]) {
+        return $Value.UtcDateTime.ToString("O", [Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [DateTime]) {
+        return $Value.ToUniversalTime().ToString("O", [Globalization.CultureInfo]::InvariantCulture)
+    }
+    $parsed = [DateTimeOffset]::MinValue
+    if (-not [DateTimeOffset]::TryParseExact(
+            [string]$Value,
+            "O",
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind,
+            [ref]$parsed)) {
+        return $null
+    }
+    return $parsed.UtcDateTime.ToString("O", [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Test-ProcessMatchesHeadlessIdentity(
+    [Diagnostics.Process]$TestProcess,
+    [string]$ExpectedStartTimeUtc,
+    [string]$ExpectedExecutable
+) {
+    if ($null -eq $TestProcess -or
+        [string]::IsNullOrWhiteSpace($ExpectedStartTimeUtc) -or
+        [string]::IsNullOrWhiteSpace($ExpectedExecutable)) {
+        return $false
+    }
+
+    # Callers acquire and retain SafeHandle before using this helper. Do not
+    # collapse access failures into "not a match": indeterminate ownership must
+    # preserve the process, marker, and loaded dependency.
+    $TestProcess.Refresh()
+    if ($TestProcess.HasExited -or $TestProcess.ProcessName -ne "SlayTheSpire2") {
+        return $false
+    }
+    $actualExecutable = [IO.Path]::GetFullPath($TestProcess.Path)
+    if (-not [string]::Equals(
+            $actualExecutable,
+            $ExpectedExecutable,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        return $false
+    }
+    return [string]::Equals(
+        (Get-ProcessStartTimeUtc $TestProcess),
+        $ExpectedStartTimeUtc,
+        [StringComparison]::Ordinal)
+}
+
+function Remove-ProcessMarkerForIdentity(
+    [int]$ProcessId,
+    [string]$ExpectedStartTimeUtc
+) {
+    if ($ProcessId -le 0 -or
+        [string]::IsNullOrWhiteSpace($ExpectedStartTimeUtc) -or
+        -not (Test-Path -LiteralPath $processMarkerPath -PathType Leaf)) {
+        return
+    }
+    try {
+        $marker = Get-Content -LiteralPath $processMarkerPath -Raw | ConvertFrom-Json
+        $markerStartTimeUtc = ConvertTo-NormalizedUtcTimestamp $marker.processStartTimeUtc
+    } catch {
+        Write-Warning "Could not validate the process marker during cleanup; leaving it untouched: $processMarkerPath"
+        return
+    }
+    $markerProcessId = 0
+    if ([int]::TryParse([string]$marker.pid, [ref]$markerProcessId) -and
+        $markerProcessId -eq $ProcessId -and
+        [string]::Equals($markerStartTimeUtc, $ExpectedStartTimeUtc, [StringComparison]::Ordinal)) {
+        Remove-Item -LiteralPath $processMarkerPath -Force
+    }
+}
+
+function Stop-ClaimedProcessAndRemoveDependency(
+    [Diagnostics.Process]$TestProcess,
+    [string]$ExpectedStartTimeUtc
+) {
+    $processIdForCleanup = if ($null -eq $TestProcess) { 0 } else { $TestProcess.Id }
+    if ($null -eq $TestProcess) {
+        throw "Claimed headless process handle is unavailable."
+    }
+
+    # Marker recovery and Start-Process both retain this exact Process object's
+    # SafeHandle before ownership is claimed. Kill therefore cannot target a
+    # later process that happens to reuse the numeric PID.
+    $TestProcess.Refresh()
+    if (-not $TestProcess.HasExited) {
+        $TestProcess.Kill()
+        $TestProcess.WaitForExit(10000) | Out-Null
+        $TestProcess.Refresh()
+    }
+    if (-not $TestProcess.HasExited) {
+        throw "Claimed headless process did not exit within 10 seconds: pid=$processIdForCleanup"
+    }
+    # Never remove the temporary dependency while the exact process that loaded
+    # it may still be alive. Marker removal remains PID+start-time guarded.
+    Remove-ProcessMarkerForIdentity $processIdForCleanup $ExpectedStartTimeUtc
     Remove-HeadlessDependency
 }
 
@@ -468,6 +692,8 @@ $request = [ordered]@{
     expectedInitialOnlyDeathRoutesFound = if ($ExpectedInitialOnlyDeathRoutesFound -ge 0) { [bool]$ExpectedInitialOnlyDeathRoutesFound } else { $null }
     expectedInitialCombatEndedTurn = if ($ExpectedInitialCombatEndedTurn -gt 0) { $ExpectedInitialCombatEndedTurn } else { $null }
     expectedInitialDeathTurn = if ($ExpectedInitialDeathTurn -gt 0) { $ExpectedInitialDeathTurn } else { $null }
+    expectedInitialDeathTurnAtLeast = if ($ExpectedInitialDeathTurnAtLeast -gt 0) { $ExpectedInitialDeathTurnAtLeast } else { $null }
+    expectedInitialFinalEnemyHpAtMost = if ($ExpectedInitialFinalEnemyHpAtMost -ge 0) { $ExpectedInitialFinalEnemyHpAtMost } else { $null }
     expectedInitialActEndingBoss = if ($ExpectedInitialActEndingBoss -ge 0) { [bool]$ExpectedInitialActEndingBoss } else { $null }
     expectedInitialPlannedChoiceCardId = if ([string]::IsNullOrWhiteSpace($ExpectedInitialPlannedChoiceCardId)) { $null } else { $ExpectedInitialPlannedChoiceCardId }
     expectedInitialTurnStartChoiceTurn = if ($ExpectedInitialTurnStartChoiceTurn -gt 0) { $ExpectedInitialTurnStartChoiceTurn } else { $null }
@@ -499,6 +725,7 @@ $request = [ordered]@{
     expectedNativeChoiceSearchStartedAtMost = if ($ExpectedNativeChoiceSearchStartedAtMost -ge 0) { $ExpectedNativeChoiceSearchStartedAtMost } else { $null }
     stopAfterExpectedPlayerPower = $StopAfterExpectedPlayerPower.IsPresent
     expectedPlayerDeath = $ExpectedPlayerDeath.IsPresent
+    headlessFastModeForTest = if ([string]::IsNullOrWhiteSpace($HeadlessFastModeForTest)) { $null } else { $HeadlessFastModeForTest }
     deploymentFastModeForTest = if ([string]::IsNullOrWhiteSpace($DeploymentFastModeForTest)) { $null } else { $DeploymentFastModeForTest }
     performancePresetForTest = if ([string]::IsNullOrWhiteSpace($PerformancePresetForTest)) { $null } else { $PerformancePresetForTest }
     shortMaxCardBranchesPerNodeForTest = if ($ShortMaxCardBranchesPerNodeForTest -gt 0) { $ShortMaxCardBranchesPerNodeForTest } else { $null }
@@ -625,16 +852,139 @@ if (-not [string]::IsNullOrWhiteSpace($PowerId)) {
     )
 }
 
-$requestTempPath = "$requestPath.$runId.tmp"
-$request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $requestTempPath -Encoding UTF8
-Move-Item -LiteralPath $requestTempPath -Destination $requestPath -Force
-$startedAt = Get-Date
-$process = $null
+$combatSolverDllSha256 = (Get-FileHash -LiteralPath $combatSolverDll -Algorithm SHA256).Hash
+$combatSolverManifestSha256 = (Get-FileHash -LiteralPath $combatSolverManifest -Algorithm SHA256).Hash
 if (Test-Path -LiteralPath $processMarkerPath -PathType Leaf) {
-    $marker = Get-Content -LiteralPath $processMarkerPath -Raw | ConvertFrom-Json
-    $candidate = Get-Process -Id $marker.pid -ErrorAction SilentlyContinue
-    if ($null -ne $candidate -and $candidate.ProcessName -eq "SlayTheSpire2") {
-        $process = $candidate
+    $marker = $null
+    $markerProcessId = 0
+    $markerIsOwned = $false
+    $discardMarker = $false
+    $markerProblem = "marker contents did not match the isolated headless process"
+    try {
+        $marker = Get-Content -LiteralPath $processMarkerPath -Raw | ConvertFrom-Json
+        if (-not [int]::TryParse([string]$marker.pid, [ref]$markerProcessId) -or
+            $markerProcessId -le 0) {
+            throw "marker PID is invalid"
+        }
+        $markerStartTimeUtc = ConvertTo-NormalizedUtcTimestamp $marker.processStartTimeUtc
+        if ([string]::IsNullOrWhiteSpace($markerStartTimeUtc)) {
+            throw "marker process start time is missing or invalid"
+        }
+        $markerExecutable = [IO.Path]::GetFullPath([string]$marker.executable)
+        $requestedExecutableProperty = $marker.PSObject.Properties['requestedExecutable']
+        $markerRequestedExecutable = if ($null -eq $requestedExecutableProperty -or
+            [string]::IsNullOrWhiteSpace([string]$requestedExecutableProperty.Value)) {
+            $null
+        } else {
+            [IO.Path]::GetFullPath([string]$requestedExecutableProperty.Value)
+        }
+        $markerAppData = [IO.Path]::GetFullPath([string]$marker.appData)
+        $markerDataDir = [IO.Path]::GetFullPath([string]$marker.dataDir)
+        if (($null -ne $markerRequestedExecutable -and
+                -not [string]::Equals(
+                    $markerRequestedExecutable,
+                    $gameExe,
+                    [StringComparison]::OrdinalIgnoreCase)) -or
+            -not [string]::Equals($markerAppData, $headlessRoaming, [StringComparison]::OrdinalIgnoreCase) -or
+            -not [string]::Equals($markerDataDir, $dataDir, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "marker paths do not match this isolated launcher"
+        }
+    } catch {
+        $markerProblem = $_.Exception.Message
+        if ($markerProcessId -gt 0) {
+            $legacyCandidate = Get-Process -Id $markerProcessId -ErrorAction SilentlyContinue
+            if ($null -ne $legacyCandidate) {
+                try {
+                    $legacyCandidateSafeHandle = $legacyCandidate.SafeHandle
+                    $legacyCandidate.Refresh()
+                    if (-not $legacyCandidate.HasExited -and
+                        $legacyCandidate.ProcessName -eq "SlayTheSpire2") {
+                        throw "live SlayTheSpire2 process still uses an older or invalid ownership marker"
+                    }
+                } catch {
+                    throw "Could not safely upgrade the existing headless marker; " +
+                        "the process, marker, and dependency were preserved. pid=$markerProcessId " +
+                        "error=$($_.Exception.Message)"
+                }
+            }
+        } else {
+            $unidentifiedGameProcesses = @(Get-Process -Name "SlayTheSpire2" -ErrorAction SilentlyContinue)
+            foreach ($unidentifiedGameProcess in $unidentifiedGameProcesses) {
+                try {
+                    $unidentifiedSafeHandle = $unidentifiedGameProcess.SafeHandle
+                    $unidentifiedGameProcess.Refresh()
+                    if (-not $unidentifiedGameProcess.HasExited) {
+                        throw "a live SlayTheSpire2 process exists but the marker has no usable PID"
+                    }
+                } catch {
+                    throw "Could not safely replace the invalid headless marker; " +
+                        "the process, marker, and dependency were preserved. error=$($_.Exception.Message)"
+                }
+            }
+        }
+        $discardMarker = $true
+    }
+
+    if (-not $discardMarker) {
+        $candidate = Get-Process -Id $markerProcessId -ErrorAction SilentlyContinue
+        if ($null -eq $candidate) {
+            $markerProblem = "marker process is absent"
+            $discardMarker = $true
+        } else {
+            try {
+                # Retain this SafeHandle for the whole launcher invocation so a
+                # recycled PID can never redirect validation or cleanup.
+                $candidateSafeHandle = $candidate.SafeHandle
+                if (-not (Test-ProcessMatchesHeadlessIdentity $candidate $markerStartTimeUtc $markerExecutable)) {
+                    $markerProblem = "marker process has a different executable or start time"
+                    $discardMarker = $true
+                } else {
+                    $markerIsOwned = $true
+                    $process = $candidate
+                    $processSafeHandle = $candidateSafeHandle
+                    $processIdentityStartTimeUtc = $markerStartTimeUtc
+                    $cleanupProcessOnExit = $true
+                }
+            } catch {
+                throw "Could not conclusively validate the managed headless process; " +
+                    "its marker and dependency were preserved. pid=$markerProcessId error=$($_.Exception.Message)"
+            }
+        }
+    }
+
+    if ($discardMarker) {
+        Write-Warning "Discarding stale or unowned process marker ($markerProblem): $processMarkerPath"
+        Remove-Item -LiteralPath $processMarkerPath -Force
+    } elseif (-not [string]::Equals(
+            [string]$marker.combatSolverDllSha256,
+            $combatSolverDllSha256,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        -not [string]::Equals(
+            [string]$marker.combatSolverManifestSha256,
+            $combatSolverManifestSha256,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        Write-Host "UNATTENDED_RESTART reason=mod_changed pid=$($process.Id)"
+        Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+        $cleanupProcessOnExit = $false
+        $process = $null
+        $processIdentityStartTimeUtc = ""
+    } elseif (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+        $previousReadyHeld = $false
+        try {
+            $previousReady = Get-Content -LiteralPath $readyPath -Raw | ConvertFrom-Json
+            $previousReadyHeld = $previousReady.schemaVersion -eq 1 -and
+                $previousReady.held -eq $true -and
+                -not [string]::IsNullOrWhiteSpace([string]$previousReady.runId)
+        } catch {
+            Write-Warning "Could not inspect the previous ready marker; it will be replaced by this request."
+        }
+        if ($previousReadyHeld) {
+            Write-Host "UNATTENDED_RESTART reason=held_process_not_reusable pid=$($process.Id)"
+            Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+            $cleanupProcessOnExit = $false
+            $process = $null
+            $processIdentityStartTimeUtc = ""
+        }
     }
 }
 $otherProcesses = @(Get-Process -Name "SlayTheSpire2" -ErrorAction SilentlyContinue |
@@ -644,10 +994,26 @@ if ($otherProcesses.Count -gt 0) {
     throw "Refusing to start or reuse headless tests while an interactive SlayTheSpire2 process is running. pid=$ids"
 }
 $reusedProcess = $null -ne $process
+Assert-LauncherNotCancelled
+
+# Publish only after marker ownership, process identity, mod fingerprint, and
+# interactive-process checks have all succeeded.
+$requestTempPath = "$requestPath.$runId.tmp"
+if (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+    Remove-Item -LiteralPath $readyPath -Force
+}
+$request | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $requestTempPath -Encoding UTF8
+Move-Item -LiteralPath $requestTempPath -Destination $requestPath -Force
+$startedAt = Get-Date
+if ($reusedProcess) {
+    $cleanupProcessOnExit = $true
+}
+
 if (-not $reusedProcess) {
     Install-HeadlessDependency
     $arguments = "--headless --disable-vsync --max-fps 0 --force-steam=off --log-file `"$headlessLogPath`""
     try {
+        Assert-LauncherNotCancelled
         $process = Start-Process `
             -FilePath $gameExe `
             -ArgumentList $arguments `
@@ -658,26 +1024,64 @@ if (-not $reusedProcess) {
             } `
             -WindowStyle Hidden `
             -PassThru
+        # Start-Process returned this exact Process object, so the launcher owns
+        # its handle even before StartTime is readable and marker identity exists.
+        $startedHere = $true
+        $cleanupProcessOnExit = $true
+        $processSafeHandle = $process.SafeHandle
+        $processIdentityStartTimeUtc = Get-ProcessStartTimeUtc $process
+        Assert-LauncherNotCancelled
+        $process.Refresh()
+        if ($process.HasExited -or $process.ProcessName -ne "SlayTheSpire2") {
+            throw "Started process exited or did not expose the expected game process."
+        }
+        $processActualExecutable = [IO.Path]::GetFullPath($process.Path)
     } catch {
-        Remove-HeadlessDependency
-        throw
+        $launchError = $_
+        if ($startedHere) {
+            try {
+                Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+                $startedHere = $false
+                $cleanupProcessOnExit = $false
+            } catch {
+                throw "Headless game startup failed: $($launchError.Exception.Message) Cleanup also failed: $($_.Exception.Message)"
+            }
+        } else {
+            try {
+                Remove-HeadlessDependency
+            } catch {
+                throw "Headless game startup failed: $($launchError.Exception.Message) " +
+                    "Dependency cleanup also failed: $($_.Exception.Message)"
+            }
+        }
+        throw $launchError
     }
+    $processMarkerTempPath = "$processMarkerPath.$runId.tmp"
     [ordered]@{
         pid = $process.Id
         startedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
+        processStartTimeUtc = $processIdentityStartTimeUtc
+        requestedExecutable = $gameExe
+        executable = $processActualExecutable
         appData = $headlessRoaming
+        dataDir = $dataDir
         logPath = $headlessLogPath
-    } | ConvertTo-Json | Set-Content -LiteralPath $processMarkerPath -Encoding UTF8
+        combatSolverDllSha256 = $combatSolverDllSha256
+        combatSolverManifestSha256 = $combatSolverManifestSha256
+    } | ConvertTo-Json | Set-Content -LiteralPath $processMarkerTempPath -Encoding UTF8
+    Move-Item -LiteralPath $processMarkerTempPath -Destination $processMarkerPath -Force
     $launchDeadline = $startedAt.AddSeconds(30)
     while (-not $process.HasExited -and (Get-Date) -lt $launchDeadline) {
         if (Test-Path -LiteralPath $headlessLogPath -PathType Leaf) {
             break
         }
         Start-Sleep -Milliseconds 250
+        Assert-LauncherNotCancelled
+        $process.Refresh()
     }
 }
 if ($null -eq $process -or $process.HasExited) {
-    Remove-HeadlessDependency
+    Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
     throw "Headless SlayTheSpire2 did not remain running. log=$headlessLogPath"
 }
 if ($reusedProcess) {
@@ -686,39 +1090,142 @@ if ($reusedProcess) {
     Write-Host "UNATTENDED_STARTED run_id=$runId pid=$($process.Id)"
 }
 
-$deadline = $startedAt.AddSeconds($TimeoutSeconds + 45)
-while ((Get-Date) -lt $deadline) {
+$resultDeadline = $startedAt.AddSeconds($TimeoutSeconds + 45)
+while ((Get-Date) -lt $resultDeadline) {
+    Assert-LauncherNotCancelled
     if (Test-Path -LiteralPath $resultPath) {
         $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
         if ($result.runId -eq $runId) {
             $result | ConvertTo-Json -Depth 8
+            if ($result.status -ne "Passed") {
+                Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+                $cleanupProcessOnExit = $false
+                exit 1
+            }
+            $quiescenceDeadline = (Get-Date).AddSeconds(120)
             if ($HoldAfterInitialSearch.IsPresent -and $result.status -eq "Passed") {
-                Write-Host "UNATTENDED_HELD run_id=$runId pid=$($process.Id) release=$holdReleasePath"
-                while (-not $process.HasExited -and -not (Test-Path -LiteralPath $holdReleasePath -PathType Leaf)) {
-                    Start-Sleep -Milliseconds 500
+                $ready = $null
+                while (-not $process.HasExited -and (Get-Date) -lt $quiescenceDeadline) {
+                    if (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+                        $ready = Get-Content -LiteralPath $readyPath -Raw | ConvertFrom-Json
+                        if ($ready.schemaVersion -eq 1 -and
+                            $ready.runId -eq $runId -and
+                            $ready.held -eq $true) {
+                            break
+                        }
+                    }
+                    Start-Sleep -Milliseconds 100
+                    Assert-LauncherNotCancelled
                     $process.Refresh()
                 }
-                if (Test-Path -LiteralPath $holdReleasePath -PathType Leaf) {
-                    Remove-Item -LiteralPath $holdReleasePath -Force
+                if ($process.HasExited -or
+                    $null -eq $ready -or
+                    $ready.schemaVersion -ne 1 -or
+                    $ready.runId -ne $runId -or
+                    $ready.held -ne $true) {
+                    Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+                    $cleanupProcessOnExit = $false
+                    throw "Held test did not reach quiescence before timeout. run_id=$runId"
                 }
-                Stop-TestProcessAndRemoveDependency $process
+                Write-Host "UNATTENDED_HELD run_id=$runId pid=$($process.Id) release=$holdReleasePath"
+                while (-not $process.HasExited -and
+                    -not (Test-Path -LiteralPath $holdReleasePath -PathType Leaf)) {
+                    Start-Sleep -Milliseconds 500
+                    Assert-LauncherNotCancelled
+                    $process.Refresh()
+                }
+                if (-not (Test-Path -LiteralPath $holdReleasePath -PathType Leaf)) {
+                    Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+                    $cleanupProcessOnExit = $false
+                    throw "Held test process exited before the release marker was written. run_id=$runId"
+                }
+                Assert-LauncherNotCancelled
+                Remove-Item -LiteralPath $holdReleasePath -Force
+                Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+                $cleanupProcessOnExit = $false
                 exit 0
             }
             if ($ExitOnComplete.IsPresent) {
-                $process.WaitForExit(30000) | Out-Null
-                Stop-TestProcessAndRemoveDependency $process
+                $exitDeadline = (Get-Date).AddSeconds(30)
+                while (-not $process.HasExited -and (Get-Date) -lt $exitDeadline) {
+                    $process.WaitForExit(100) | Out-Null
+                    Assert-LauncherNotCancelled
+                    $process.Refresh()
+                }
+                Assert-LauncherNotCancelled
+                Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+                $cleanupProcessOnExit = $false
+                exit 0
             }
-            if ($result.status -ne "Passed") { exit 1 }
-            exit 0
+            $ready = $null
+            while (-not $process.HasExited -and (Get-Date) -lt $quiescenceDeadline) {
+                if (Test-Path -LiteralPath $readyPath -PathType Leaf) {
+                    $ready = Get-Content -LiteralPath $readyPath -Raw | ConvertFrom-Json
+                    if ($ready.schemaVersion -eq 1 -and
+                        $ready.runId -eq $runId -and
+                        $ready.held -eq $false) {
+                        Assert-LauncherNotCancelled
+                        Write-Host "UNATTENDED_READY run_id=$runId pid=$($process.Id)"
+                        $cleanupProcessOnExit = $false
+                        exit 0
+                    }
+                }
+                Start-Sleep -Milliseconds 100
+                Assert-LauncherNotCancelled
+                $process.Refresh()
+            }
+            Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+            $cleanupProcessOnExit = $false
+            throw "Test passed but did not become reusable before timeout. run_id=$runId"
         }
     }
     if ($process.HasExited) {
-        Remove-HeadlessDependency
-        throw "Game exited without writing a result for this run. exit_code=$($process.ExitCode)"
+        $processExitCode = "unknown"
+        try {
+            if ($process.HasExited) {
+                $processExitCode = $process.ExitCode
+            }
+        } catch {
+            $processExitCode = "unknown"
+        }
+        Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+        $cleanupProcessOnExit = $false
+        throw "Game exited without writing a result for this run. exit_code=$processExitCode"
     }
     Start-Sleep -Milliseconds 500
+    Assert-LauncherNotCancelled
     $process.Refresh()
 }
 
-Stop-TestProcessAndRemoveDependency $process
+Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+$cleanupProcessOnExit = $false
 throw "Unattended test exceeded the launcher timeout; its game process was stopped. run_id=$runId"
+} catch {
+    $launcherFailure = $_
+    $launcherWasCancelled =
+        $_.Exception -is [OperationCanceledException] -or
+        [CombatSolverUnattendedLauncherCancellation]::IsCancellationRequested
+} finally {
+    try {
+        if ($cleanupProcessOnExit) {
+            try {
+                Stop-ClaimedProcessAndRemoveDependency $process $processIdentityStartTimeUtc
+            } catch {
+                Write-Warning "Failed to clean up the owned headless process during launcher shutdown: $($_.Exception.Message)"
+            }
+        }
+    } finally {
+        if ($launcherCancellationInstalled) {
+            [CombatSolverUnattendedLauncherCancellation]::Uninstall()
+        }
+        $launcherLock.Dispose()
+    }
+}
+
+if ($null -ne $launcherFailure) {
+    if ($launcherWasCancelled) {
+        Write-Error -ErrorAction Continue $launcherFailure
+        exit 130
+    }
+    throw $launcherFailure
+}

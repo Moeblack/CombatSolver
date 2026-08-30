@@ -1273,7 +1273,10 @@ internal sealed partial class CombatBeamSolver
         try
         {
         int roundHistoryEntryStart = simulator.History.Entries.Count;
-        bool takingExtraTurn = simulatedCombat.PrepareExtraPlayerTurn(simulator, _player);
+        bool takingExtraTurn = simulatedCombat.PrepareExtraPlayerTurn(
+            simulator,
+            _player,
+            out bool hasActiveEmotionChip);
         int etherealExhaustCount = simulatedCombat.CountEtherealCardsInHand(simulator, _player);
         {
             using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundPlayerEnd);
@@ -1445,6 +1448,10 @@ internal sealed partial class CombatBeamSolver
         }
         else
         {
+            // An extra turn advances the player's turn number too, so damage from the
+            // just-finished turn becomes Emotion Chip's "previous turn" window.
+            if (hasActiveEmotionChip)
+                simulatedCombat.RecordRelicRoundDamage(simulator, _player, roundHistoryEntryStart);
             simulatedCombat.ConsumeExtraTurnSources(_player);
         }
 

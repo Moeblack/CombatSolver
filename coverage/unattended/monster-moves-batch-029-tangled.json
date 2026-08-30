@@ -32,9 +32,9 @@
       "TANGLED_POWER": 1
     },
     "expectedPlayerCardStates": {
-      "Hand:BLUDGEON:ENTANGLED:1:-": 1,
-      "Hand:ARMAMENTS:-:0:-": 1,
-      "Hand:BODY_SLAM:ENTANGLED:1:-": 1
+      "Hand:BLUDGEON:ENTANGLED:1:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:ARMAMENTS:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:BODY_SLAM:ENTANGLED:1:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   },
   {
@@ -46,9 +46,9 @@
       "TANGLED_POWER"
     ],
     "expectedPlayerCardStates": {
-      "Hand:BLUDGEON:-:0:-": 1,
-      "Hand:ARMAMENTS:-:0:-": 1,
-      "Hand:BODY_SLAM:-:0:-": 1
+      "Hand:BLUDGEON:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:ARMAMENTS:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1,
+      "Hand:BODY_SLAM:-:0:-:R0:XFalse:SFalse:TFalse:DFalse:MFalse": 1
     }
   }
 ]

@@ -15,7 +15,9 @@ internal sealed partial class UnattendedTestRunner
     private sealed class Writer(
         UnattendedTestRequest request,
         Stopwatch stopwatch,
-        IReadOnlyList<string> completedChecks)
+        IReadOnlyList<string> completedChecks,
+        DateTimeOffset startedAtUtc,
+        Func<UnattendedStageTiming[]> captureStageTimings)
     {
         public RuntimeMemorySnapshot Write(
             string status,
@@ -37,6 +39,7 @@ internal sealed partial class UnattendedTestRunner
                 CharacterId = characterId,
                 EncounterId = encounterId,
                 Seed = request.Seed,
+                StartedAtUtc = startedAtUtc,
                 ElapsedMilliseconds = stopwatch.Elapsed.TotalMilliseconds,
                 MainThread = NGame.IsMainThread(),
                 CombatEnded = combatEnded,
@@ -46,6 +49,7 @@ internal sealed partial class UnattendedTestRunner
                 ManagedFragmentedBytes = memory.ManagedFragmentedBytes,
                 WorkingSetBytes = memory.WorkingSetBytes,
                 PrivateMemoryBytes = memory.PrivateMemoryBytes,
+                StageTimings = captureStageTimings(),
                 CompletedChecks = completedChecks.ToArray(),
                 Error = error,
             });
