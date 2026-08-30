@@ -13,7 +13,11 @@ internal readonly record struct CombatBugReportUploadProgress(long BytesSent, lo
         : (int)Math.Clamp(BytesSent * 100L / TotalBytes, 0L, 100L);
 }
 
-internal sealed record CombatBugReportUploadReceipt(string ReportId, string SubmissionId);
+internal sealed record CombatBugReportUploadReceipt(
+    string ReportId,
+    string SubmissionId,
+    long SizeBytes,
+    HttpStatusCode StatusCode);
 
 internal static class CombatBugReportUploader
 {
@@ -80,7 +84,8 @@ internal static class CombatBugReportUploader
             FileMode.Open,
             System.IO.FileAccess.Read,
             FileShare.Read);
-        using ProgressFileContent fileContent = new(stream, progress);
+        long archiveBytes = stream.Length;
+        using ProgressFileContent fileContent = new(stream, progress, cancellationToken);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/zip");
         using MultipartFormDataContent form = new()
         {
@@ -91,19 +96,42 @@ internal static class CombatBugReportUploader
         using HttpRequestMessage request = new(HttpMethod.Post, endpoint) { Content = form };
         request.Headers.Add(UploadTokenHeaderName, UploadToken);
 
-        using HttpResponseMessage response = await client.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        string body = await ReadResponseBodyAsync(response.Content, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        using CancellationTokenRegistration abortRequest = cancellationToken.Register(request.Dispose);
+        HttpResponseMessage response;
+        try
         {
-            throw new HttpRequestException(
-                $"上传服务器返回 HTTP {(int)response.StatusCode}：{DescribeResponse(body)}");
+            response = await client.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
         }
+        catch (Exception ex) when (cancellationToken.IsCancellationRequested
+                                   && ex is not OperationCanceledException)
+        {
+            throw new OperationCanceledException("问题包上传已取消。", ex, cancellationToken);
+        }
+        using (response)
+        {
+            string body = await ReadResponseBodyAsync(response.Content, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"上传服务器返回 HTTP {(int)response.StatusCode}：{DescribeResponse(body)}");
+            }
 
-        string reportId = TryReadReportId(body) ?? submissionId;
-        return new CombatBugReportUploadReceipt(reportId, submissionId);
+            ServerReceipt serverReceipt = ReadServerReceipt(body);
+            if (serverReceipt.SizeBytes != archiveBytes)
+            {
+                throw new InvalidDataException(
+                    $"上传服务器确认的文件大小不一致：本地 {archiveBytes} 字节，服务器 {serverReceipt.SizeBytes} 字节。");
+            }
+
+            return new CombatBugReportUploadReceipt(
+                serverReceipt.ReportId,
+                submissionId,
+                serverReceipt.SizeBytes,
+                response.StatusCode);
+        }
     }
 
     private static void ValidateInputs(
@@ -153,27 +181,30 @@ internal static class CombatBugReportUploader
         return Encoding.UTF8.GetString(output.GetBuffer(), 0, (int)output.Length);
     }
 
-    private static string? TryReadReportId(string body)
+    private static ServerReceipt ReadServerReceipt(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
-            return null;
+            throw new InvalidDataException("上传服务器没有返回文件确认信息。");
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
             if (document.RootElement.ValueKind != JsonValueKind.Object
                 || !document.RootElement.TryGetProperty("id", out JsonElement id)
-                || id.ValueKind != JsonValueKind.String)
+                || id.ValueKind != JsonValueKind.String
+                || !document.RootElement.TryGetProperty("sizeBytes", out JsonElement sizeBytes)
+                || !sizeBytes.TryGetInt64(out long confirmedSize))
             {
-                return null;
+                throw new InvalidDataException("上传服务器返回的文件确认信息不完整。");
             }
             string? value = id.GetString();
-            return string.IsNullOrWhiteSpace(value)
-                ? null
-                : CombatBugReportDescription.NormalizeDetail(value);
+            string? reportId = CombatBugReportDescription.NormalizeDetail(value);
+            if (string.IsNullOrWhiteSpace(reportId) || confirmedSize < 0)
+                throw new InvalidDataException("上传服务器返回的文件确认信息无效。");
+            return new ServerReceipt(reportId, confirmedSize);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return null;
+            throw new InvalidDataException("上传服务器返回的文件确认信息不是有效 JSON。", ex);
         }
     }
 
@@ -185,9 +216,12 @@ internal static class CombatBugReportUploader
             : description[..MaximumDisplayedResponseCharacters] + "…";
     }
 
+    private readonly record struct ServerReceipt(string ReportId, long SizeBytes);
+
     private sealed class ProgressFileContent(
         FileStream source,
-        IProgress<CombatBugReportUploadProgress>? progress) : HttpContent
+        IProgress<CombatBugReportUploadProgress>? progress,
+        CancellationToken requestCancellationToken) : HttpContent
     {
         protected override bool TryComputeLength(out long length)
         {
@@ -196,13 +230,32 @@ internal static class CombatBugReportUploader
         }
 
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
-            => WriteContentAsync(stream, CancellationToken.None);
+            => WriteContentAsync(stream, requestCancellationToken);
 
         protected override Task SerializeToStreamAsync(
             Stream stream,
             TransportContext? context,
             CancellationToken cancellationToken)
-            => WriteContentAsync(stream, cancellationToken);
+        {
+            if (!requestCancellationToken.CanBeCanceled
+                || requestCancellationToken == cancellationToken)
+            {
+                return WriteContentAsync(stream, cancellationToken);
+            }
+            if (!cancellationToken.CanBeCanceled)
+                return WriteContentAsync(stream, requestCancellationToken);
+            return WriteContentWithLinkedCancellationAsync(stream, cancellationToken);
+        }
+
+        private async Task WriteContentWithLinkedCancellationAsync(
+            Stream destination,
+            CancellationToken transportCancellationToken)
+        {
+            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(
+                requestCancellationToken,
+                transportCancellationToken);
+            await WriteContentAsync(destination, linked.Token);
+        }
 
         private async Task WriteContentAsync(Stream destination, CancellationToken cancellationToken)
         {

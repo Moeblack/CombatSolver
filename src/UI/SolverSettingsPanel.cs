@@ -29,6 +29,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private long _uploadBytesSent;
     private long _uploadTotalBytes;
     private int _lastRenderedUploadPercentage = -1;
+    private string? _uploadSubmissionId;
 
     public event Action? ResetPositionRequested;
 
@@ -36,6 +37,11 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         => !_uploadProgress.Visible
            && _uploadProgress.MinValue == 0
            && _uploadProgress.MaxValue == 100
+           && !_uploadProgress.ShowPercentage
+           && MapUploadProgressBarValue(100) == 95
+           && FormatUploadProgressStatus(1024, 1024, 100).Contains(
+               "等待服务器确认",
+               StringComparison.Ordinal)
            && _uploadBugReport.Text == "上传问题包";
 
     public SolverSettingsPanel()
@@ -215,7 +221,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             MinValue = 0,
             MaxValue = 100,
             Value = 0,
-            ShowPercentage = true,
+            ShowPercentage = false,
             CustomMinimumSize = new Vector2(0, 18),
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
@@ -238,14 +244,14 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             return;
         long total = Interlocked.Read(ref _uploadTotalBytes);
         long sent = Interlocked.Read(ref _uploadBytesSent);
-        int percentage = total <= 0
-            ? 0
-            : (int)Math.Clamp(sent * 100L / total, 0L, 100L);
+        if (total <= 0)
+            return;
+        int percentage = (int)Math.Clamp(sent * 100L / total, 0L, 100L);
         if (percentage == _lastRenderedUploadPercentage)
             return;
         _lastRenderedUploadPercentage = percentage;
-        _uploadProgress.Value = percentage;
-        _status.Text = $"正在上传… {percentage}%";
+        _uploadProgress.Value = MapUploadProgressBarValue(percentage);
+        _status.Text = FormatUploadProgressStatus(sent, total, percentage);
     }
 
     public override void _ExitTree()
@@ -768,13 +774,16 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         {
             _uploadCancelRequested = true;
             _uploadCancellation?.Cancel();
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] BUG_REPORT_UPLOAD_CANCEL_REQUESTED submission_id={_uploadSubmissionId ?? "unknown"}");
             _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Warning);
             _status.Text = "正在取消上传…";
-            _uploadBugReport.Disabled = true;
+            RefreshBugReportControls();
             return;
         }
         if (_exportInProgress || HasOpenUploadDialog())
             return;
+        _uploadProgress.Visible = false;
         BugReportUploadDialog dialog = new(SolverSettings.Current.ReporterContactQq ?? string.Empty);
         _uploadDialog = dialog;
         dialog.UploadConfirmed += OnUploadConfirmed;
@@ -800,6 +809,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextSecondary);
         _status.Text = "正在打包问题包…";
         string submissionId = Guid.NewGuid().ToString("N");
+        _uploadSubmissionId = submissionId;
         TaskHelper.RunSafely(UploadBugReportAsync(
             description,
             submissionId,
@@ -812,6 +822,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         CancellationToken cancellationToken)
     {
         string? path = null;
+        bool uploadConfirmed = false;
         try
         {
             string descriptionWithClassification = SolverController.BuildBugReportDescription(description);
@@ -823,6 +834,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             FileInfo archive = new(path);
             Interlocked.Exchange(ref _uploadBytesSent, 0);
             Interlocked.Exchange(ref _uploadTotalBytes, archive.Length);
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] BUG_REPORT_UPLOAD_STARTED submission_id={submissionId} zip_bytes={archive.Length}");
             string contactQq = SolverSettings.Current.ReporterContactQq ?? string.Empty;
             DirectProgress<CombatBugReportUploadProgress> progress = new(value =>
             {
@@ -836,14 +849,18 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                 submissionId,
                 progress,
                 cancellationToken);
+            uploadConfirmed = true;
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] BUG_REPORT_UPLOAD_CONFIRMED submission_id={submissionId} report_id={receipt.ReportId} status={(int)receipt.StatusCode} zip_bytes={receipt.SizeBytes}");
             string? cleanupWarning = DeleteUploadedArchive(path);
             PostUi(() =>
             {
                 _uploadProgress.Value = 100;
+                _uploadProgress.Visible = true;
                 _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
                 _status.Text = cleanupWarning == null
-                    ? $"已上传，反馈编号：{receipt.ReportId}"
-                    : $"已上传，反馈编号：{receipt.ReportId}；{cleanupWarning}";
+                    ? $"已上传 {FormatByteCount(receipt.SizeBytes)}，反馈编号：{receipt.ReportId}"
+                    : $"已上传 {FormatByteCount(receipt.SizeBytes)}，反馈编号：{receipt.ReportId}；{cleanupWarning}";
             });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -854,7 +871,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                 _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Warning);
                 _status.Text = path == null
                     ? "上传已取消"
-                    : "已停止等待上传结果；问题包已保留，请勿立即重复提交";
+                    : "上传已取消；未收到服务器确认，问题包已保留";
             });
         }
         catch (TaskCanceledException ex)
@@ -885,10 +902,11 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             _uploadCancelRequested = false;
             _uploadCancellation?.Dispose();
             _uploadCancellation = null;
+            _uploadSubmissionId = null;
             PostUi(() =>
             {
                 SetProcess(false);
-                _uploadProgress.Visible = false;
+                _uploadProgress.Visible = uploadConfirmed;
                 RefreshBugReportControls();
             });
         }
@@ -912,8 +930,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         _exportBugReport.Disabled = _exportInProgress || _uploadInProgress || dialogOpen;
         if (_uploadInProgress)
         {
-            _uploadBugReport.Disabled = false;
-            _uploadBugReport.Text = "取消上传";
+            _uploadBugReport.Disabled = _uploadCancelRequested;
+            _uploadBugReport.Text = _uploadCancelRequested ? "正在取消…" : "取消上传";
             SolverUiTokens.ApplyButtonStyle(_uploadBugReport, SolverButtonStyle.Danger);
             return;
         }
@@ -952,6 +970,27 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private static string DescribeUiFailure(Exception exception)
         => CombatBugReportDescription.NormalizeDetail(exception.GetBaseException().Message)
            ?? exception.GetType().Name;
+
+    private static string FormatByteCount(long bytes)
+    {
+        if (bytes < 1024)
+            return $"{bytes} B";
+        if (bytes < 1024L * 1024)
+            return $"{bytes / 1024d:0.##} KB";
+        if (bytes < 1024L * 1024 * 1024)
+            return $"{bytes / (1024d * 1024):0.##} MB";
+        return $"{bytes / (1024d * 1024 * 1024):0.##} GB";
+    }
+
+    private static double MapUploadProgressBarValue(int transmittedPercentage)
+        => transmittedPercentage >= 100
+            ? 95
+            : Math.Min(94, transmittedPercentage * 0.95);
+
+    private static string FormatUploadProgressStatus(long sent, long total, int percentage)
+        => sent >= total
+            ? $"已发送 {FormatByteCount(total)}，正在等待服务器确认…"
+            : $"正在上传… {FormatByteCount(sent)} / {FormatByteCount(total)}（{percentage}%）";
 
     private sealed class DirectProgress<T>(Action<T> report) : IProgress<T>
     {

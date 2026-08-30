@@ -113,9 +113,10 @@ internal sealed partial class BugReportUploadDialog : CanvasLayer
         };
         buttons.AddChild(confirm);
         root.AddChild(buttons);
-
-        TaskHelper.RunSafely(CenterOnScreenAsync());
     }
+
+    public override void _Ready()
+        => TaskHelper.RunSafely(CenterOnScreenAsync());
 
     private async Task CenterOnScreenAsync()
     {

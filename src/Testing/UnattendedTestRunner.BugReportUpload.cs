@@ -13,14 +13,15 @@ internal sealed partial class UnattendedTestRunner
         string directory = ProjectSettings.GlobalizePath("user://combat-solver-test-upload");
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, $"upload-{_request.RunId}.zip");
-        File.WriteAllBytes(path, new byte[200 * 1024]);
+        const int archiveBytes = 200 * 1024;
+        File.WriteAllBytes(path, new byte[archiveBytes]);
         try
         {
             string submissionId = Guid.NewGuid().ToString("N");
             List<CombatBugReportUploadProgress> progress = [];
             using FakeUploadHandler successHandler = new(
-                HttpStatusCode.OK,
-                "accepted-without-json");
+                HttpStatusCode.Created,
+                $"{{\"id\":\"server-report-1\",\"sizeBytes\":{archiveBytes}}}");
             using NetHttpClient successClient = new(successHandler);
             CombatBugReportUploadReceipt receipt = await CombatBugReportUploader.UploadForTestingAsync(
                 successClient,
@@ -29,8 +30,10 @@ internal sealed partial class UnattendedTestRunner
                 "123456",
                 submissionId,
                 new DirectTestProgress<CombatBugReportUploadProgress>(progress.Add));
-            if (receipt.ReportId != submissionId
+            if (receipt.ReportId != "server-report-1"
                 || receipt.SubmissionId != submissionId
+                || receipt.SizeBytes != archiveBytes
+                || receipt.StatusCode != HttpStatusCode.Created
                 || progress.Count == 0
                 || progress[^1].Percentage != 100
                 || !successHandler.SawMultipartReport
@@ -40,8 +43,10 @@ internal sealed partial class UnattendedTestRunner
             {
                 throw new InvalidOperationException(
                     "问题包上传成功回执、multipart 字段或传输进度不完整：" +
-                    $"report_id={receipt.ReportId == submissionId} " +
+                    $"report_id={receipt.ReportId == "server-report-1"} " +
                     $"submission_id={receipt.SubmissionId == submissionId} " +
+                    $"size={receipt.SizeBytes} " +
+                    $"status={(int)receipt.StatusCode} " +
                     $"progress_count={progress.Count} " +
                     $"progress_last={(progress.Count == 0 ? -1 : progress[^1].Percentage)} " +
                     $"report={successHandler.SawMultipartReport} " +
@@ -50,27 +55,57 @@ internal sealed partial class UnattendedTestRunner
                     $"token={successHandler.SawUploadToken}。");
             }
 
-            using FakeUploadHandler numericIdHandler = new(HttpStatusCode.OK, "{\"id\":123}");
+            using FakeUploadHandler numericIdHandler = new(
+                HttpStatusCode.OK,
+                $"{{\"id\":123,\"sizeBytes\":{archiveBytes}}}");
             using NetHttpClient numericIdClient = new(numericIdHandler);
-            CombatBugReportUploadReceipt numericIdReceipt = await CombatBugReportUploader.UploadForTestingAsync(
-                numericIdClient,
-                path,
-                "测试\n\n【CombatSolver 提交编号】" + submissionId,
-                string.Empty,
-                submissionId);
-            if (numericIdReceipt.ReportId != submissionId)
-                throw new InvalidOperationException("非字符串服务端编号没有回退到客户端提交编号。");
+            try
+            {
+                await CombatBugReportUploader.UploadForTestingAsync(
+                    numericIdClient,
+                    path,
+                    "测试\n\n【CombatSolver 提交编号】" + submissionId,
+                    string.Empty,
+                    submissionId);
+                throw new InvalidOperationException("无效服务端编号被误报为上传成功。");
+            }
+            catch (InvalidDataException)
+            {
+            }
 
             using FakeUploadHandler arrayResponseHandler = new(HttpStatusCode.OK, "[]");
             using NetHttpClient arrayResponseClient = new(arrayResponseHandler);
-            CombatBugReportUploadReceipt arrayResponseReceipt = await CombatBugReportUploader.UploadForTestingAsync(
-                arrayResponseClient,
-                path,
-                "测试\n\n【CombatSolver 提交编号】" + submissionId,
-                string.Empty,
-                submissionId);
-            if (arrayResponseReceipt.ReportId != submissionId)
-                throw new InvalidOperationException("非对象成功响应没有回退到客户端提交编号。");
+            try
+            {
+                await CombatBugReportUploader.UploadForTestingAsync(
+                    arrayResponseClient,
+                    path,
+                    "测试\n\n【CombatSolver 提交编号】" + submissionId,
+                    string.Empty,
+                    submissionId);
+                throw new InvalidOperationException("非对象服务端响应被误报为上传成功。");
+            }
+            catch (InvalidDataException)
+            {
+            }
+
+            using FakeUploadHandler wrongSizeHandler = new(
+                HttpStatusCode.Created,
+                "{\"id\":\"server-report-2\",\"sizeBytes\":1}");
+            using NetHttpClient wrongSizeClient = new(wrongSizeHandler);
+            try
+            {
+                await CombatBugReportUploader.UploadForTestingAsync(
+                    wrongSizeClient,
+                    path,
+                    "测试\n\n【CombatSolver 提交编号】" + submissionId,
+                    string.Empty,
+                    submissionId);
+                throw new InvalidOperationException("服务端文件大小不一致仍被误报为上传成功。");
+            }
+            catch (InvalidDataException)
+            {
+            }
 
             string oversizedResponse = new string('x', 70_000) + "\nUNBOUNDED_RESPONSE_TAIL";
             using FakeUploadHandler failureHandler = new(
@@ -114,6 +149,49 @@ internal sealed partial class UnattendedTestRunner
             }
             if (unusedHandler.RequestCount != 0)
                 throw new InvalidOperationException("超长问题描述仍然访问了上传服务。");
+
+            using CancellationTokenSource bodyCancellation = new();
+            using LegacyCopyUploadHandler bodyCancellationHandler = new(archiveBytes);
+            using NetHttpClient bodyCancellationClient = new(bodyCancellationHandler);
+            Task<CombatBugReportUploadReceipt> bodyCancellationTask =
+                CombatBugReportUploader.UploadForTestingAsync(
+                    bodyCancellationClient,
+                    path,
+                    "取消文件传输",
+                    string.Empty,
+                    submissionId,
+                    new DirectTestProgress<CombatBugReportUploadProgress>(value =>
+                    {
+                        if (value.BytesSent > 0)
+                            bodyCancellation.Cancel();
+                    }),
+                    bodyCancellation.Token);
+            await AssertUploadCanceledPromptlyAsync(
+                bodyCancellationTask,
+                bodyCancellation,
+                "无取消参数的旧传输入口");
+
+            using CancellationTokenSource confirmationCancellation = new();
+            using AwaitingConfirmationUploadHandler confirmationHandler = new();
+            using NetHttpClient confirmationClient = new(confirmationHandler);
+            List<CombatBugReportUploadProgress> confirmationProgress = [];
+            Task<CombatBugReportUploadReceipt> confirmationTask =
+                CombatBugReportUploader.UploadForTestingAsync(
+                    confirmationClient,
+                    path,
+                    "等待服务端确认",
+                    string.Empty,
+                    submissionId,
+                    new DirectTestProgress<CombatBugReportUploadProgress>(confirmationProgress.Add),
+                    confirmationCancellation.Token);
+            await confirmationHandler.BodyCopied.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            if (confirmationProgress.Count == 0 || confirmationProgress[^1].Percentage != 100)
+                throw new InvalidOperationException("等待服务端确认前没有完成文件字节进度。");
+            confirmationCancellation.Cancel();
+            await AssertUploadCanceledPromptlyAsync(
+                confirmationTask,
+                confirmationCancellation,
+                "等待服务端确认阶段");
         }
         finally
         {
@@ -124,6 +202,25 @@ internal sealed partial class UnattendedTestRunner
     private sealed class DirectTestProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
+    }
+
+    private static async Task AssertUploadCanceledPromptlyAsync(
+        Task<CombatBugReportUploadReceipt> uploadTask,
+        CancellationTokenSource cancellation,
+        string stage)
+    {
+        try
+        {
+            await uploadTask.WaitAsync(TimeSpan.FromSeconds(2));
+            throw new InvalidOperationException($"{stage}取消后仍返回成功。");
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (TimeoutException ex)
+        {
+            throw new InvalidOperationException($"{stage}取消后两秒内没有结束。", ex);
+        }
     }
 
     private sealed class FakeUploadHandler(HttpStatusCode statusCode, string responseBody) : HttpMessageHandler
@@ -158,6 +255,41 @@ internal sealed partial class UnattendedTestRunner
             {
                 Content = new StringContent(responseBody, Encoding.UTF8),
             };
+        }
+    }
+
+    private sealed class LegacyCopyUploadHandler(int archiveBytes) : HttpMessageHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            using MemoryStream serialized = new();
+            if (request.Content != null)
+                await request.Content.CopyToAsync(serialized);
+            return new HttpResponseMessage(HttpStatusCode.Created)
+            {
+                Content = new StringContent(
+                    $"{{\"id\":\"legacy-copy\",\"sizeBytes\":{archiveBytes}}}",
+                    Encoding.UTF8),
+            };
+        }
+    }
+
+    private sealed class AwaitingConfirmationUploadHandler : HttpMessageHandler
+    {
+        public TaskCompletionSource<bool> BodyCopied { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            if (request.Content != null)
+                await request.Content.CopyToAsync(Stream.Null, cancellationToken);
+            BodyCopied.TrySetResult(true);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException("等待服务端确认的测试处理器意外恢复。");
         }
     }
 }

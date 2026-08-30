@@ -20,6 +20,7 @@
 | `TOASTY-FIRST-TURN-USER-BOUNDARY-0190` | 通过 | 烘焙手套原生手牌页显示后开始搜索；计划就绪时仍为 `Selected=0 / CardsPlayed=0`，模拟玩家启动后才确认选择。严格增量/完整回放一致，开启结束回合变差复核后完整自动执行到第 2 回合，计划外重算 `0`。runId `a2a1fd688e71465d9458c5cbb1c743d4` | 2026-08-30 |
 | `TOASTY-PHANTASMAL-BUNDLE-0190` | 通过 | 使用花园幽灵鳗问题包的战前牌组、遗物与 RNG；首回合计划展示时未选牌、未出牌，玩家启动后完整自动执行到第 5 回合。结束回合复核开启，计划外重算 `0`；严格完整回放从同一份首回合准备选择起步。runId `0451b77331a94c96ae507e2ccdb4603a` | 2026-08-30 |
 | `UPLOAD-HARDENING-PR4-FINAL` | 通过 | 真实问题包导出保持完整夹具且移除联系QQ与本机绝对路径；本地假服务验证 multipart 三字段不变、字节进度到 `100%`、非 JSON/数字编号的成功响应回退客户端提交编号、超长描述联网前失败、超长错误响应截断并折叠换行。设置面板同时存在隐藏初始进度条与单实例上传按钮状态。导出/脱敏与上传协议 runId `8a4144cb3a264bb7abf33ea6461ddcb7`；最终 UI/进度状态 runId `c90d6b854c3446ffad4c09b4da1753bf`；最终成功响应兼容矩阵 runId `85861ebc16a04cb09fbd9894bfb3d088` | 2026-08-30 |
+| `UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL` | 通过 | 取代上一条中“任意成功响应回退客户端编号”的旧口径：文件发送完成只显示到 `95%` 并进入“等待服务器确认”，只有反馈编号与实收字节数匹配才确认成功。假服务分别在正文传输中和等待回执时取消，任务均在两秒内结束；无效回执与大小不一致均保留本地包。真实接收服务 test ZIP 返回 HTTP `201`、反馈编号 `9264c0f65854423e8254de5ff5e5449f` 并确认 `259 B`。runId `f328c2f5fe9f4ccca11826bcbb8b1f6c` | 2026-08-30 |
 
 ## 0.19.0
 
@@ -526,6 +527,7 @@ pwsh -NoProfile -File tools\run-headless-matrix.ps1 -ContinueOnFailure
 
 ```powershell
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId QOL-CONTROLLER-STOP-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-LOW-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Low -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-MEDIUM-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Medium -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-HIGH-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest High -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
@@ -760,6 +762,7 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MOVES-BA
 
 ```bash
 ./tools/run-unattended-test.sh --scenario-id QOL-CONTROLLER-STOP-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
+./tools/run-unattended-test.sh --scenario-id UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-LOW-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test Low --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-MEDIUM-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test Medium --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-HIGH-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test High --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete

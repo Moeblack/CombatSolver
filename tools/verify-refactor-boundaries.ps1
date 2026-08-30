@@ -630,8 +630,11 @@ $solverSettingsPanelPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel
 foreach ($check in @(
     @{ Path = $bugReportUploaderPath; Text = "IProgress<CombatBugReportUploadProgress>" },
     @{ Path = $bugReportUploaderPath; Text = "HttpCompletionOption.ResponseHeadersRead" },
+    @{ Path = $bugReportUploaderPath; Text = "CancellationToken requestCancellationToken" },
+    @{ Path = $bugReportUploaderPath; Text = "ReadServerReceipt(body)" },
     @{ Path = $solverSettingsPanelPath; Text = "private readonly ProgressBar _uploadProgress;" },
-    @{ Path = $solverSettingsPanelPath; Text = "private volatile bool _uploadInProgress;" })) {
+    @{ Path = $solverSettingsPanelPath; Text = "private volatile bool _uploadInProgress;" },
+    @{ Path = $solverSettingsPanelPath; Text = "等待服务器确认" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing upload ownership boundary '$($check.Text)'")
     }
