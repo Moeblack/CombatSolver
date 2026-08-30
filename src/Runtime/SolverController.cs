@@ -90,6 +90,11 @@ internal static class SolverController
         => _combat.ReplanCounts.GetValueOrDefault(ReplanCause.ManualDivergence);
     internal static bool ManualRouteImprovementDetected
         => _combat.ManualRouteImprovementDetected;
+    internal static bool BugReportUploadRecommended
+        => UnexpectedReplanCount > 0
+           || _combat.ReplanCounts.GetValueOrDefault(ReplanCause.ContinuationMissing) > 0
+           || _combat.ReplanCounts.GetValueOrDefault(ReplanCause.PlanExhausted) > 0
+           || _combat.BugReportIssues.RequiresPlayerUpload;
     internal static ManualProjectionComparison? LastManualProjectionComparisonForTesting
         => _combat.LastManualProjectionComparison;
     internal static int NoGcRegionRolloverCountForTesting
@@ -122,14 +127,21 @@ internal static class SolverController
     }
 
     internal static void RecordTurnSetupFailure(Exception exception)
-        => _combat.BugReportIssues.RecordFailure(
+    {
+        _combat.BugReportIssues.RecordFailure(
             CombatBugReportIssueKind.TurnSetupFailure,
             exception);
+        if (NGame.Instance is { } host)
+            SolverOverlay.Show(host, FormatTurnSetupFailure(exception));
+    }
 
     internal static void RecordTurnSetupStateMismatch(string difference)
-        => _combat.BugReportIssues.Record(
+    {
+        _combat.BugReportIssues.Record(
             CombatBugReportIssueKind.TurnSetupStateMismatch,
             difference);
+        SolverOverlay.RefreshControls();
+    }
 
     public static void ApplyPersistentSettings(SolverSettingsSnapshot settings)
     {
@@ -657,11 +669,15 @@ internal static class SolverController
     {
         string title = $"[color={SolverUiTokens.Palette.DangerHex}][b]搜索初始化失败[/b][/color]";
         if (exception is not IncompatibleGameplayModException incompatible)
-            return $"{title}\n[color={SolverUiTokens.Palette.DangerHex}]{EscapeRichText(exception.Message)}[/color]";
+        {
+            return $"{title}\n[color={SolverUiTokens.Palette.DangerHex}]{EscapeRichText(exception.Message)}[/color]" +
+                   $"\n{SolverUiTokens.BugReportUploadInstructionRichText}";
+        }
 
         string modName = EscapeRichText(incompatible.PlayerFacingModName);
         return $"{title}\n[color={SolverUiTokens.Palette.DangerHex}]检测到不兼容的第三方 Mod：{modName}。" +
-               "建议卸载该 Mod 并重启游戏后再使用求解器。[/color]";
+               $"建议卸载该 Mod 并重启游戏后再使用求解器。[/color]\n" +
+               SolverUiTokens.BugReportUploadInstructionRichText;
     }
 
     private static string EscapeRichText(string value)
@@ -1114,7 +1130,10 @@ internal static class SolverController
             _combat.PendingManualProjectionBaseline = null;
             _combat.LatestResult = null;
             _combat.LatestStamp = null;
-            SolverOverlay.Show(host, "[b]战斗路线求解器[/b]\n战斗状态在计算期间发生变化，已丢弃过期结果。");
+            SolverOverlay.Show(
+                host,
+                "[b]战斗路线求解器[/b]\n战斗状态在计算期间发生变化，已丢弃过期结果。\n" +
+                SolverUiTokens.BugReportUploadInstructionRichText);
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_STALE generation={generation}");
             return;
         }
@@ -1659,11 +1678,18 @@ internal static class SolverController
 
     private static string FormatSearchFailure(Exception exception)
         => $"[color={SolverUiTokens.Palette.DangerHex}][b]计算失败[/b]\n" +
-           $"{EscapeRichText(exception.Message)}[/color]";
+           $"{EscapeRichText(exception.Message)}[/color]\n" +
+           SolverUiTokens.BugReportUploadInstructionRichText;
 
     private static string FormatDeploymentFailure(Exception exception)
         => $"[color={SolverUiTokens.Palette.DangerHex}][b]自动执行中止[/b]\n" +
-           $"{EscapeRichText(exception.Message)}[/color]";
+           $"{EscapeRichText(exception.Message)}[/color]\n" +
+           SolverUiTokens.BugReportUploadInstructionRichText;
+
+    private static string FormatTurnSetupFailure(Exception exception)
+        => $"[color={SolverUiTokens.Palette.DangerHex}][b]回合准备选牌失败[/b]\n" +
+           $"{EscapeRichText(exception.GetBaseException().Message)}[/color]\n" +
+           SolverUiTokens.BugReportUploadInstructionRichText;
 
     private static void CancelDeployment()
     {

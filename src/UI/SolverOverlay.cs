@@ -73,10 +73,16 @@ internal static class SolverOverlay
             && _theftPolicyControls.Visible;
     internal static bool UnexpectedReplanWarningVisibleForTesting
         => _feedbackBanner?.Visible == true
-            && _feedbackBannerLabel?.Text.Contains("计划外重算", StringComparison.Ordinal) == true;
+            && _feedbackBannerLabel?.Text.Contains("计划外重算", StringComparison.Ordinal) == true
+            && _feedbackBannerLabel.Text.Contains(
+                SolverUiTokens.BugReportUploadInstruction,
+                StringComparison.Ordinal);
     internal static bool ManualRouteImprovementVisibleForTesting
         => _feedbackBanner?.Visible == true
-            && _feedbackBannerLabel?.Text.Contains("比求解器更好的世界线", StringComparison.Ordinal) == true;
+            && _feedbackBannerLabel?.Text.Contains("比求解器更好的世界线", StringComparison.Ordinal) == true
+            && _feedbackBannerLabel.Text.Contains(
+                SolverUiTokens.BugReportUploadInstruction,
+                StringComparison.Ordinal);
     internal static string? ExecuteButtonTextForTesting => _executeButton?.Text;
     internal static bool MessageWrappingEnabledForTesting
         => _summaryText is { FitContent: true, AutowrapMode: TextServer.AutowrapMode.WordSmart };
@@ -382,7 +388,8 @@ internal static class SolverOverlay
             _summaryText.Visible = true;
             _summaryText.Text =
                 $"[color={SolverUiTokens.Palette.DangerHex}]完整路线原预计 {previousProjectedBattleHpLost} HP，" +
-                $"重算后为 {projectedBattleHpLost} HP；全自动已暂停。[/color]";
+                $"重算后为 {projectedBattleHpLost} HP；全自动已暂停。[/color]\n" +
+                SolverUiTokens.BugReportUploadInstructionRichText;
         }
     }
 
@@ -403,7 +410,8 @@ internal static class SolverOverlay
             _summaryText.Visible = true;
             _summaryText.Text =
                 $"[color={SolverUiTokens.Palette.DangerHex}]路线预计掉血 {plannedHpLoss} HP，" +
-                $"结束回合前实机复核为 {liveHpLoss} HP；全自动未提交结束回合。[/color]";
+                $"结束回合前实机复核为 {liveHpLoss} HP；全自动未提交结束回合。[/color]\n" +
+                SolverUiTokens.BugReportUploadInstructionRichText;
         }
     }
 
@@ -963,12 +971,21 @@ internal static class SolverOverlay
         Color tone;
         if (SolverController.ManualRouteImprovementDetected)
         {
-            text = "你打出了比求解器更好的世界线，建议在设置中上传问题包，这可以更好地推动算法进步！";
+            text = "你打出了比求解器更好的世界线。" +
+                   SolverUiTokens.BugReportUploadInstruction +
+                   "这可以更好地推动算法进步！";
             tone = Success;
         }
         else if (SolverController.UnexpectedReplanCount > 0)
         {
-            text = "出现计划外重算，可能是模拟或算法问题。请在设置中导出完整问题包并反馈。";
+            text = "出现计划外重算，可能是模拟或算法问题。" +
+                   SolverUiTokens.BugReportUploadInstruction;
+            tone = Danger;
+        }
+        else if (SolverController.BugReportUploadRecommended)
+        {
+            text = "求解器记录到需要反馈的异常。" +
+                   SolverUiTokens.BugReportUploadInstruction;
             tone = Danger;
         }
         else

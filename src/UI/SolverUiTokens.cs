@@ -13,6 +13,10 @@ internal enum SolverButtonStyle
 
 internal static class SolverUiTokens
 {
+    public const string BugReportUploadInstruction = "请在设置中点击“上传问题包”提交日志。";
+    public static string BugReportUploadInstructionRichText
+        => $"[color={Palette.WarningHex}]{BugReportUploadInstruction}[/color]";
+
     public static class Spacing
     {
         public const int Xxs = 2;

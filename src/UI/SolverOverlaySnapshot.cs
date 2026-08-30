@@ -233,13 +233,16 @@ internal sealed record SolverOverlaySnapshot(
         {
             detailLines.Add(
                 $"[color={SolverUiTokens.Palette.DangerHex}][b]路线失配[/b][/color]  " +
-                $"完整路线原预计 {result.PreviousProjectedBattleHpLost} HP，重算后 {result.ProjectedBattleHpLost} HP，增加 {result.ProjectedBattleHpLossIncrease} HP");
+                $"完整路线原预计 {result.PreviousProjectedBattleHpLost} HP，重算后 {result.ProjectedBattleHpLost} HP，" +
+                $"增加 {result.ProjectedBattleHpLossIncrease} HP。" +
+                SolverUiTokens.BugReportUploadInstruction);
         }
         if (unexpectedReplan)
         {
             detailLines.Add(
                 $"[color={SolverUiTokens.Palette.DangerHex}][b]计划外重算[/b][/color]  " +
-                "求解器执行后的预测状态与实机不一致，请在设置中导出问题包并反馈");
+                "求解器执行后的预测状态与实机不一致。" +
+                SolverUiTokens.BugReportUploadInstruction);
         }
         return string.Join('\n', detailLines);
     }

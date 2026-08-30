@@ -56,9 +56,10 @@ internal sealed partial class UnattendedTestRunner
         if (!playerMessage.Contains("The Watcher ［Test］（Watcher）", StringComparison.Ordinal)
             || !playerMessage.Contains("不兼容的第三方 Mod", StringComparison.Ordinal)
             || !playerMessage.Contains("建议卸载", StringComparison.Ordinal)
+            || !playerMessage.Contains(SolverUiTokens.BugReportUploadInstruction, StringComparison.Ordinal)
             || playerMessage.Contains("WatcherEnchantStackHookProxy", StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("第三方玩法 Mod 初始化失败提示缺少名称、标识或卸载建议。");
+            throw new InvalidOperationException("第三方玩法 Mod 初始化失败提示缺少名称、卸载建议或上传入口。");
         }
         if (!incompatible.Message.Contains("WatcherEnchantStackHookProxy", StringComparison.Ordinal)
             || !incompatible.Message.Contains("Watcher", StringComparison.Ordinal))

@@ -82,6 +82,11 @@ internal sealed class CombatBugReportIssueLedger
     public IReadOnlyList<CombatBugReportIssue> Snapshot()
         => _issues.Values.OrderBy(issue => issue.Kind).ToArray();
 
+    public bool RequiresPlayerUpload
+        => _issues.Keys.Any(kind => kind is not (
+            CombatBugReportIssueKind.ManualHpLossIncreased
+            or CombatBugReportIssueKind.FullAutoStoppedAtDeathTurn));
+
     private static bool IsUnexpectedChoiceFailure(string message)
         => message.Contains("计划外选择", StringComparison.Ordinal)
            || message.Contains("计划外的", StringComparison.Ordinal)
