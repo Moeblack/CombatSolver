@@ -1,4 +1,5 @@
 using Godot;
+using MegaCrit.Sts2.Core.Localization.Fonts;
 
 namespace CombatSolver;
 
@@ -10,11 +11,43 @@ internal sealed partial class SolverSettingsPanel
     private CheckButton _stopOnWorseRecalculation = null!;
     private OptionButton _searchCompletionNotificationPolicy = null!;
     private OptionButton _potionPolicy = null!;
+    private OptionButton _overlayTheme = null!;
+    private HSlider _overlayOpacity = null!;
+    private Label _overlayOpacityValue = null!;
 
     internal bool SearchCompletionNotificationSettingsConfiguredForTesting
         => _searchCompletionNotificationPolicy.GetItemId(
                _searchCompletionNotificationPolicy.Selected)
            == (int)ResolveSearchCompletionNotificationPolicy(SolverSettings.Current);
+
+    internal bool VisualSettingsConfiguredForTesting
+        => _overlayTheme.GetItemId(_overlayTheme.Selected) == (int)SolverSettings.Current.OverlayTheme
+           && Math.Abs(_overlayOpacity.Value - SolverSettings.Current.OverlayOpacity) < 0.001d;
+
+    internal bool ExerciseVisualSettingsForTesting()
+    {
+        SolverSettingsData original = SolverSettings.Current;
+        try
+        {
+            SolverSettings.ApplyForTesting(original with
+            {
+                OverlayTheme = SolverOverlayTheme.Light,
+                OverlayOpacity = 0.55f,
+            });
+            Reload();
+            SolverOverlay.ApplyOverlayOpacity();
+            return VisualSettingsConfiguredForTesting
+                   && _overlayTheme.GetItemId(_overlayTheme.Selected) == (int)SolverOverlayTheme.Light
+                   && _overlayOpacityValue.Text == "55%"
+                   && Math.Abs(SolverOverlay.OverlayOpacityForTesting - 0.55f) < 0.001f;
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(original);
+            Reload();
+            SolverOverlay.ApplyOverlayOpacity();
+        }
+    }
 
     internal bool ExerciseSearchCompletionNotificationPolicyForTesting()
     {
@@ -94,6 +127,21 @@ internal sealed partial class SolverSettingsPanel
             0d,
             3d));
         content.AddChild(executionGrid);
+
+        content.AddChild(CreateSectionHeading("界面"));
+        GridContainer interfaceGrid = CreateSettingsGrid();
+        _overlayTheme = CreateOverlayThemeInput();
+        AddBasicRow(
+            interfaceGrid,
+            "界面主题",
+            _overlayTheme,
+            "深色为默认主题；切换后会重建当前覆盖层，并保留最近的路线与设置页面。");
+        AddBasicRow(
+            interfaceGrid,
+            "覆盖层透明度",
+            CreateOverlayOpacityInput(),
+            "调整整个求解器覆盖层的透明度，范围为 25%–100%，立即生效。");
+        content.AddChild(interfaceGrid);
         return CreatePageScroll(content);
     }
 
@@ -166,6 +214,69 @@ internal sealed partial class SolverSettingsPanel
             SetStatus("已保存，下次执行生效", SolverUiTokens.Palette.Success);
         };
         return input;
+    }
+
+    private OptionButton CreateOverlayThemeInput()
+    {
+        OptionButton input = CreateOptionInput();
+        input.AddItem("深色（默认）", (int)SolverOverlayTheme.Dark);
+        input.AddItem("浅色", (int)SolverOverlayTheme.Light);
+        _reloadInputs.Add(data => input.Selected = input.GetItemIndex((int)data.OverlayTheme));
+        input.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            SolverOverlayTheme theme = (SolverOverlayTheme)input.GetItemId((int)index);
+            SolverSettings.Update(SolverSettings.Current with { OverlayTheme = theme });
+            SetStatus("界面主题已保存并应用", SolverUiTokens.Palette.Success);
+            SolverOverlay.ApplyConfiguredTheme();
+        };
+        return input;
+    }
+
+    private Control CreateOverlayOpacityInput()
+    {
+        HBoxContainer row = new()
+        {
+            MouseFilter = MouseFilterEnum.Pass,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        row.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+        _overlayOpacity = new HSlider
+        {
+            MinValue = 0.25,
+            MaxValue = 1d,
+            Step = 0.05,
+            FocusMode = FocusModeEnum.None,
+            MouseDefaultCursorShape = CursorShape.PointingHand,
+            CustomMinimumSize = new Vector2(220, 24),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        StyleSlider(_overlayOpacity);
+        _overlayOpacityValue = SolverUiTokens.CreateLabel(
+            "100%",
+            SolverUiTokens.Type.Body,
+            SolverUiTokens.Palette.TextPrimary,
+            FontType.Bold);
+        _overlayOpacityValue.HorizontalAlignment = HorizontalAlignment.Right;
+        _overlayOpacityValue.CustomMinimumSize = new Vector2(48, 24);
+        _reloadInputs.Add(data =>
+        {
+            _overlayOpacity.SetValueNoSignal(data.OverlayOpacity);
+            _overlayOpacityValue.Text = $"{Math.Round(data.OverlayOpacity * 100d)}%";
+        });
+        _overlayOpacity.ValueChanged += value =>
+        {
+            _overlayOpacityValue.Text = $"{Math.Round(value * 100d)}%";
+            if (_loading)
+                return;
+            SolverSettings.Update(SolverSettings.Current with { OverlayOpacity = (float)value });
+            SolverOverlay.ApplyOverlayOpacity();
+            SetStatus("透明度已保存并立即生效", SolverUiTokens.Palette.Success);
+        };
+        row.AddChild(_overlayOpacity);
+        row.AddChild(_overlayOpacityValue);
+        return row;
     }
 
     private void OnSolverEnabledToggled(bool enabled)

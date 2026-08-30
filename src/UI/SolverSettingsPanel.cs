@@ -189,6 +189,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private void ResetDefaults()
     {
         bool wasDisabled = SolverController.SolverDisabled;
+        SolverOverlayTheme activeTheme = SolverOverlay.ActiveThemeForTesting;
         SolverSettings.ResetToDefaults();
         SolverSettingsSnapshot defaults = SolverSettings.Capture();
         SolverController.ApplyPersistentSettings(defaults);
@@ -197,7 +198,10 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         SolverOverlay.RefreshControls();
         ResetPositionRequested?.Invoke();
         Reload();
+        SolverOverlay.ApplyOverlayOpacity();
         SetStatus("已恢复默认设置", SolverUiTokens.Palette.Success);
+        if (activeTheme != SolverSettings.Current.OverlayTheme)
+            SolverOverlay.ApplyConfiguredTheme();
     }
 
     private enum SettingsPage

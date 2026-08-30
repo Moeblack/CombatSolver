@@ -58,8 +58,12 @@ internal sealed partial class SolverSettingsPanel
         input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.IsLightTheme
+                ? SolverUiTokens.Palette.Surface
+                : SolverUiTokens.Palette.Background,
+            SolverUiTokens.IsLightTheme
+                ? SolverUiTokens.Palette.Border
+                : SolverUiTokens.Palette.BorderSubtle,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
@@ -69,6 +73,12 @@ internal sealed partial class SolverSettingsPanel
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
+        if (SolverUiTokens.IsLightTheme)
+        {
+            input.AddThemeIconOverride(
+                "arrow",
+                SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
+        }
         SolverUiTokens.ApplyTextOutline(input);
         input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
         return input;
@@ -125,8 +135,12 @@ internal sealed partial class SolverSettingsPanel
         input.AddThemeColorOverride("font_placeholder_color", SolverUiTokens.Palette.TextMuted);
         input.AddThemeColorOverride("caret_color", SolverUiTokens.Palette.Accent);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.IsLightTheme
+                ? SolverUiTokens.Palette.Surface
+                : SolverUiTokens.Palette.Background,
+            SolverUiTokens.IsLightTheme
+                ? SolverUiTokens.Palette.Border
+                : SolverUiTokens.Palette.BorderSubtle,
             SolverUiTokens.Radius.Small,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Xs));
@@ -161,13 +175,65 @@ internal sealed partial class SolverSettingsPanel
         {
             FocusMode = FocusModeEnum.None,
             MouseDefaultCursorShape = CursorShape.PointingHand,
-            CustomMinimumSize = new Vector2(126, 32),
+            CustomMinimumSize = SolverUiTokens.IsLightTheme
+                ? new Vector2(40, 20)
+                : new Vector2(126, 32),
             SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
         };
         toggle.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
-        toggle.AddThemeColorOverride("font_hover_color", Colors.White);
+        toggle.AddThemeColorOverride(
+            "font_hover_color",
+            SolverUiTokens.IsLightTheme ? SolverUiTokens.Palette.TextPrimary : Colors.White);
+        if (SolverUiTokens.IsLightTheme)
+        {
+            Color trackOff = Color.FromHtml("d9d9d9ff");
+            Color trackOn = SolverUiTokens.Palette.Accent;
+            toggle.AddThemeStyleboxOverride("base", SolverUiTokens.CreateBox(
+                trackOff,
+                trackOff,
+                SolverUiTokens.Radius.Pill,
+                horizontalPadding: 4,
+                verticalPadding: 3));
+            Texture2D knob = SolverUiTokens.CreateCircleTexture(Colors.White);
+            toggle.AddThemeIconOverride("checked", knob);
+            toggle.AddThemeIconOverride("unchecked", knob);
+            toggle.Toggled += enabled => toggle.AddThemeStyleboxOverride(
+                "base",
+                SolverUiTokens.CreateBox(
+                    enabled ? trackOn : trackOff,
+                    enabled ? trackOn : trackOff,
+                    SolverUiTokens.Radius.Pill,
+                    horizontalPadding: 4,
+                    verticalPadding: 3));
+        }
         SolverUiTokens.ApplyTextOutline(toggle);
         return toggle;
+    }
+
+    private static void StyleSlider(HSlider slider)
+    {
+        Color track = SolverUiTokens.IsLightTheme
+            ? Color.FromHtml("e0e0e0ff")
+            : SolverUiTokens.Palette.Border;
+        slider.AddThemeStyleboxOverride("slider", SolverUiTokens.CreateBox(
+            track,
+            track,
+            SolverUiTokens.Radius.Pill,
+            horizontalPadding: 0,
+            verticalPadding: 0));
+        slider.AddThemeStyleboxOverride("grabber_area", SolverUiTokens.CreateBox(
+            Colors.Transparent,
+            Colors.Transparent,
+            0,
+            horizontalPadding: 7,
+            verticalPadding: 0,
+            borderWidth: 0));
+        Texture2D grabber = SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.Accent, 14);
+        slider.AddThemeIconOverride("grabber", grabber);
+        slider.AddThemeIconOverride("grabber_highlight", grabber);
+        slider.AddThemeIconOverride(
+            "grabber_disabled",
+            SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.TextMuted, 14));
     }
 
     private static void AddBasicRow(

@@ -1,3 +1,4 @@
+using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Nodes;
 
@@ -23,6 +24,11 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
         if (!SolverOverlay.SearchCompletionNotificationSettingsConfiguredForTesting)
             throw new InvalidOperationException("搜索结束通知三态选项没有按持久化设置加载。");
+        if (!SolverOverlay.VisualSettingsConfiguredForTesting
+            || SolverOverlay.ActiveThemeForTesting != SolverSettings.Current.OverlayTheme)
+        {
+            throw new InvalidOperationException("界面主题或覆盖层透明度没有按持久化设置加载。");
+        }
         if (!SolverOverlay.SettingsTabsConfiguredForTesting
             || !SolverOverlay.ExerciseSettingsTabSwitchingForTesting())
         {
@@ -30,6 +36,36 @@ internal sealed partial class UnattendedTestRunner
         }
         if (!SolverOverlay.ExerciseSearchCompletionNotificationPolicyForTesting())
             throw new InvalidOperationException("搜索结束通知三态选项不能无损回读旧设置字段。");
+        if (!SolverOverlay.ExerciseVisualSettingsForTesting())
+            throw new InvalidOperationException("浅色主题或覆盖层透明度不能无损回读设置。");
+        SolverSettingsData originalVisualSettings = SolverSettings.Current;
+        SolverOverlayTheme alternateTheme = originalVisualSettings.OverlayTheme == SolverOverlayTheme.Dark
+            ? SolverOverlayTheme.Light
+            : SolverOverlayTheme.Dark;
+        try
+        {
+            SolverSettings.ApplyForTesting(originalVisualSettings with
+            {
+                OverlayTheme = alternateTheme,
+                OverlayOpacity = 0.65f,
+            });
+            SolverOverlay.ApplyConfiguredTheme();
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            if (SolverOverlay.ActiveThemeForTesting != alternateTheme
+                || Math.Abs(SolverOverlay.OverlayOpacityForTesting - 0.65f) > 0.001f
+                || !SolverOverlay.VisualSettingsConfiguredForTesting)
+            {
+                throw new InvalidOperationException("界面主题切换没有重建覆盖层并恢复透明度设置。");
+            }
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(originalVisualSettings);
+            SolverOverlay.ApplyConfiguredTheme();
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
         SolverSettingsData notificationDefaults = new();
         if (!notificationDefaults.SearchCompletionNotificationsEnabled
             || notificationDefaults.SearchCompletionNotificationMode
@@ -52,6 +88,11 @@ internal sealed partial class UnattendedTestRunner
                 gameForeground: true))
         {
             throw new InvalidOperationException("搜索结束通知的默认值或前台判断不正确。");
+        }
+        if (notificationDefaults.OverlayTheme != SolverOverlayTheme.Dark
+            || Math.Abs(notificationDefaults.OverlayOpacity - 1f) > 0.001f)
+        {
+            throw new InvalidOperationException("界面默认值不是深色主题和 100% 透明度。");
         }
         SolverSettingsData originalNotificationSettings = SolverSettings.Current;
         try

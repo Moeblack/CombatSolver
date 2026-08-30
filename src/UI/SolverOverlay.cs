@@ -60,6 +60,11 @@ internal static class SolverOverlay
     private static bool? _renderedFullAutoStyle;
     private static SolverButtonStyle? _renderedExecuteButtonStyle;
     private static SolverTheftPolicy? _renderedTheftPolicy;
+    private static SolverOverlaySnapshot? _lastSnapshot;
+    private static string? _lastMessageText;
+    private static int _lastSearchingTurn;
+    private static bool _lastSearchDeployWhenReady;
+    private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
     private static Vector2 _dragOffset;
     private static Vector2 _panelPosition = new(SolverUiTokens.Size.PanelMargin, SolverUiTokens.Size.PanelMargin);
@@ -92,6 +97,12 @@ internal static class SolverOverlay
         => _settingsPanel?.SearchCompletionNotificationSettingsConfiguredForTesting == true;
     internal static bool SettingsTabsConfiguredForTesting
         => _settingsPanel?.SettingsTabsConfiguredForTesting == true;
+    internal static bool VisualSettingsConfiguredForTesting
+        => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
+    internal static float OverlayOpacityForTesting => _panel?.Modulate.A ?? 1f;
+    internal static SolverOverlayTheme ActiveThemeForTesting => SolverUiTokens.IsLightTheme
+        ? SolverOverlayTheme.Light
+        : SolverOverlayTheme.Dark;
     internal static bool ExerciseUploadCompletionTransitionForTesting()
         => _settingsPanel?.ExerciseUploadCompletionTransitionForTesting() == true;
     internal static bool ExercisePerformancePresetPersistenceForTesting()
@@ -100,9 +111,13 @@ internal static class SolverOverlay
         => _settingsPanel?.ExerciseSettingsTabSwitchingForTesting() == true;
     internal static bool ExerciseSearchCompletionNotificationPolicyForTesting()
         => _settingsPanel?.ExerciseSearchCompletionNotificationPolicyForTesting() == true;
+    internal static bool ExerciseVisualSettingsForTesting()
+        => _settingsPanel?.ExerciseVisualSettingsForTesting() == true;
 
     public static void Show(Node host, string text)
     {
+        _lastSnapshot = null;
+        _lastMessageText = text;
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("求解器消息", TextMuted);
@@ -114,6 +129,8 @@ internal static class SolverOverlay
 
     public static void ShowDisabled(Node host)
     {
+        _lastSnapshot = null;
+        _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("求解器已禁用", TextMuted);
@@ -124,6 +141,8 @@ internal static class SolverOverlay
 
     public static void ShowSearchStopped(Node host)
     {
+        _lastSnapshot = null;
+        _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("计算已停止", Danger);
@@ -138,6 +157,8 @@ internal static class SolverOverlay
         if (_layer == null || !GodotObject.IsInstanceValid(_layer) || !_layer.Visible)
             return;
         _deployQueued = deployWhenReady;
+        _lastSearchingTurn = progress.CurrentTurnNumber;
+        _lastSearchDeployWhenReady = deployWhenReady;
         SetStatus(
             "后台计算中",
             Accent,
@@ -164,6 +185,10 @@ internal static class SolverOverlay
 
     public static void ShowSearching(Node host, int turn, bool deployWhenReady)
     {
+        _lastSnapshot = null;
+        _lastMessageText = null;
+        _lastSearchingTurn = turn;
+        _lastSearchDeployWhenReady = deployWhenReady;
         EnsureCreated(host);
         _deployQueued = deployWhenReady;
         SetStatus(
@@ -215,6 +240,8 @@ internal static class SolverOverlay
 
     public static void ShowResult(Node host, SolverOverlaySnapshot snapshot)
     {
+        _lastSnapshot = snapshot;
+        _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;
         Color statusColor = snapshot.StatusTone switch
@@ -232,7 +259,7 @@ internal static class SolverOverlay
         if (_summaryText != null)
         {
             _summaryText.Visible = true;
-            _summaryText.Text = snapshot.SummaryText;
+            _summaryText.Text = SolverUiTokens.AdaptRichTextToActiveTheme(snapshot.SummaryText);
         }
         if (_progressText != null)
             _progressText.Visible = false;
@@ -278,7 +305,7 @@ internal static class SolverOverlay
         if (_detailsButton != null)
             _detailsButton.Visible = true;
         if (_detailsText != null)
-            _detailsText.Text = snapshot.DetailsText;
+            _detailsText.Text = SolverUiTokens.AdaptRichTextToActiveTheme(snapshot.DetailsText);
         SetDetailsVisible(false);
         ShowLayer();
         RefreshControls();
@@ -463,7 +490,11 @@ internal static class SolverOverlay
             SolverUiTokens.ApplyButtonStyle(
                 _fullAutoButton,
                 SolverController.FullAutoEnabled ? SolverButtonStyle.Positive : SolverButtonStyle.Secondary);
-            _fullAutoButton.AddThemeColorOverride("font_color", TextPrimary);
+            _fullAutoButton.AddThemeColorOverride(
+                "font_color",
+                SolverUiTokens.IsLightTheme && SolverController.FullAutoEnabled
+                    ? Colors.White
+                    : TextPrimary);
             _renderedFullAutoStyle = SolverController.FullAutoEnabled;
         }
 
@@ -502,6 +533,84 @@ internal static class SolverOverlay
     {
         if (_layer != null && GodotObject.IsInstanceValid(_layer))
             _layer.Visible = false;
+    }
+
+    public static void ApplyOverlayOpacity()
+    {
+        if (_panel == null || !GodotObject.IsInstanceValid(_panel))
+            return;
+        float opacity = Math.Clamp(SolverSettings.Current.OverlayOpacity, 0.25f, 1f);
+        _panel.Modulate = new Color(1f, 1f, 1f, opacity);
+    }
+
+    public static void ApplyConfiguredTheme()
+    {
+        if (_themeRefreshQueued)
+            return;
+        _themeRefreshQueued = true;
+        Callable.From(RebuildConfiguredTheme).CallDeferred();
+    }
+
+    private static void RebuildConfiguredTheme()
+    {
+        _themeRefreshQueued = false;
+        SolverUiTokens.ConfigureTheme(SolverSettings.Current.OverlayTheme);
+        if (_layer == null || !GodotObject.IsInstanceValid(_layer))
+            return;
+        Node host = _layer.GetParent()
+            ?? throw new InvalidOperationException("CombatSolver overlay has no host node.");
+        bool wasVisible = _layer.Visible;
+        bool wasSettingsVisible = _settingsVisible;
+        bool wasCollapsed = _collapsed;
+        bool wereDetailsVisible = _detailsVisible;
+        CanvasLayer oldLayer = _layer;
+        oldLayer.Visible = false;
+        oldLayer.QueueFree();
+        if (_viewport != null && GodotObject.IsInstanceValid(_viewport))
+            _viewport.SizeChanged -= ApplyResponsiveLayout;
+        _layer = null;
+        _panel = null;
+        _viewport = null;
+        _layoutQueued = false;
+        _remainingLayoutPasses = 0;
+        _renderedFullAutoStyle = null;
+        _renderedExecuteButtonStyle = null;
+        _renderedTheftPolicy = null;
+
+        if (_lastSnapshot is { } snapshot)
+        {
+            ShowResult(host, snapshot);
+        }
+        else if (SolverController.SolverDisabled)
+        {
+            ShowDisabled(host);
+        }
+        else if (SolverController.AutomaticSearchPaused)
+        {
+            ShowSearchStopped(host);
+        }
+        else if (SolverController.IsSearching)
+        {
+            ShowSearching(host, _lastSearchingTurn, _lastSearchDeployWhenReady);
+        }
+        else
+        {
+            Show(host, _lastMessageText ?? "界面主题已应用。");
+        }
+
+        _settingsVisible = wasSettingsVisible;
+        if (wasSettingsVisible)
+            _settingsPanel?.Reload();
+        SetCollapsed(wasSettingsVisible ? false : wasCollapsed);
+        if (!wasSettingsVisible && !wasCollapsed && wereDetailsVisible && _lastSnapshot != null)
+            SetDetailsVisible(true);
+        ApplyContentVisibility();
+        ApplyOverlayOpacity();
+        if (!wasVisible)
+            Hide();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_THEME_APPLIED theme={SolverSettings.Current.OverlayTheme} " +
+            $"opacity={SolverSettings.Current.OverlayOpacity:0.##}");
     }
 
     private static void EnsureCreated(Node host)
@@ -648,6 +757,7 @@ internal static class SolverOverlay
         host.AddChild(layer);
         _layer = layer;
         _panel = panel;
+        ApplyOverlayOpacity();
         if (_viewport != null && GodotObject.IsInstanceValid(_viewport))
             _viewport.SizeChanged -= ApplyResponsiveLayout;
         _viewport = host.GetViewport();
@@ -677,13 +787,35 @@ internal static class SolverOverlay
         header.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
         header.GuiInput += OnHeaderGuiInput;
 
-        ColorRect marker = new()
+        Control marker;
+        if (SolverUiTokens.IsLightTheme)
         {
-            Color = Accent,
-            CustomMinimumSize = new Vector2(4, 24),
-            SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
+            PanelContainer icon = new()
+            {
+                Name = "AppIcon",
+                CustomMinimumSize = new Vector2(16, 16),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+            icon.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
+                Accent,
+                Accent,
+                SolverUiTokens.Radius.Small,
+                0,
+                0,
+                borderWidth: 0));
+            marker = icon;
+        }
+        else
+        {
+            marker = new ColorRect
+            {
+                Color = Accent,
+                CustomMinimumSize = new Vector2(4, 24),
+                SizeFlagsVertical = Control.SizeFlags.ShrinkCenter,
+                MouseFilter = Control.MouseFilterEnum.Ignore,
+            };
+        }
         header.AddChild(marker);
 
         Label title = CreateTextLabel("战斗路线求解器", SolverUiTokens.Type.Title, TextPrimary, FontType.Bold);
@@ -699,10 +831,22 @@ internal static class SolverOverlay
 
         _settingsButton = CreateHeaderButton("设置", 54);
         _settingsButton.Pressed += ToggleSettings;
+        if (SolverUiTokens.IsLightTheme)
+        {
+            _settingsButton.AddThemeColorOverride("font_color", Accent);
+            _settingsButton.AddThemeColorOverride("font_hover_color", Accent);
+            _settingsButton.AddThemeColorOverride("font_pressed_color", Accent);
+        }
         header.AddChild(_settingsButton);
 
         _collapseButton = CreateHeaderButton("−  收起", 54);
         _collapseButton.Pressed += ToggleCollapsed;
+        if (SolverUiTokens.IsLightTheme)
+        {
+            _collapseButton.AddThemeColorOverride("font_color", Danger);
+            _collapseButton.AddThemeColorOverride("font_hover_color", Danger);
+            _collapseButton.AddThemeColorOverride("font_pressed_color", Danger);
+        }
         header.AddChild(_collapseButton);
         return header;
     }
@@ -837,9 +981,20 @@ internal static class SolverOverlay
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _searchProgressBar.AddThemeStyleboxOverride("background",
-            SolverUiTokens.CreateBox(Background, SolverUiTokens.Palette.BorderSubtle, SolverUiTokens.Radius.Small, 0, 0));
+            SolverUiTokens.CreateBox(
+                SolverUiTokens.Palette.ProgressBackground,
+                SolverUiTokens.IsLightTheme ? Colors.Transparent : SolverUiTokens.Palette.BorderSubtle,
+                SolverUiTokens.Radius.Small,
+                0,
+                0,
+                borderWidth: SolverUiTokens.IsLightTheme ? 0 : 1));
         _searchProgressBar.AddThemeStyleboxOverride("fill",
-            SolverUiTokens.CreateBox(Accent.Darkened(0.12f), Accent, SolverUiTokens.Radius.Small, 0, 0));
+            SolverUiTokens.CreateBox(
+                SolverUiTokens.Palette.ProgressFill,
+                Accent,
+                SolverUiTokens.Radius.Small,
+                0,
+                0));
         layout.AddChild(_searchProgressBar);
         _summaryPanel.AddChild(layout);
         return _summaryPanel;
@@ -945,8 +1100,8 @@ internal static class SolverOverlay
         if (_summaryStatusBadge != null)
         {
             _summaryStatusBadge.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
-                color.Darkened(0.76f),
-                color.Darkened(0.18f),
+                SolverUiTokens.IsLightTheme ? color.Lightened(0.86f) : color.Darkened(0.76f),
+                SolverUiTokens.IsLightTheme ? new Color(color, 0.5f) : color.Darkened(0.18f),
                 SolverUiTokens.Radius.Pill,
                 horizontalPadding: SolverUiTokens.Spacing.Sm,
                 verticalPadding: 2));
@@ -962,7 +1117,7 @@ internal static class SolverOverlay
         if (_summaryText != null)
         {
             _summaryText.Visible = true;
-            _summaryText.Text = text;
+            _summaryText.Text = SolverUiTokens.AdaptRichTextToActiveTheme(text);
         }
         if (_progressText != null)
             _progressText.Visible = false;
@@ -1015,8 +1170,8 @@ internal static class SolverOverlay
             _feedbackBannerLabel.Text = text;
             _feedbackBannerLabel.AddThemeColorOverride("font_color", tone);
             _feedbackBanner.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
-                tone.Darkened(0.78f),
-                tone.Darkened(0.12f),
+                SolverUiTokens.IsLightTheme ? tone.Lightened(0.86f) : tone.Darkened(0.78f),
+                SolverUiTokens.IsLightTheme ? new Color(tone, 0.45f) : tone.Darkened(0.12f),
                 SolverUiTokens.Radius.Medium,
                 SolverUiTokens.Spacing.Md,
                 SolverUiTokens.Spacing.Sm));
@@ -1137,7 +1292,9 @@ internal static class SolverOverlay
             _settingsButton.Text = _settingsVisible ? "返回" : "设置";
             _settingsButton.AddThemeColorOverride(
                 "font_color",
-                _settingsVisible ? Accent : SolverUiTokens.Palette.TextSecondary);
+                _settingsVisible || SolverUiTokens.IsLightTheme
+                    ? Accent
+                    : SolverUiTokens.Palette.TextSecondary);
         }
     }
 

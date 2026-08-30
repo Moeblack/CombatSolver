@@ -18,6 +18,7 @@
 | `PR10-CACHE-FORK-BOUNDARIES` | 通过（PR 当前 artifact） | 覆盖 Ritsu capability 缓存失效、选牌键跨 Fork、池化身份哈希、listener observer、所属牌堆、投影洗牌、稀疏 Power affliction 和 `CardPlay` 选择风险隔离。runId `bd24e4eeda0247f99eaac9fa90281e3b`。 | 2026-08-30 |
 | `PR10-MERGED-POLICY-FORK-0220` | 通过（本地主线合并态） | 高血量、多候选固定根实际完成 No-GC `1 GB → 2 GB` 切换、DOP1/DOP2 全字段等价、节点上限快照释放、Fork 边界及完整自动战斗；第 6 回合结束，runId `26654574147d4925be016d7295fbee2a`。首次 `1 HP` 烟雾输入因没有形成并行工作量而被门禁拒绝，不计功能失败。 | 2026-08-30 |
 | `PR10-VISIBLE-STEAM` | 未验证 | PR 没有可比较的当前 artifact 可见 Steam 性能结果；本轮不把 headless 单次墙钟写成生产帧率结论。 | 2026-08-30 |
+| `PR11-THEME-OPACITY-LIFECYCLE-0220` | 通过（headless） | 验证新设置默认深色主题与 100% 不透明度，浅色/55% 设置可回读；切换主题会重建覆盖层、恢复设置页与当前搜索状态，并即时应用 65% 透明度。既有三页设置、通知、上传终态、预设持久化和搜索停止/恢复同时通过，首回合结束。runId `921055897c4c43ceb773c90c79eac953`；不替代 Steam 可见像素、拖动和动画检查。 | 2026-08-30 |
 
 ## 0.21.7
 

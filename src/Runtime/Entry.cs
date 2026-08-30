@@ -27,6 +27,7 @@ public static class Entry
     {
         Logger = RitsuLibFramework.CreateLogger(ModId);
         SolverSettings.Load();
+        SolverUiTokens.ConfigureTheme(SolverSettings.Current.OverlayTheme);
         SolverController.ApplyPersistentSettings(SolverSettings.Capture());
         ModTypeDiscoveryHub.RegisterModAssembly(ModId, Assembly.GetExecutingAssembly());
         RitsuLibFramework.SubscribeLifecycle<CombatStartingEvent>(evt => SolverController.BeginCombat(evt.CombatState));

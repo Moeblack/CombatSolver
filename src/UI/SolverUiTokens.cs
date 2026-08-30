@@ -13,6 +13,13 @@ internal enum SolverButtonStyle
 
 internal static class SolverUiTokens
 {
+    private static SolverOverlayTheme _activeTheme = SolverOverlayTheme.Dark;
+
+    public static bool IsLightTheme => _activeTheme == SolverOverlayTheme.Light;
+
+    public static void ConfigureTheme(SolverOverlayTheme theme)
+        => _activeTheme = theme;
+
     public const string BugReportUploadInstruction = "请在设置中点击“上传问题包”提交日志。";
     public static string BugReportUploadInstructionRichText
         => $"[color={Palette.WarningHex}]{BugReportUploadInstruction}[/color]";
@@ -22,6 +29,24 @@ internal static class SolverUiTokens
         => $"[color={Palette.WarningHex}]" +
            $"{(parallelSearchWasEnabled ? ParallelSearchFailureInstruction : BugReportUploadInstruction)}[/color]";
 
+    public static string AdaptRichTextToActiveTheme(string text)
+    {
+        (string Dark, string Light, string Active)[] colors =
+        [
+            ("#b8c0cc", "#5f5f5f", Palette.TextSecondaryHex),
+            ("#858f9f", "#8a8a8a", Palette.TextMutedHex),
+            ("#5c9fc7", "#0078d4", Palette.AccentHex),
+            ("#d6a34c", "#9d5d00", Palette.WarningHex),
+            ("#e26666", "#c42b1c", Palette.DangerHex),
+            ("#69b77d", "#0f7b0f", Palette.SuccessHex),
+        ];
+        foreach ((string dark, string light, string active) in colors)
+        {
+            text = text.Replace(dark, active, StringComparison.OrdinalIgnoreCase)
+                .Replace(light, active, StringComparison.OrdinalIgnoreCase);
+        }
+        return text;
+    }
     public static class Spacing
     {
         public const int Xxs = 2;
@@ -67,42 +92,53 @@ internal static class SolverUiTokens
 
     public static class Palette
     {
-        public static readonly Color Background = Color.FromHtml("101216f5");
-        public static readonly Color Surface = Color.FromHtml("191c22fa");
-        public static readonly Color SurfaceRaised = Color.FromHtml("23272ffb");
-        public static readonly Color SurfaceHover = Color.FromHtml("2b3039ff");
-        public static readonly Color Border = Color.FromHtml("3a404aeb");
-        public static readonly Color BorderSubtle = Color.FromHtml("2a2f38cc");
-        public static readonly Color Accent = Color.FromHtml("5c9fc7ff");
-        public static readonly Color AccentHover = Color.FromHtml("73b4d8ff");
-        public static readonly Color TextPrimary = Color.FromHtml("eef1f6ff");
-        public static readonly Color TextSecondary = Color.FromHtml("b8c0ccff");
-        public static readonly Color TextMuted = Color.FromHtml("858f9fff");
-        public static readonly Color TextOutline = Color.FromHtml("080a0de6");
-        public static readonly Color Warning = Color.FromHtml("d6a34cff");
-        public static readonly Color Danger = Color.FromHtml("e26666ff");
-        public static readonly Color Success = Color.FromHtml("69b77dff");
-        public static readonly Color Positive = Color.FromHtml("34764fff");
-        public static readonly Color PositiveHover = Color.FromHtml("428d60ff");
+        public static Color Background => Pick("101216f5", "f3f3f3ff");
+        public static Color Surface => Pick("191c22fa", "ffffffff");
+        public static Color SurfaceRaised => Pick("23272ffb", "f7f9fbff");
+        public static Color SurfaceHover => Pick("2b3039ff", "efefefff");
+        public static Color Border => Pick("3a404aeb", "e0e0e0ff");
+        public static Color BorderSubtle => Pick("2a2f38cc", "eaeaeaff");
+        public static Color Accent => Pick("5c9fc7ff", "0078d4ff");
+        public static Color AccentHover => Pick("73b4d8ff", "106ebeff");
+        public static Color TextPrimary => Pick("eef1f6ff", "1b1b1bff");
+        public static Color TextSecondary => Pick("b8c0ccff", "5f5f5fff");
+        public static Color TextMuted => Pick("858f9fff", "8a8a8aff");
+        public static Color TextOutline => Pick("080a0de6", "ffffff00");
+        public static Color Warning => Pick("d6a34cff", "9d5d00ff");
+        public static Color Danger => Pick("e26666ff", "c42b1cff");
+        public static Color Success => Pick("69b77dff", "0f7b0fff");
+        public static Color Positive => Pick("34764fff", "107c10ff");
+        public static Color PositiveHover => Pick("428d60ff", "0e6e0eff");
 
-        public static readonly Color Attack = Color.FromHtml("d96363ff");
-        public static readonly Color AttackBackground = Color.FromHtml("2b171bf8");
-        public static readonly Color Skill = Color.FromHtml("5b91d1ff");
-        public static readonly Color SkillBackground = Color.FromHtml("172235f8");
-        public static readonly Color Power = Color.FromHtml("d7a84fff");
-        public static readonly Color PowerBackground = Color.FromHtml("2b2417f8");
-        public static readonly Color Negative = Color.FromHtml("9b70c9ff");
-        public static readonly Color NegativeBackground = Color.FromHtml("241b30f8");
-        public static readonly Color Potion = Color.FromHtml("55b9a5ff");
-        public static readonly Color PotionBackground = Color.FromHtml("152a27f8");
-        public static readonly Color KillBackground = Color.FromHtml("14291ffb");
+        public static Color Attack => Pick("d96363ff", "c42b1cff");
+        public static Color AttackBackground => Pick("2b171bf8", "fce9e7ff");
+        public static Color Skill => Pick("5b91d1ff", "0067c0ff");
+        public static Color SkillBackground => Pick("172235f8", "eaf2faff");
+        public static Color Power => Pick("d7a84fff", "9d5d00ff");
+        public static Color PowerBackground => Pick("2b2417f8", "fbf1dcff");
+        public static Color Negative => Pick("9b70c9ff", "6b4fa0ff");
+        public static Color NegativeBackground => Pick("241b30f8", "f1ebf8ff");
+        public static Color Potion => Pick("55b9a5ff", "00786cff");
+        public static Color PotionBackground => Pick("152a27f8", "e5f4f1ff");
+        public static Color KillBackground => Pick("14291ffb", "e7f4ecff");
+        public static Color ProgressBackground => IsLightTheme ? Color.FromHtml("e8e8e8ff") : Background;
+        public static Color ProgressFill => IsLightTheme ? Accent : Accent.Darkened(0.12f);
+        public static Color CompletedActionModulate => IsLightTheme
+            ? new Color(0.66f, 0.68f, 0.72f, 0.55f)
+            : new Color(0.54f, 0.58f, 0.66f, 0.52f);
+        public static Color ActiveActionModulate => IsLightTheme
+            ? new Color(0.45f, 0.72f, 0.98f, 1f)
+            : new Color(1f, 0.88f, 0.48f, 1f);
 
-        public const string TextSecondaryHex = "#b8c0cc";
-        public const string TextMutedHex = "#858f9f";
-        public const string AccentHex = "#5c9fc7";
-        public const string WarningHex = "#d6a34c";
-        public const string DangerHex = "#e26666";
-        public const string SuccessHex = "#69b77d";
+        public static string TextSecondaryHex => IsLightTheme ? "#5f5f5f" : "#b8c0cc";
+        public static string TextMutedHex => IsLightTheme ? "#8a8a8a" : "#858f9f";
+        public static string AccentHex => IsLightTheme ? "#0078d4" : "#5c9fc7";
+        public static string WarningHex => IsLightTheme ? "#9d5d00" : "#d6a34c";
+        public static string DangerHex => IsLightTheme ? "#c42b1c" : "#e26666";
+        public static string SuccessHex => IsLightTheme ? "#0f7b0f" : "#69b77d";
+
+        private static Color Pick(string dark, string light)
+            => Color.FromHtml(IsLightTheme ? light : dark);
     }
 
     public static StyleBoxFlat CreateBox(
@@ -130,8 +166,10 @@ internal static class SolverUiTokens
             ContentMarginTop = verticalPadding,
             ContentMarginRight = horizontalPadding,
             ContentMarginBottom = verticalPadding,
-            ShadowColor = shadow ? new Color(0f, 0f, 0f, 0.52f) : Godot.Colors.Transparent,
-            ShadowSize = shadow ? 10 : 0,
+            ShadowColor = shadow
+                ? new Color(0f, 0f, 0f, IsLightTheme ? 0.14f : 0.52f)
+                : Godot.Colors.Transparent,
+            ShadowSize = shadow ? (IsLightTheme ? 16 : 10) : 0,
         };
     }
 
@@ -140,7 +178,7 @@ internal static class SolverUiTokens
         int fontSize,
         Color color,
         FontType fontType = FontType.Regular,
-        int outlineSize = Type.Outline,
+        int outlineSize = -1,
         Color? outlineColor = null)
     {
         Label label = new()
@@ -159,7 +197,7 @@ internal static class SolverUiTokens
 
     public static RichTextLabel CreateRichText(
         int fontSize,
-        int outlineSize = Type.Outline,
+        int outlineSize = -1,
         Color? outlineColor = null)
     {
         RichTextLabel label = new()
@@ -195,8 +233,8 @@ internal static class SolverUiTokens
         };
         button.AddThemeFontSizeOverride("font_size", Type.Body);
         button.AddThemeColorOverride("font_color", Palette.TextPrimary);
-        button.AddThemeColorOverride("font_hover_color", Godot.Colors.White);
-        button.AddThemeColorOverride("font_pressed_color", Godot.Colors.White);
+        button.AddThemeColorOverride("font_hover_color", IsLightTheme ? Palette.TextPrimary : Godot.Colors.White);
+        button.AddThemeColorOverride("font_pressed_color", IsLightTheme ? Palette.TextPrimary : Godot.Colors.White);
         button.AddThemeColorOverride("font_disabled_color", Palette.TextMuted);
         ApplyTextOutline(button);
         ApplyButtonStyle(button, style);
@@ -205,17 +243,75 @@ internal static class SolverUiTokens
 
     public static void ApplyButtonStyle(Button button, SolverButtonStyle style)
     {
-        (Color background, Color border, Color hover) = style switch
+        if (!IsLightTheme)
         {
-            SolverButtonStyle.Primary => (Palette.Accent.Darkened(0.12f), Palette.Accent.Lightened(0.08f), Palette.AccentHover),
-            SolverButtonStyle.Positive => (Palette.Positive, Palette.Success, Palette.PositiveHover),
-            SolverButtonStyle.Danger => (Palette.Danger.Darkened(0.22f), Palette.Danger, Palette.Danger.Lightened(0.08f)),
-            _ => (Palette.SurfaceRaised, Palette.Border, Palette.SurfaceHover),
+            (Color darkBackground, Color darkBorder, Color darkHover) = style switch
+            {
+                SolverButtonStyle.Primary => (
+                    Palette.Accent.Darkened(0.12f),
+                    Palette.Accent.Lightened(0.08f),
+                    Palette.AccentHover),
+                SolverButtonStyle.Positive => (Palette.Positive, Palette.Success, Palette.PositiveHover),
+                SolverButtonStyle.Danger => (
+                    Palette.Danger.Darkened(0.22f),
+                    Palette.Danger,
+                    Palette.Danger.Lightened(0.08f)),
+                _ => (Palette.SurfaceRaised, Palette.Border, Palette.SurfaceHover),
+            };
+            button.AddThemeStyleboxOverride("normal", CreateBox(
+                darkBackground, darkBorder, Radius.Medium, Spacing.Sm, Spacing.Xs));
+            button.AddThemeStyleboxOverride("hover", CreateBox(
+                darkHover, darkBorder.Lightened(0.12f), Radius.Medium, Spacing.Sm, Spacing.Xs));
+            button.AddThemeStyleboxOverride("pressed", CreateBox(
+                darkBackground.Darkened(0.16f), darkBorder, Radius.Medium, Spacing.Sm, Spacing.Xs));
+            button.AddThemeStyleboxOverride("disabled", CreateBox(
+                Palette.Background, Palette.BorderSubtle, Radius.Medium, Spacing.Sm, Spacing.Xs));
+            button.AddThemeColorOverride("font_color", Palette.TextPrimary);
+            button.AddThemeColorOverride("font_hover_color", Godot.Colors.White);
+            button.AddThemeColorOverride("font_pressed_color", Godot.Colors.White);
+            ApplyButtonFont(button, style);
+            return;
+        }
+
+        (Color background, Color border, Color hover, Color pressed, Color font) = style switch
+        {
+            SolverButtonStyle.Primary => (
+                Palette.Accent,
+                Palette.Accent,
+                Palette.AccentHover,
+                Palette.Accent.Darkened(0.22f),
+                Godot.Colors.White),
+            SolverButtonStyle.Positive => (
+                Palette.Positive,
+                Palette.Positive,
+                Palette.PositiveHover,
+                Palette.Positive.Darkened(0.18f),
+                Godot.Colors.White),
+            SolverButtonStyle.Danger => (
+                Palette.Danger,
+                Palette.Danger,
+                Palette.Danger.Lightened(0.08f),
+                Palette.Danger.Darkened(0.18f),
+                Godot.Colors.White),
+            _ => (
+                Palette.Surface,
+                Color.FromHtml("8a8a8aff"),
+                Palette.SurfaceHover,
+                Palette.Border,
+                Palette.TextPrimary),
         };
-        button.AddThemeStyleboxOverride("normal", CreateBox(background, border, Radius.Medium, Spacing.Sm, Spacing.Xs));
-        button.AddThemeStyleboxOverride("hover", CreateBox(hover, border.Lightened(0.12f), Radius.Medium, Spacing.Sm, Spacing.Xs));
-        button.AddThemeStyleboxOverride("pressed", CreateBox(background.Darkened(0.16f), border, Radius.Medium, Spacing.Sm, Spacing.Xs));
-        button.AddThemeStyleboxOverride("disabled", CreateBox(Palette.Background, Palette.BorderSubtle, Radius.Medium, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("normal", CreateBox(background, border, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("hover", CreateBox(hover, border, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("pressed", CreateBox(pressed, border, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeStyleboxOverride("disabled", CreateBox(Palette.Background, Palette.BorderSubtle, Radius.Small, Spacing.Sm, Spacing.Xs));
+        button.AddThemeColorOverride("font_color", font);
+        button.AddThemeColorOverride("font_hover_color", font);
+        button.AddThemeColorOverride("font_pressed_color", font);
+        ApplyButtonFont(button, style);
+    }
+
+    private static void ApplyButtonFont(Button button, SolverButtonStyle style)
+    {
         button.ApplyLocaleFontSubstitution(
             style is SolverButtonStyle.Primary or SolverButtonStyle.Positive or SolverButtonStyle.Danger
                 ? FontType.Bold
@@ -223,11 +319,46 @@ internal static class SolverUiTokens
             "font");
     }
 
+    public static Texture2D CreateCircleTexture(Color color, int size = 12)
+    {
+        Image image = Image.CreateEmpty(size, size, false, Image.Format.Rgba8);
+        float center = (size - 1) / 2f;
+        float radius = center;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dx = x - center;
+                float dy = y - center;
+                if (dx * dx + dy * dy <= radius * radius)
+                    image.SetPixel(x, y, color);
+            }
+        }
+        return ImageTexture.CreateFromImage(image);
+    }
+
+    public static Texture2D CreateChevronTexture(Color color, int width = 10, int height = 5)
+    {
+        Image image = Image.CreateEmpty(width, height, false, Image.Format.Rgba8);
+        int half = width / 2;
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (x >= half - 1 - y && x <= half + y)
+                    image.SetPixel(x, y, color);
+            }
+        }
+        return ImageTexture.CreateFromImage(image);
+    }
+
     public static void ApplyTextOutline(
         Control control,
-        int outlineSize = Type.Outline,
+        int outlineSize = -1,
         Color? outlineColor = null)
     {
+        if (outlineSize < 0)
+            outlineSize = IsLightTheme ? 0 : Type.Outline;
         if (outlineSize <= 0)
             return;
         control.AddThemeConstantOverride("outline_size", outlineSize);
