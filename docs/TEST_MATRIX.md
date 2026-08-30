@@ -10,7 +10,8 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
-| `NOTIFICATION-SETTINGS-LIFECYCLE-NEXT` | 通过（Windows 可见通知/声音未验证） | 验证通知默认开启且默认为“仅游戏不在前台”，关闭、仅后台和始终通知的决策正确；设置 UI 按持久化值加载。用户停止搜索产生一次结束通知请求，headless 不进入 Windows 原生调用。runId `99e510b870fc4ad6ab0611ce36f8f3b1` | 2026-08-30 |
+| `NOTIFICATION-SETTINGS-LIFECYCLE-NEXT` | 通过（headless） | 验证通知默认开启且默认为“仅游戏不在前台”，关闭、仅后台和始终通知的决策正确；设置 UI 按持久化值加载。用户停止搜索产生一次结束通知请求，headless 不进入 Windows 原生调用。runId `99e510b870fc4ad6ab0611ce36f8f3b1` | 2026-08-30 |
+| `WINDOWS-NATIVE-NOTIFICATION-ENTRYPOINT-NEXT` | 通过（系统声音量未检测） | 可见游戏日志确认旧入口连续 5 次抛出 `EntryPointNotFoundException`；显式绑定 `Shell_NotifyIconW` / `LoadIconW` 后，独立 Win32 窗口按与 Mod 相同的结构提交通知，返回 `shown=True / win32_error=0`。通知未设置静音标志，实际音量与是否播放由 Windows 通知策略决定。 | 2026-08-30 |
 
 ## 0.21.6
 

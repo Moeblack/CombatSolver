@@ -194,11 +194,19 @@ internal static class SearchCompletionNotifier
         public IntPtr BalloonIcon;
     }
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [DllImport(
+        "shell32.dll",
+        EntryPoint = "Shell_NotifyIconW",
+        CharSet = CharSet.Unicode,
+        SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool ShellNotifyIcon(uint message, ref NotifyIconData data);
 
-    [DllImport("user32.dll", SetLastError = true)]
+    [DllImport(
+        "user32.dll",
+        EntryPoint = "LoadIconW",
+        CharSet = CharSet.Unicode,
+        SetLastError = true)]
     private static extern IntPtr LoadIcon(IntPtr instance, IntPtr iconName);
 
     [DllImport("user32.dll")]

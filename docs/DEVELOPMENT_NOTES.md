@@ -15,8 +15,9 @@
 - 新增搜索结束通知。主搜索与开局/回合开始选牌搜索在成功、失败、用户停止或结果因实机状态变化而过期时都会提交一次通知；被新搜索替代的旧回调和没有实际搜索的路线复用不重复通知。
 - 设置页新增“搜索结束通知”开关与“仅游戏不在前台（默认）/始终通知”选择。新安装和恢复默认均开启通知，并只在游戏不处于前台时提示；设置保存后立即生效。
 - Windows 通过原生通知区域接口显示系统通知，不设置静音标志，因此提示音跟随 Windows 通知音量、专注助手和系统通知策略。前台判断使用当前前台窗口所属进程；游戏最小化或切换到其他应用时属于后台。
+- 首次可见测试发现 P/Invoke 默认把托管方法名 `ShellNotifyIcon` 当成原生导出名，实际 Windows 入口为 `Shell_NotifyIconW`，五次搜索完成回调均抛出 `EntryPointNotFoundException`，所以没有通知且回调在路线展示后提前终止。现已显式绑定 `Shell_NotifyIconW` 与 `LoadIconW`；独立 Win32 通知探针返回 `shown=True / win32_error=0`。系统提示音仍由 Windows 当前通知设置决定。
 - 非 Windows 平台在任何 Win32 调用前直接结束；headless 同样不创建通知区域图标。没有引入仅 Windows 可加载的托管依赖，macOS 不会因空调用 Windows API 报错。
-- 定向验证 `NOTIFICATION-SETTINGS-LIFECYCLE-NEXT` 覆盖默认值、关闭/仅后台/始终通知判断、设置 UI 回读、用户停止搜索通知和 headless 原生调用隔离，runId `99e510b870fc4ad6ab0611ce36f8f3b1`，通过。Windows 可见通知外观与实际提示音未在 headless 中验证。
+- 定向验证 `NOTIFICATION-SETTINGS-LIFECYCLE-NEXT` 覆盖默认值、关闭/仅后台/始终通知判断、设置 UI 回读、用户停止搜索通知和 headless 原生调用隔离，runId `99e510b870fc4ad6ab0611ce36f8f3b1`，通过。独立 Windows 原生通知探针同时验证正确入口与结构能够提交通知；实际提示音量未程序化检测。
 
 ## 0.21.6：问题包后台记录与版本分类
 

@@ -519,6 +519,8 @@ while IFS=$'\t' read -r path text; do
 done <<EOF
 $search_completion_notifier_path	if (!OperatingSystem.IsWindows())
 $search_completion_notifier_path	DisplayServer.GetName()
+$search_completion_notifier_path	EntryPoint = "Shell_NotifyIconW"
+$search_completion_notifier_path	EntryPoint = "LoadIconW"
 $search_completion_notifier_path	GetWindowThreadProcessId(foreground, out uint processId)
 $search_completion_notifier_path	ShellNotifyIcon(NotifyIconDelete, ref data)
 $repository_root/src/Runtime/SolverController.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)

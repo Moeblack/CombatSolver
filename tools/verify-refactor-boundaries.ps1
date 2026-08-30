@@ -659,6 +659,8 @@ $searchCompletionNotifierPath = Join-Path $repositoryRoot "src\Runtime\SearchCom
 foreach ($check in @(
     @{ Path = $searchCompletionNotifierPath; Text = "if (!OperatingSystem.IsWindows())" },
     @{ Path = $searchCompletionNotifierPath; Text = "DisplayServer.GetName()" },
+    @{ Path = $searchCompletionNotifierPath; Text = 'EntryPoint = "Shell_NotifyIconW"' },
+    @{ Path = $searchCompletionNotifierPath; Text = 'EntryPoint = "LoadIconW"' },
     @{ Path = $searchCompletionNotifierPath; Text = "GetWindowThreadProcessId(foreground, out uint processId)" },
     @{ Path = $searchCompletionNotifierPath; Text = "ShellNotifyIcon(NotifyIconDelete, ref data)" },
     @{ Path = $controllerPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)" },
