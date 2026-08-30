@@ -114,6 +114,7 @@ internal sealed partial class UnattendedTestRunner
         [
             "玩家填写的问题描述",
             "【CombatSolver 自动分类】",
+            $"CombatSolver 版本：{CombatBugReportDescription.CurrentModVersion}",
             "计划外重算：3 次（状态不一致 1，执行漂移 2）",
             "续接路线缺失后重算：3 次",
             "本回合路线耗尽后重算：4 次",

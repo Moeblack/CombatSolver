@@ -1,4 +1,12 @@
 {
+  "V0216-BUG-REPORT-BACKGROUND-FIFO-AND-VERSION": {
+    "status": "Passed",
+    "level": "HeadlessRuntimeBackgroundForensicsQueueAndOnlineDescriptionVersion",
+    "procedure": "在最小活动战斗中运行控制器分类断言，连续记录检查点并立即导出问题包；导出等待后台 FIFO 排空后检查取证结构、控制模式与自动描述版本号。",
+    "expected": "实机状态只在主线程冻结；后台按顺序整理、序列化和写盘；导出不会早于检查点完成；在线问题描述始终包含当前 CombatSolver 版本。",
+    "observed": "runId 7065e4ebabd64bc69700ebf70d323e27 Passed；活动战斗问题包成功生成，结构化状态、完整 RNG、五个牌堆、原生状态、即时跑局存档和 solver_only 控制模式断言全部通过。",
+    "evidence": "src/Runtime/CombatBugReportExporter.cs；src/Runtime/CombatBugReportDescription.cs；src/Testing/UnattendedTestRunner.ControllerSessions.cs；上述 runId；验证日期 2026-08-30。"
+  },
   "POST0201-SCRAPE-NEGATIVE-COST": {
     "status": "Passed",
     "level": "HeadlessStrictNativeSimulationCardDrawCostAndPileDifferential",

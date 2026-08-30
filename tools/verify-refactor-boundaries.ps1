@@ -629,9 +629,14 @@ foreach ($rendererPath in $overlayRendererPaths) {
     }
 }
 
+$bugReportExporterPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportExporter.cs"
 $bugReportUploaderPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportUploader.cs"
 $solverSettingsPanelPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.cs"
 foreach ($check in @(
+    @{ Path = $bugReportExporterPath; Text = "private static readonly BlockingCollection<Action> BackgroundOperations = new();" },
+    @{ Path = $bugReportExporterPath; Text = "QueueCheckpointWrite(session, capture);" },
+    @{ Path = $bugReportExporterPath; Text = "Task<ForensicArchiveBundle> forensicsTask = QueueBackground(" },
+    @{ Path = $bugReportExporterPath; Text = "ForensicArchiveBundle forensics = await forensicsTask.ConfigureAwait(false);" },
     @{ Path = $bugReportUploaderPath; Text = "IProgress<CombatBugReportUploadProgress>" },
     @{ Path = $bugReportUploaderPath; Text = "HttpCompletionOption.ResponseHeadersRead" },
     @{ Path = $bugReportUploaderPath; Text = "CancellationToken requestCancellationToken" },
@@ -643,7 +648,7 @@ foreach ($check in @(
     @{ Path = $solverSettingsPanelPath; Text = "TryApplyUploadCompletion()" },
     @{ Path = $solverSettingsPanelPath; Text = "等待服务器确认" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
-        $violations.Add("$($check.Path): missing upload ownership boundary '$($check.Text)'")
+        $violations.Add("$($check.Path): missing bug-report ownership boundary '$($check.Text)'")
     }
 }
 if (Select-String -LiteralPath $bugReportUploaderPath -SimpleMatch "using Godot" -Quiet) {

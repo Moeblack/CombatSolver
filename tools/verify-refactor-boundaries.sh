@@ -490,11 +490,16 @@ for renderer_path in "${overlay_renderer_paths[@]}"; do
     done
 done
 
+bug_report_exporter_path="$repository_root/src/Runtime/CombatBugReportExporter.cs"
 bug_report_uploader_path="$repository_root/src/Runtime/CombatBugReportUploader.cs"
 solver_settings_panel_path="$repository_root/src/UI/SolverSettingsPanel.cs"
 while IFS=$'\t' read -r path text; do
-    require_fixed "$path" "$text" 'missing upload ownership boundary'
+    require_fixed "$path" "$text" 'missing bug-report ownership boundary'
 done <<EOF
+$bug_report_exporter_path	private static readonly BlockingCollection<Action> BackgroundOperations = new();
+$bug_report_exporter_path	QueueCheckpointWrite(session, capture);
+$bug_report_exporter_path	Task<ForensicArchiveBundle> forensicsTask = QueueBackground(
+$bug_report_exporter_path	ForensicArchiveBundle forensics = await forensicsTask.ConfigureAwait(false);
 $bug_report_uploader_path	IProgress<CombatBugReportUploadProgress>
 $bug_report_uploader_path	HttpCompletionOption.ResponseHeadersRead
 $bug_report_uploader_path	CancellationToken requestCancellationToken

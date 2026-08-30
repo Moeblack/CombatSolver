@@ -135,6 +135,8 @@ internal static class CombatBugReportDescription
         }
 
         builder.AppendLine("【CombatSolver 自动分类】");
+        builder.Append("- CombatSolver 版本：");
+        builder.AppendLine(CurrentModVersion);
         if (classifications.Count == 0)
         {
             builder.Append("- 未检测到求解器已记录的异常信号");
@@ -149,6 +151,16 @@ internal static class CombatBugReportDescription
                 builder.AppendLine();
         }
         return builder.ToString();
+    }
+
+    internal static string CurrentModVersion
+    {
+        get
+        {
+            Version version = typeof(CombatBugReportDescription).Assembly.GetName().Version
+                ?? throw new InvalidOperationException("无法读取 CombatSolver 程序集版本。");
+            return $"{version.Major}.{version.Minor}.{version.Build}";
+        }
     }
 
     public static string AppendSubmissionId(string description, string submissionId)
