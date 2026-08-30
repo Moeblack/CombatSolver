@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Collections.Concurrent;
 using System.Collections;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -36,7 +37,12 @@ internal static class CombatBugReportExporter
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() },
+        Converters =
+        {
+            new JsonStringEnumConverter(),
+            new SerializableCardJsonConverter(),
+            new CapturedObjectFieldsJsonConverter(),
+        },
     };
 
     private sealed record CapturedFile(string SourceRelativePath, byte[] Bytes);
@@ -47,6 +53,55 @@ internal static class CombatBugReportExporter
         string ReplayStateJson,
         byte[] NativeCombatState,
         byte[] InMemoryRunSave);
+    private sealed record ForensicCheckpointCapture(
+        string Label,
+        DateTimeOffset CapturedAt,
+        string StateText,
+        ForensicCombatCapture Combat,
+        SolverSettingsData Settings,
+        object SearchProfiles,
+        object? MetadataResult,
+        object? ReplayResult,
+        bool HasResult,
+        string Route,
+        string ReplanAudit,
+        string ControlMode,
+        int? LastSolverDeployedTurn);
+    private sealed record ForensicCombatCapture(
+        ForensicMetadataStateCapture MetadataState,
+        ForensicReplayStateCapture ReplayState,
+        NetFullCombatState NativeCombatState,
+        SerializableRun InMemoryRunSave);
+    private sealed record ForensicMetadataStateCapture(
+        string? EncounterId,
+        int RoundNumber,
+        string CurrentSide,
+        int? PlayerTurn,
+        string? PlayerPhase,
+        int AscensionLevel,
+        int CurrentActIndex,
+        int ActFloor,
+        int TotalFloor,
+        string ReadableDiagnostic,
+        object RunRng,
+        object[] Players);
+    private sealed record ForensicReplayStateCapture(
+        string? EncounterId,
+        string? EncounterType,
+        int RoundNumber,
+        string CurrentSide,
+        int AscensionLevel,
+        int CurrentActIndex,
+        int ActFloor,
+        int TotalFloor,
+        object RunRng,
+        int ActualPotionsUsedThisCombat,
+        object[] Players,
+        object[] Creatures,
+        object[] History);
+    private sealed record CapturedObjectFields(IReadOnlyList<CapturedObjectField> Items);
+    private sealed record CapturedObjectField(string Name, object? Value);
+    private sealed record CapturedFieldDescriptor(string Name, FieldInfo Field);
     private sealed record ForensicLogRange(string Path, string EntryName, long Start, long End);
     private sealed record ForensicArchiveCheckpoint(
         string Name,
@@ -55,6 +110,53 @@ internal static class CombatBugReportExporter
         byte[] NativeCombatState,
         byte[] InMemoryRunSave);
 
+    private sealed class SerializableCardJsonConverter : JsonConverter<SerializableCard>
+    {
+        public override SerializableCard? Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options)
+            => throw new NotSupportedException();
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            SerializableCard value,
+            JsonSerializerOptions options)
+            => JsonSerializer.Serialize(
+                writer,
+                value,
+                JsonSerializationUtility.GetTypeInfo<SerializableCard>());
+    }
+
+    private sealed class CapturedObjectFieldsJsonConverter : JsonConverter<CapturedObjectFields>
+    {
+        public override CapturedObjectFields? Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options)
+            => throw new NotSupportedException();
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            CapturedObjectFields value,
+            JsonSerializerOptions options)
+        {
+            SortedDictionary<string, object?> fields = new(StringComparer.Ordinal);
+            foreach (CapturedObjectField field in value.Items)
+                fields[field.Name] = field.Value;
+            writer.WriteStartObject();
+            foreach ((string name, object? fieldValue) in fields)
+            {
+                writer.WritePropertyName(name);
+                if (fieldValue == null)
+                    writer.WriteNullValue();
+                else
+                    JsonSerializer.Serialize(writer, fieldValue, fieldValue.GetType(), options);
+            }
+            writer.WriteEndObject();
+        }
+    }
+
     private sealed class ForensicSession
     {
         public required string SessionId { get; init; }
@@ -62,12 +164,17 @@ internal static class CombatBugReportExporter
         public required string EncounterType { get; init; }
         public required string Seed { get; init; }
         public required DateTimeOffset StartedAt { get; init; }
+        public required string UserDataDirectory { get; init; }
         public DateTimeOffset? EndedAt { get; set; }
         public string? EndReason { get; set; }
         public CapturedFile? InMemoryRunSave { get; set; }
         public CapturedFile? PreCombatRunSave { get; set; }
         public CapturedFile? PreCombatProgressSave { get; set; }
-        public int PreCombatDiskCaptureAttempts { get; set; }
+        public ulong CachedCombatCaptureFrame { get; set; }
+        public string? CachedCombatStateText { get; set; }
+        public int CachedCombatHistoryCount { get; set; }
+        public SolverSettingsSnapshot? CachedCombatProfiles { get; set; }
+        public ForensicCombatCapture? CachedCombatCapture { get; set; }
         public List<ForensicCheckpoint> Checkpoints { get; } = [];
         public Dictionary<string, long> LogStartOffsets { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, long> LogEndOffsets { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -75,6 +182,7 @@ internal static class CombatBugReportExporter
         public string ReplanAudit { get; set; } = string.Empty;
         public string ControlMode { get; set; } = "solver_only";
         public int? LastSolverDeployedTurn { get; set; }
+        public List<Exception> BackgroundErrors { get; } = [];
     }
 
     private sealed record ForensicArchiveSession(
@@ -96,6 +204,13 @@ internal static class CombatBugReportExporter
 
     private static ForensicSession? _currentSession;
     private static ForensicSession? _lastSession;
+    private static readonly BlockingCollection<Action> BackgroundOperations = new();
+    private static readonly ConcurrentDictionary<Type, CapturedFieldDescriptor[]> ObjectFieldPlans = new();
+    private static readonly ConcurrentDictionary<Type, CapturedFieldDescriptor[]> NestedFieldPlans = new();
+    static CombatBugReportExporter()
+    {
+        StartBackgroundThread();
+    }
 
     public static void BeginCombat(ICombatState? rawState)
     {
@@ -106,6 +221,7 @@ internal static class CombatBugReportExporter
 
         if (_currentSession != null)
             CompleteCombat("combat_replaced", null, string.Empty);
+        string userDataDirectory = OS.GetUserDataDir();
         _currentSession = new ForensicSession
         {
             SessionId = Guid.NewGuid().ToString("N"),
@@ -113,10 +229,10 @@ internal static class CombatBugReportExporter
             EncounterType = state.Encounter?.RoomType.ToString() ?? "unknown",
             Seed = state.RunState.Rng.StringSeed,
             StartedAt = DateTimeOffset.Now,
+            UserDataDirectory = userDataDirectory,
         };
-        CaptureInMemoryRunSave(_currentSession);
         CaptureLogStarts(_currentSession);
-        TryCapturePreCombatFiles(_currentSession, state);
+        QueuePreCombatFileCapture(_currentSession);
         RecordCheckpointCore(state, "combat_start", null, string.Empty);
     }
 
@@ -143,10 +259,13 @@ internal static class CombatBugReportExporter
         CombatState? live = CombatManager.Instance.DebugOnlyGetState();
         if (live != null && live.RunState.Rng.StringSeed == session.Seed)
             RecordCheckpointCore(live, "combat_end", result, replanAudit);
-        UpdateSessionResult(session, result, replanAudit);
-        session.EndedAt = DateTimeOffset.Now;
-        session.EndReason = reason;
-        CaptureLogEnds(session);
+        QueueSessionCompletion(
+            session,
+            reason,
+            result,
+            replanAudit,
+            DateTimeOffset.Now,
+            CaptureLogEndOffsets(session));
         _lastSession = session;
         _currentSession = null;
     }
@@ -189,14 +308,17 @@ internal static class CombatBugReportExporter
                 .OrderBy(assembly => assembly.name, StringComparer.Ordinal)
                 .ToArray(),
         }, JsonOptions);
-        ForensicArchiveBundle forensics = CaptureForensicBundle();
+        ForensicSession? currentSession = _currentSession;
+        ForensicSession? recentSession = _lastSession;
+        Task<ForensicArchiveBundle> forensicsTask = QueueBackground(
+            () => CaptureForensicBundle(currentSession, recentSession));
 
         string exportDirectory = outputDirectory ?? DefaultExportDirectory();
         Directory.CreateDirectory(exportDirectory);
         string encounter = SanitizeFileName(
             state?.Encounter?.Id.Entry
-            ?? forensics.Recent?.EncounterId
-            ?? forensics.Current?.EncounterId
+            ?? recentSession?.EncounterId
+            ?? currentSession?.EncounterId
             ?? "no-combat");
         string path = Path.Combine(
             exportDirectory,
@@ -211,18 +333,22 @@ internal static class CombatBugReportExporter
         byte[] screenshot = image == null || image.IsEmpty()
             ? []
             : image.SavePngToBuffer();
-        return Task.Run(() => WriteArchive(
-            path,
-            userDataDirectory,
-            executableDirectory,
-            screenshot,
-            combatJson,
-            routeText,
-            replanAudit,
-            settingsJson,
-            exportContextJson,
-            environmentJson,
-            forensics));
+        return Task.Run(async () =>
+        {
+            ForensicArchiveBundle forensics = await forensicsTask.ConfigureAwait(false);
+            return WriteArchive(
+                path,
+                userDataDirectory,
+                executableDirectory,
+                screenshot,
+                combatJson,
+                routeText,
+                replanAudit,
+                settingsJson,
+                exportContextJson,
+                environmentJson,
+                forensics);
+        });
     }
 
     private static string WriteArchive(
@@ -362,35 +488,113 @@ internal static class CombatBugReportExporter
     {
         ForensicSession session = _currentSession
             ?? throw new InvalidOperationException("记录战斗取证检查点时没有活动会话。");
-        TryCapturePreCombatFiles(session, state);
+        DateTimeOffset capturedAt = DateTimeOffset.Now;
         SolverSettingsSnapshot profiles = SolverSettings.Capture();
+        SolverSettingsData settings = SolverSettings.Current;
         Player? localPlayer = LocalContext.GetMe(state);
         string stateText = localPlayer?.PlayerCombatState == null
             ? string.Empty
             : ContinuationStamp.CaptureLive(state).StateText;
-        string route = DescribeRoute(result);
-        string json = JsonSerializer.Serialize(new
+        ulong captureFrame = Godot.Engine.GetProcessFrames();
+        int historyEntryCount = CombatManager.Instance.History.Entries.Count();
+        ForensicCombatCapture combatCapture;
+        if (session.CachedCombatCapture != null
+            && session.CachedCombatCaptureFrame == captureFrame
+            && session.CachedCombatHistoryCount == historyEntryCount
+            && session.CachedCombatProfiles == profiles
+            && string.Equals(session.CachedCombatStateText, stateText, StringComparison.Ordinal))
         {
-            schemaVersion = 3,
-            sessionId = session.SessionId,
+            combatCapture = session.CachedCombatCapture;
+        }
+        else
+        {
+            combatCapture = new ForensicCombatCapture(
+                CaptureMetadataState(state, profiles),
+                CaptureReplayState(state),
+                CaptureNativeCombatState(state),
+                CaptureInMemoryRunSave());
+            session.CachedCombatCaptureFrame = captureFrame;
+            session.CachedCombatStateText = stateText;
+            session.CachedCombatHistoryCount = historyEntryCount;
+            session.CachedCombatProfiles = profiles;
+            session.CachedCombatCapture = combatCapture;
+        }
+
+        string route = DescribeRoute(result);
+        string controlMode = SolverController.ControlModeForBugReport;
+        int? lastSolverDeployedTurn = SolverController.LastSolverDeployedTurnForBugReport;
+        object searchProfiles = new
+        {
+            profiles.ShortProfile,
+            profiles.DeepProfile,
+        };
+        object? metadataResult = result == null ? null : new
+        {
+            result.StartTurnNumber,
+            result.SearchedTurns,
+            result.BattleHpLostSoFar,
+            result.ProjectedBattleHpLost,
+            result.BattlePotionsUsedSoFar,
+            plannedPotionCount = result.PotionCount,
+            result.TheftPolicy,
+            result.OutstandingStolenResource,
+            result.CombatEndedTurn,
+            result.DeathTurn,
+            result.BoundaryReason,
+            result.OnlyDeathRoutesFound,
+        };
+        object? replayResult = result == null ? null : new
+        {
+            result.StartTurnNumber,
+            result.SearchedTurns,
+            result.BattleHpLostSoFar,
+            result.ProjectedBattleHpLost,
+            result.BattlePotionsUsedSoFar,
+            plannedPotionCount = result.PotionCount,
+            result.TheftPolicy,
+            result.OutstandingStolenResource,
+            result.CombatEndedTurn,
+            result.DeathTurn,
+            result.BoundaryReason,
+        };
+        ForensicCheckpointCapture capture = new(
             label,
-            capturedAt = DateTimeOffset.Now,
-            encounterId = state.Encounter?.Id.Entry,
-            round = state.RoundNumber,
-            side = state.CurrentSide.ToString(),
-            playerTurn = localPlayer?.PlayerCombatState?.TurnNumber,
-            playerPhase = localPlayer?.PlayerCombatState?.Phase.ToString(),
-            ascension = state.RunState.AscensionLevel,
-            actIndex = state.RunState.CurrentActIndex,
-            actFloor = state.RunState.ActFloor,
-            totalFloor = state.RunState.TotalFloor,
-            exactContinuationState = stateText,
-            readableDiagnostic = SolverDiagnostics.DescribeStart(
+            capturedAt,
+            stateText,
+            combatCapture,
+            settings,
+            searchProfiles,
+            metadataResult,
+            replayResult,
+            result != null,
+            route,
+            replanAudit,
+            controlMode,
+            lastSolverDeployedTurn);
+        QueueCheckpointWrite(session, capture);
+    }
+
+    private static ForensicMetadataStateCapture CaptureMetadataState(
+        CombatState state,
+        SolverSettingsSnapshot profiles)
+    {
+        Player? localPlayer = LocalContext.GetMe(state);
+        return new ForensicMetadataStateCapture(
+            state.Encounter?.Id.Entry,
+            state.RoundNumber,
+            state.CurrentSide.ToString(),
+            localPlayer?.PlayerCombatState?.TurnNumber,
+            localPlayer?.PlayerCombatState?.Phase.ToString(),
+            state.RunState.AscensionLevel,
+            state.RunState.CurrentActIndex,
+            state.RunState.ActFloor,
+            state.RunState.TotalFloor,
+            SolverDiagnostics.DescribeStart(
                 state,
                 profiles.ShortProfile,
                 profiles.DeepProfile),
-            runRng = state.RunState.Rng.ToSerializable(),
-            players = state.Players.Select(player => new
+            state.RunState.Rng.ToSerializable(),
+            state.Players.Select(player => (object)new
             {
                 netId = player.NetId,
                 characterId = player.Character.Id.Entry,
@@ -398,52 +602,184 @@ internal static class CombatBugReportExporter
                 maxHp = player.Creature.MaxHp,
                 rng = player.PlayerRng.ToSerializable(),
                 odds = player.PlayerOdds.ToSerializable(),
-            }).ToArray(),
-            settings = SolverSettings.Current,
-            result = result == null ? null : new
+            }).ToArray());
+    }
+
+    private static void QueuePreCombatFileCapture(ForensicSession session)
+    {
+        _ = QueueBackground(() =>
+        {
+            try
             {
-                result.StartTurnNumber,
-                result.SearchedTurns,
-                result.BattleHpLostSoFar,
-                result.ProjectedBattleHpLost,
-                result.BattlePotionsUsedSoFar,
-                plannedPotionCount = result.PotionCount,
-                result.TheftPolicy,
-                result.OutstandingStolenResource,
-                result.CombatEndedTurn,
-                result.DeathTurn,
-                result.BoundaryReason,
-                result.OnlyDeathRoutesFound,
-            },
-            route,
-            replanAudit,
-            controlMode = SolverController.ControlModeForBugReport,
-            lastSolverDeployedTurn = SolverController.LastSolverDeployedTurnForBugReport,
-        }, JsonOptions);
-        ForensicCheckpoint checkpoint = new(
-            label,
-            stateText,
-            json,
-            CaptureReplayState(state, profiles, result),
-            CaptureNativeCombatState(state),
-            CaptureInMemoryRunSaveBytes());
-        if (session.Checkpoints.Count >= MaximumCheckpoints)
-            session.Checkpoints.RemoveAt(1);
-        session.Checkpoints.Add(checkpoint);
-        UpdateSessionResult(session, result, replanAudit);
+                TryCapturePreCombatFiles(session);
+            }
+            catch (Exception ex)
+            {
+                RegisterBackgroundFailure(session, "pre_combat_files", ex);
+            }
+            return true;
+        });
+    }
+
+    private static void QueueCheckpointWrite(
+        ForensicSession session,
+        ForensicCheckpointCapture capture)
+    {
+        _ = QueueBackground(() =>
+        {
+            try
+            {
+                byte[] runSave = SerializeInMemoryRunSave(capture.Combat.InMemoryRunSave);
+                if (capture.Label == "combat_start" && session.InMemoryRunSave == null)
+                    session.InMemoryRunSave = new CapturedFile("in-memory", runSave);
+                ForensicCheckpoint checkpoint = new(
+                    capture.Label,
+                    capture.StateText,
+                    SerializeSnapshot(BuildCheckpointMetadata(session, capture)),
+                    SerializeSnapshot(BuildReplayState(capture)),
+                    SerializeNativeCombatState(capture.Combat.NativeCombatState),
+                    runSave);
+                if (session.Checkpoints.Count >= MaximumCheckpoints)
+                    session.Checkpoints.RemoveAt(1);
+                session.Checkpoints.Add(checkpoint);
+                UpdateSessionResult(
+                    session,
+                    capture.HasResult,
+                    capture.Route,
+                    capture.ReplanAudit,
+                    capture.ControlMode,
+                    capture.LastSolverDeployedTurn);
+            }
+            catch (Exception ex)
+            {
+                RegisterBackgroundFailure(session, capture.Label, ex);
+            }
+            return true;
+        });
+    }
+
+    private static object BuildCheckpointMetadata(
+        ForensicSession session,
+        ForensicCheckpointCapture capture)
+    {
+        ForensicMetadataStateCapture state = capture.Combat.MetadataState;
+        return new
+        {
+            schemaVersion = 3,
+            sessionId = session.SessionId,
+            label = capture.Label,
+            capturedAt = capture.CapturedAt,
+            encounterId = state.EncounterId,
+            round = state.RoundNumber,
+            side = state.CurrentSide,
+            playerTurn = state.PlayerTurn,
+            playerPhase = state.PlayerPhase,
+            ascension = state.AscensionLevel,
+            actIndex = state.CurrentActIndex,
+            actFloor = state.ActFloor,
+            totalFloor = state.TotalFloor,
+            exactContinuationState = capture.StateText,
+            readableDiagnostic = state.ReadableDiagnostic,
+            runRng = state.RunRng,
+            players = state.Players,
+            settings = capture.Settings,
+            result = capture.MetadataResult,
+            route = capture.Route,
+            replanAudit = capture.ReplanAudit,
+            controlMode = capture.ControlMode,
+            lastSolverDeployedTurn = capture.LastSolverDeployedTurn,
+        };
+    }
+
+    private static object BuildReplayState(ForensicCheckpointCapture capture)
+    {
+        ForensicReplayStateCapture state = capture.Combat.ReplayState;
+        return new
+        {
+            schemaVersion = 1,
+            capturedAt = capture.CapturedAt,
+            restorableScope = "mid_combat_checkpoint",
+            encounterId = state.EncounterId,
+            encounterType = state.EncounterType,
+            state.RoundNumber,
+            currentSide = state.CurrentSide,
+            state.AscensionLevel,
+            state.CurrentActIndex,
+            state.ActFloor,
+            state.TotalFloor,
+            exactContinuationState = capture.StateText,
+            runRng = state.RunRng,
+            settings = capture.Settings,
+            searchProfiles = capture.SearchProfiles,
+            actualPotionsUsedThisCombat = state.ActualPotionsUsedThisCombat,
+            resultSummary = capture.ReplayResult,
+            players = state.Players,
+            creatures = state.Creatures,
+            history = state.History,
+            route = capture.Route,
+        };
+    }
+
+    private static void QueueSessionCompletion(
+        ForensicSession session,
+        string reason,
+        SolverResult? result,
+        string replanAudit,
+        DateTimeOffset endedAt,
+        IReadOnlyDictionary<string, long> logEndOffsets)
+    {
+        bool hasResult = result != null;
+        string route = DescribeRoute(result);
+        string controlMode = SolverController.ControlModeForBugReport;
+        int? lastSolverDeployedTurn = SolverController.LastSolverDeployedTurnForBugReport;
+        _ = QueueBackground(() =>
+        {
+            try
+            {
+                UpdateSessionResult(
+                    session,
+                    hasResult,
+                    route,
+                    replanAudit,
+                    controlMode,
+                    lastSolverDeployedTurn);
+                session.EndedAt = endedAt;
+                session.EndReason = reason;
+                foreach ((string path, long end) in logEndOffsets)
+                    session.LogEndOffsets[path] = end;
+            }
+            catch (Exception ex)
+            {
+                RegisterBackgroundFailure(session, "combat_end", ex);
+            }
+            return true;
+        });
     }
 
     private static void UpdateSessionResult(
         ForensicSession session,
-        SolverResult? result,
-        string replanAudit)
+        bool hasResult,
+        string route,
+        string replanAudit,
+        string controlMode,
+        int? lastSolverDeployedTurn)
     {
-        if (result != null)
-            session.LastRoute = DescribeRoute(result);
+        if (hasResult)
+            session.LastRoute = route;
         if (!string.IsNullOrWhiteSpace(replanAudit))
             session.ReplanAudit = replanAudit;
-        session.ControlMode = SolverController.ControlModeForBugReport;
-        session.LastSolverDeployedTurn = SolverController.LastSolverDeployedTurnForBugReport;
+        session.ControlMode = controlMode;
+        session.LastSolverDeployedTurn = lastSolverDeployedTurn;
+    }
+
+    private static void RegisterBackgroundFailure(
+        ForensicSession session,
+        string label,
+        Exception exception)
+    {
+        session.BackgroundErrors.Add(exception);
+        Entry.Logger.Error(
+            $"[CombatSolver/Test] BUG_REPORT_CHECKPOINT_FAILURE label={label} exception={exception}");
     }
 
     private static string DescribeRoute(SolverResult? result)
@@ -451,10 +787,24 @@ internal static class CombatBugReportExporter
             ? "当前没有已完成的求解路线。"
             : SolverDiagnostics.DescribeResult(result) + System.Environment.NewLine + result.Format();
 
-    private static ForensicArchiveBundle CaptureForensicBundle()
+    private static ForensicArchiveBundle CaptureForensicBundle(
+        ForensicSession? currentSession,
+        ForensicSession? recentSession)
     {
-        ForensicArchiveSession? current = CaptureForensicSession(_currentSession);
-        ForensicArchiveSession? recent = CaptureForensicSession(_lastSession);
+        List<Exception> backgroundErrors = [];
+        if (currentSession != null)
+            backgroundErrors.AddRange(currentSession.BackgroundErrors);
+        if (recentSession != null && !ReferenceEquals(recentSession, currentSession))
+            backgroundErrors.AddRange(recentSession.BackgroundErrors);
+        if (backgroundErrors.Count > 0)
+        {
+            throw new AggregateException(
+                "战斗取证后台写出未能完整完成，问题包未导出。",
+                backgroundErrors);
+        }
+
+        ForensicArchiveSession? current = CaptureForensicSession(currentSession);
+        ForensicArchiveSession? recent = CaptureForensicSession(recentSession);
         string manifest = JsonSerializer.Serialize(new
         {
             schemaVersion = 3,
@@ -624,10 +974,7 @@ internal static class CombatBugReportExporter
         }, JsonOptions);
     }
 
-    private static string CaptureReplayState(
-        CombatState state,
-        SolverSettingsSnapshot profiles,
-        SolverResult? result)
+    private static ForensicReplayStateCapture CaptureReplayState(CombatState state)
     {
         object[] players = state.Players.Select(player =>
         {
@@ -745,58 +1092,26 @@ internal static class CombatBugReportExporter
             })
             .Cast<object>()
             .ToArray();
-        string exactState = LocalContext.GetMe(state)?.PlayerCombatState == null
-            ? string.Empty
-            : ContinuationStamp.CaptureLive(state).StateText;
-        return JsonSerializer.Serialize(new
-        {
-            schemaVersion = 1,
-            capturedAt = DateTimeOffset.Now,
-            restorableScope = "mid_combat_checkpoint",
-            encounterId = state.Encounter?.Id.Entry,
-            encounterType = state.Encounter?.RoomType.ToString(),
+        return new ForensicReplayStateCapture(
+            state.Encounter?.Id.Entry,
+            state.Encounter?.RoomType.ToString(),
             state.RoundNumber,
-            currentSide = state.CurrentSide.ToString(),
+            state.CurrentSide.ToString(),
             state.RunState.AscensionLevel,
             state.RunState.CurrentActIndex,
             state.RunState.ActFloor,
             state.RunState.TotalFloor,
-            exactContinuationState = exactState,
-            runRng = state.RunState.Rng.ToSerializable(),
-            settings = SolverSettings.Current,
-            searchProfiles = new
-            {
-                profiles.ShortProfile,
-                profiles.DeepProfile,
-            },
-            actualPotionsUsedThisCombat = CombatManager.Instance.History.Entries
+            state.RunState.Rng.ToSerializable(),
+            CombatManager.Instance.History.Entries
                 .Count(entry => entry.GetType().Name == "PotionUsedEntry"),
-            resultSummary = result == null ? null : new
-            {
-                result.StartTurnNumber,
-                result.SearchedTurns,
-                result.BattleHpLostSoFar,
-                result.ProjectedBattleHpLost,
-                result.BattlePotionsUsedSoFar,
-                plannedPotionCount = result.PotionCount,
-                result.TheftPolicy,
-                result.OutstandingStolenResource,
-                result.CombatEndedTurn,
-                result.DeathTurn,
-                result.BoundaryReason,
-            },
             players,
             creatures,
-            history,
-            route = DescribeRoute(result),
-        }, JsonOptions);
+            history);
     }
 
     private static object CaptureCard(CardModel card, int index)
     {
-        JsonElement serialized = JsonSerializer.SerializeToElement(
-            card.ToSerializable(),
-            JsonSerializationUtility.GetTypeInfo<SerializableCard>());
+        SerializableCard serialized = card.ToSerializable();
         return new
         {
             index,
@@ -843,29 +1158,47 @@ internal static class CombatBugReportExporter
         };
     }
 
-    private static SortedDictionary<string, object?> CaptureObjectFields(object source)
+    private static CapturedObjectFields CaptureObjectFields(object source)
     {
-        SortedDictionary<string, object?> fields = new(StringComparer.Ordinal);
+        CapturedFieldDescriptor[] plan = ObjectFieldPlans.GetOrAdd(
+            source.GetType(),
+            static type => BuildObjectFieldPlan(type));
+        List<CapturedObjectField> fields = new(plan.Length);
         HashSet<object> visited = new(ReferenceEqualityComparer.Instance) { source };
-        for (Type? type = source.GetType(); type != null && type != typeof(object); type = type.BaseType)
+        foreach (CapturedFieldDescriptor descriptor in plan)
+        {
+            fields.Add(new CapturedObjectField(
+                descriptor.Name,
+                SnapshotFieldValue(descriptor.Field.GetValue(source), depth: 0, visited)));
+        }
+        return new CapturedObjectFields(fields);
+    }
+
+    private static CapturedFieldDescriptor[] BuildObjectFieldPlan(Type sourceType)
+    {
+        List<CapturedFieldDescriptor> plan = [];
+        for (Type? type = sourceType; type != null && type != typeof(object); type = type.BaseType)
         {
             foreach (FieldInfo field in type.GetFields(
                          BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
             {
-                if (field.IsStatic
-                    || typeof(Delegate).IsAssignableFrom(field.FieldType)
-                    || typeof(GodotObject).IsAssignableFrom(field.FieldType))
-                {
-                    continue;
-                }
-                fields[$"{type.Name}.{field.Name}"] = SnapshotFieldValue(
-                    field.GetValue(source),
-                    depth: 0,
-                    visited);
+                if (ShouldCaptureField(field))
+                    plan.Add(new CapturedFieldDescriptor($"{type.Name}.{field.Name}", field));
             }
         }
-        return fields;
+        return plan.ToArray();
     }
+
+    private static CapturedFieldDescriptor[] BuildNestedFieldPlan(Type type)
+        => type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Where(ShouldCaptureField)
+            .Select(field => new CapturedFieldDescriptor(field.Name, field))
+            .ToArray();
+
+    private static bool ShouldCaptureField(FieldInfo field)
+        => !field.IsStatic
+           && !typeof(Delegate).IsAssignableFrom(field.FieldType)
+           && !typeof(GodotObject).IsAssignableFrom(field.FieldType);
 
     private static object? SnapshotFieldValue(object? value, int depth, HashSet<object> visited)
     {
@@ -921,35 +1254,35 @@ internal static class CombatBugReportExporter
         }
         if (depth >= 2 || !visited.Add(value))
             return value.ToString();
-        SortedDictionary<string, object?> nested = new(StringComparer.Ordinal);
-        foreach (FieldInfo field in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+        CapturedFieldDescriptor[] plan = NestedFieldPlans.GetOrAdd(
+            type,
+            static nestedType => BuildNestedFieldPlan(nestedType));
+        List<CapturedObjectField> nested = new(plan.Length);
+        foreach (CapturedFieldDescriptor descriptor in plan)
         {
-            if (field.IsStatic
-                || typeof(Delegate).IsAssignableFrom(field.FieldType)
-                || typeof(GodotObject).IsAssignableFrom(field.FieldType))
-            {
-                continue;
-            }
-            nested[field.Name] = SnapshotFieldValue(field.GetValue(value), depth + 1, visited);
+            nested.Add(new CapturedObjectField(
+                descriptor.Name,
+                SnapshotFieldValue(descriptor.Field.GetValue(value), depth + 1, visited)));
         }
-        return nested;
+        return new CapturedObjectFields(nested);
     }
 
-    private static byte[] CaptureNativeCombatState(CombatState state)
+    private static NetFullCombatState CaptureNativeCombatState(CombatState state)
+        => NetFullCombatState.FromRun(state.RunState, justFinishedAction: null);
+
+    private static byte[] SerializeNativeCombatState(NetFullCombatState native)
     {
-        NetFullCombatState native = NetFullCombatState.FromRun(state.RunState, justFinishedAction: null);
         PacketWriter writer = new() { WarnOnGrow = false };
         native.Serialize(writer);
         writer.ZeroByteRemainder();
         return writer.Buffer.AsSpan(0, writer.BytePosition).ToArray();
     }
 
-    private static void TryCapturePreCombatFiles(ForensicSession session, CombatState state)
+    private static void TryCapturePreCombatFiles(ForensicSession session)
     {
-        if (session.PreCombatRunSave != null || session.PreCombatDiskCaptureAttempts >= 3)
+        if (session.PreCombatRunSave != null)
             return;
-        session.PreCombatDiskCaptureAttempts++;
-        string userDataDirectory = OS.GetUserDataDir();
+        string userDataDirectory = session.UserDataDirectory;
         string? best = null;
         DateTime bestWrite = DateTime.MinValue;
         foreach (string file in EnumerateFilesSafely(userDataDirectory, "current_run.save"))
@@ -960,7 +1293,7 @@ internal static class CombatBugReportExporter
                 using JsonDocument document = JsonDocument.Parse(bytes);
                 if (!document.RootElement.TryGetProperty("rng", out JsonElement rng)
                     || !rng.TryGetProperty("seed", out JsonElement seed)
-                    || seed.GetString() != state.RunState.Rng.StringSeed)
+                    || seed.GetString() != session.Seed)
                 {
                     continue;
                 }
@@ -992,16 +1325,11 @@ internal static class CombatBugReportExporter
         }
     }
 
-    private static void CaptureInMemoryRunSave(ForensicSession session)
-    {
-        if (!RunManager.Instance.IsInProgress)
-            return;
-        session.InMemoryRunSave = new CapturedFile("in-memory", CaptureInMemoryRunSaveBytes());
-    }
+    private static SerializableRun CaptureInMemoryRunSave()
+        => RunManager.Instance.ToSave(null);
 
-    private static byte[] CaptureInMemoryRunSaveBytes()
+    private static byte[] SerializeInMemoryRunSave(SerializableRun save)
     {
-        SerializableRun save = RunManager.Instance.ToSave(null);
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(
             save,
             JsonSerializationUtility.GetTypeInfo<SerializableRun>());
@@ -1012,6 +1340,9 @@ internal static class CombatBugReportExporter
         }
         return bytes;
     }
+
+    private static string SerializeSnapshot(object snapshot)
+        => JsonSerializer.Serialize(snapshot, snapshot.GetType(), JsonOptions);
 
     private static byte[] ReadSharedFile(string path, long maximumBytes)
     {
@@ -1029,7 +1360,7 @@ internal static class CombatBugReportExporter
 
     private static void CaptureLogStarts(ForensicSession session)
     {
-        string logsDirectory = Path.Combine(OS.GetUserDataDir(), "logs");
+        string logsDirectory = Path.Combine(session.UserDataDirectory, "logs");
         if (!Directory.Exists(logsDirectory))
             return;
         foreach (string log in EnumerateFilesSafely(logsDirectory, "*.log")
@@ -1038,13 +1369,48 @@ internal static class CombatBugReportExporter
             session.LogStartOffsets[log] = new FileInfo(log).Length;
     }
 
-    private static void CaptureLogEnds(ForensicSession session)
+    private static IReadOnlyDictionary<string, long> CaptureLogEndOffsets(ForensicSession session)
     {
+        Dictionary<string, long> offsets = new(StringComparer.OrdinalIgnoreCase);
         foreach (string log in session.LogStartOffsets.Keys)
         {
             if (File.Exists(log))
-                session.LogEndOffsets[log] = new FileInfo(log).Length;
+                offsets[log] = new FileInfo(log).Length;
         }
+        return offsets;
+    }
+
+    private static void StartBackgroundThread()
+    {
+        Thread worker = new(() =>
+        {
+            foreach (Action operation in BackgroundOperations.GetConsumingEnumerable())
+                operation();
+        })
+        {
+            IsBackground = true,
+            Name = "CombatSolver Bug Report Writer",
+            Priority = ThreadPriority.BelowNormal,
+        };
+        worker.Start();
+    }
+
+    private static Task<T> QueueBackground<T>(Func<T> operation)
+    {
+        TaskCompletionSource<T> completion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        BackgroundOperations.Add(() =>
+        {
+            try
+            {
+                completion.SetResult(operation());
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        });
+        return completion.Task;
     }
 
     private static void AddText(ZipArchive archive, string name, string text)
