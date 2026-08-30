@@ -2,6 +2,8 @@
 
 param(
     [int]$TimeoutSeconds = 360,
+    [ValidateRange(1, 8)]
+    [int]$SearchMaxDegreeOfParallelism = 2,
     [switch]$VerifyBaseLibCardModifierBoundary
 )
 
@@ -86,6 +88,7 @@ $request = [ordered]@{
     assertDeploymentSpeedRestored = $true
     forceShortSearchOnly = $false
     measureSearchPhases = $true
+    searchMaxDegreeOfParallelismForTest = $SearchMaxDegreeOfParallelism
     holdAfterInitialSearch = $false
     shortSearchBudgetOverrideMilliseconds = 5000
     deepSearchBudgetOverrideMilliseconds = 60000

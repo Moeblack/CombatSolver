@@ -270,6 +270,7 @@ expected_beam_files=(
     CombatBeamSolver.Expansion.cs
     CombatBeamSolver.FinalPlanOrdering.cs
     CombatBeamSolver.Models.cs
+    CombatBeamSolver.ParallelExpansion.cs
     CombatBeamSolver.Phases.cs
     CombatBeamSolver.Retention.cs
     CombatBeamSolver.StateEvaluation.cs
@@ -301,6 +302,9 @@ CombatBeamSolver.BeamRetentionPolicy.cs	public List<SearchNode> RankBest(
 CombatBeamSolver.Models.cs	private readonly record struct TranspositionLabel(
 CombatBeamSolver.Models.cs	private sealed class SearchRunContext(
 CombatBeamSolver.Models.cs	private readonly record struct SearchFeatures(
+CombatBeamSolver.ParallelExpansion.cs	private sealed class ParallelExpansionExecutor : IDisposable
+CombatBeamSolver.ParallelExpansion.cs	public ExpansionWorkerOutcome[] Evaluate(
+CombatBeamSolver.ParallelExpansion.cs	private void CommitExpansionBatch(
 CombatBeamSolver.Phases.cs	public SolverResult Solve()
 CombatBeamSolver.Expansion.cs	private IEnumerable<SearchNode> Expand(SearchNode node)
 CombatBeamSolver.BeamRetentionPolicy.cs	public List<SearchNode> RankFinal(IEnumerable<SearchNode> nodes)

@@ -28,6 +28,7 @@ internal sealed partial class UnattendedTestRunner
         public bool VerifyIncrementalSearch { get; private set; }
         public bool ForceShortSearchOnly { get; private set; }
         public bool MeasureSearchPhases { get; private set; }
+        public int? SearchMaxDegreeOfParallelismOverride { get; private set; }
         public int? ShortSearchBudgetOverrideMilliseconds { get; private set; }
         public int? DeepSearchBudgetOverrideMilliseconds { get; private set; }
 
@@ -306,6 +307,15 @@ internal sealed partial class UnattendedTestRunner
             VerifyIncrementalSearch = request.VerifyIncrementalSearch;
             ForceShortSearchOnly = request.ForceShortSearchOnly;
             MeasureSearchPhases = request.MeasureSearchPhases;
+            if (request.SearchMaxDegreeOfParallelismForTest is { } maxDegreeOfParallelism
+                && (maxDegreeOfParallelism < 1
+                    || maxDegreeOfParallelism > SolverWeights.MaximumSearchMaxDegreeOfParallelism))
+            {
+                throw new InvalidOperationException(
+                    $"搜索并行度必须在 1..{SolverWeights.MaximumSearchMaxDegreeOfParallelism} 之间，" +
+                    $"实际为 {maxDegreeOfParallelism}。");
+            }
+            SearchMaxDegreeOfParallelismOverride = request.SearchMaxDegreeOfParallelismForTest;
             ShortSearchBudgetOverrideMilliseconds = request.ShortSearchBudgetOverrideMilliseconds;
             DeepSearchBudgetOverrideMilliseconds = request.DeepSearchBudgetOverrideMilliseconds;
         }
@@ -317,6 +327,7 @@ internal sealed partial class UnattendedTestRunner
             VerifyIncrementalSearch = false;
             ForceShortSearchOnly = false;
             MeasureSearchPhases = false;
+            SearchMaxDegreeOfParallelismOverride = null;
             _injectPlayerHpLossTurn = 0;
             _injectPlayerHpLossAmount = 0;
             _injectedPlayerHpLoss = 0;

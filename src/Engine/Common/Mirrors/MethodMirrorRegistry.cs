@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using MegaCrit.Sts2.Core.Modding;
@@ -56,7 +57,8 @@ internal sealed class MethodMirrorRegistry<TBase, TContext>(MirrorMethodSpec met
     // All registrations must be completed before the first invocation. Registries are built during
     // static initialization and do not support runtime registration.
     private readonly Dictionary<Type, LookupResult> _registrations = [];
-    private readonly Dictionary<Type, LookupResult> _lookupCache = [];
+    private readonly ConcurrentDictionary<Type, Lazy<LookupResult>> _lookupCache = new();
+    private readonly object _lookupResolutionGate = new();
 
     private MethodMirrorInferrer<TBase, TContext>? _inferrer;
     private MethodMirrorInferrer<TBase, TContext>? _strictInferrer;
@@ -222,12 +224,26 @@ internal sealed class MethodMirrorRegistry<TBase, TContext>(MirrorMethodSpec met
 
     private LookupResult Lookup(Type type)
     {
-        if (_registrations.TryGetValue(type, out var result) ||
-            _lookupCache.TryGetValue(type, out result))
-        {
+        if (_registrations.TryGetValue(type, out var result))
             return result;
-        }
 
+        return _lookupCache.GetOrAdd(
+            type,
+            static (runtimeType, registry) => new Lazy<LookupResult>(
+                () => registry.ResolveLookup(runtimeType),
+                LazyThreadSafetyMode.ExecutionAndPublication),
+            this).Value;
+    }
+
+    private LookupResult ResolveLookup(Type type)
+    {
+        lock (_lookupResolutionGate)
+            return ResolveLookupUnderLock(type);
+    }
+
+    private LookupResult ResolveLookupUnderLock(Type type)
+    {
+        LookupResult result;
         if (!method.TryGetOverride(type, out var overrideMethod))
         {
             result = new LookupResult(MirrorDispatchKind.NotOverridden, null);
@@ -255,7 +271,6 @@ internal sealed class MethodMirrorRegistry<TBase, TContext>(MirrorMethodSpec met
             result = new LookupResult(MirrorDispatchKind.Unsupported, null);
         }
 
-        _lookupCache.Add(type, result);
         return result;
     }
 
@@ -302,7 +317,8 @@ internal sealed class MethodMirrorRegistry<TBase, TContext, TResult>(MirrorMetho
     // All registrations must be completed before the first invocation. Registries are built during
     // static initialization and do not support runtime registration.
     private readonly Dictionary<Type, LookupResult> _registrations = [];
-    private readonly Dictionary<Type, LookupResult> _lookupCache = [];
+    private readonly ConcurrentDictionary<Type, Lazy<LookupResult>> _lookupCache = new();
+    private readonly object _lookupResolutionGate = new();
 
     public void Register<TModel>(Func<TModel, TContext, TResult> handler)
         where TModel : TBase
@@ -388,12 +404,26 @@ internal sealed class MethodMirrorRegistry<TBase, TContext, TResult>(MirrorMetho
 
     private LookupResult Lookup(Type type)
     {
-        if (_registrations.TryGetValue(type, out var result) ||
-            _lookupCache.TryGetValue(type, out result))
-        {
+        if (_registrations.TryGetValue(type, out var result))
             return result;
-        }
 
+        return _lookupCache.GetOrAdd(
+            type,
+            static (runtimeType, registry) => new Lazy<LookupResult>(
+                () => registry.ResolveLookup(runtimeType),
+                LazyThreadSafetyMode.ExecutionAndPublication),
+            this).Value;
+    }
+
+    private LookupResult ResolveLookup(Type type)
+    {
+        lock (_lookupResolutionGate)
+            return ResolveLookupUnderLock(type);
+    }
+
+    private LookupResult ResolveLookupUnderLock(Type type)
+    {
+        LookupResult result;
         if (!method.TryGetOverride(type, out _))
         {
             result = new LookupResult(MirrorDispatchKind.NotOverridden, null);
@@ -405,7 +435,6 @@ internal sealed class MethodMirrorRegistry<TBase, TContext, TResult>(MirrorMetho
             result = new LookupResult(MirrorDispatchKind.Unsupported, null);
         }
 
-        _lookupCache.Add(type, result);
         return result;
     }
 

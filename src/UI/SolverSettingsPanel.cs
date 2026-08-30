@@ -126,6 +126,16 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         AddBasicRow(basicGrid, "本场药水策略", _potionPolicy);
         _performancePreset = CreatePerformancePresetInput();
         AddBasicRow(basicGrid, "性能预设", _performancePreset);
+        AddBasicRow(
+            basicGrid,
+            "搜索并行度",
+            CreateIntInput(
+                SolverWeights.DefaultSearchMaxDegreeOfParallelism,
+                data => data.SearchMaxDegreeOfParallelism,
+                (data, value) => data with { SearchMaxDegreeOfParallelism = value },
+                1,
+                SolverWeights.MaximumSearchMaxDegreeOfParallelism),
+            "同时展开的候选数量；实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。留空使用默认值。");
         AddBasicRow(basicGrid, "自动出牌速度", CreateDeploymentFastModeInput());
         AddBasicRow(basicGrid, "牌间额外停顿（秒）", CreateDoubleInput(
             0d,

@@ -92,8 +92,12 @@ internal sealed partial class CombatBeamSolver
             shufflesCrossed,
             processedEnemyDeaths);
         StateFingerprint unorderedPileKey = BuildUnorderedPileKey(playerState);
+        SearchMeasurement projectedShuffleMeasurement = _run.Performance.Begin();
         (StateFingerprint projectedShuffleOrderKey, int projectedShuffleOrderValue) =
             BuildProjectedShuffleOrder(simulator, playerState);
+        _run.Performance.End(
+            SearchMetricPhase.ProjectedShuffle,
+            projectedShuffleMeasurement);
         _run.Performance.End(SearchMetricPhase.Fingerprint, fingerprintMeasurement);
 
         int roundIndex = turn - _startTurnNumber;

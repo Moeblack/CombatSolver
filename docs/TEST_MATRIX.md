@@ -1,10 +1,10 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.20.1`（开发中，当前发布仍为 `0.20.0`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.21.0`（开发中，当前发布仍为 `0.20.0`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
-## 0.20.1（开发中）
+## 0.21.0（开发中）
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
@@ -14,6 +14,16 @@
 | `POST0201-SLIMED-BERSERKER-WHISTLE-REUSE` | 通过 | 从史莱姆狂战士问题包恢复牌组、遗物与 RNG；严格增量搜索实际打出吹哨，连续复用到第 3 回合，计划外重算 `0`。runId `e6232efae6494f2cb91b14d6790c3c23` | 2026-08-30 |
 | `POST0201-TEST-SUBJECT-SCRAPE-SCAVENGE-REUSE` | 通过 | 从实验体问题包恢复牌组、遗物与 RNG；第 2 回合打出刮削，内存清理随后在 4 张原生手牌候选中成功选中贪婪，严格增量复用到第 3 回合且计划外重算 `0`。runId `ec1c11fa2a444eda836520d1fe18e829` | 2026-08-30 |
 | `POST0201-DECIMILLIPEDE-CURRENT-DEEP-BASELINE` | 部分，不计完整通过 | 当前源码从千足虫问题包根完成搜索，没有复现旧版待结算力量导致的 Fork 异常；结果只有死亡路线，测试因可执行动作下限断言失败，因此不作为完整战斗证据。runId `dbf082665e984821b835e665889cc168` | 2026-08-30 |
+| `MULTICORE-NIBBITS-DOP1/DOP2-AB` | 通过（headless 迭代基准） | 固定双小啃兽快照在上游 DOP1、当前 DOP1、当前 DOP2 均为 `573` 展开、`2759` 转移、同一 5 回合零战损/零药路线。独立冷进程求解耗时 `1424.5 / 1449.3 / 955.2 ms`，当前 DOP2 缩短约 `34.1%`；累计分配 `177,425,048 / 177,767,800 / 179,165,392 B`，DOP2 并行遥测为 `286 waves / 572 items / max concurrency 2`。runId `e8bfb02cf9714c98ae9230842c756ff3`、`9314522060164435b551c18f16d7d093`、`ca238f1462874e7d8c67069b4b71077c`；不替代 Steam 可见性能门槛 | 2026-08-30 |
+| `MULTICORE-POLICY-EQUIVALENCE` | 通过 | 带初始力量与 `SURVIVOR` 弃牌选择的固定根先执行冷缓存 DOP2，再执行 DOP1；递归核对完整动作/选择、评分、展开、转移、各类剪枝、快照、continuation 与回合标注。DOP1 并行遥测全零，DOP2 实际最大并发不小于 2。runId `3f8d240bda57441c8352bfb749424017` | 2026-08-30 |
+| `MULTICORE-FULL-AUTO-DOP2` | 通过 | 默认并行路径完成双小啃兽整场自动部署，第 5 回合结束，第 3 回合精确复用；零药、零预计战损。runId `eda5d69feb774389a8990d788434ac6d` | 2026-08-30 |
+| `MULTICORE-EARRING-NESTED-CHOICE-DOP2` | 通过 | 工具盒形成首回合多根，低语耳环连续自动打出高密度 `SURVIVOR` 并消费嵌套弃牌选择；精确原版状态检查通过，搜索记录 `4 waves / 8 items / max concurrency 2`。runId `f577be1a8e0a4ebb84aa115d3ab28734` | 2026-08-30 |
+| `MULTICORE-NIBBITS-DOP4` | 通过 | 四条 lane 完成固定双小啃兽搜索，仍为 `573 / 2759`、同一路线与全部剪枝指标；并行遥测 `159 waves / 572 items / max concurrency 4`。runId `54243577aa984e8eb68f2d242a216eb9` | 2026-08-30 |
+| `MULTICORE-INCREMENTAL-FORCED-SERIAL` | 通过 | 请求 DOP4 并开启严格增量回放；首轮完整结果的 `parallel_waves / work_items / max_concurrency` 均为 `0`，逐转移回放一致，第 5 回合结束且计划外重算 `0`。runId `96b7d9fdfbb245d68f4effefcd748b1e` | 2026-08-30 |
+| `MULTICORE-V020-FINAL-POLICY-EQUIVALENCE` | 通过 | 合并 `upstream/main` 的 `v0.20.0` 后，以固定 250 节点先跑 DOP2 再跑 DOP1；动作、选择、评分、展开、转移、全部非时序剪枝、快照、continuation 与回合标注一致。门禁同时断言两档都实际释放节点上限丢弃的 Simulator；runId `c9052d90aa504ae0ba183a5089aa0e07` | 2026-08-30 |
+| `MULTICORE-V020-FULL-AUTO-DOP2-FINAL` | 通过 | 合并态默认 DOP2 完整自动部署双小啃兽，第 5 回合结束、第 3 回合精确复用，零药、零预计战损、计划外重算 `0`；runId `f48b0cebd842466594bd8f30789d589a` | 2026-08-30 |
+| `MULTICORE-MECHA-DOP4/6/8-WARM-NOCACHE` | 通过（headless 迭代基准） | 同一暖进程固定 `4319 / 33087 / 18399` 工作量与第 7 回合/28 战损路线；DOP4/6/8 为 `5451.7 / 4281.3 / 3813.0 ms`，累计分配为 `4,404,184,848 / 4,412,016,024 / 4,415,450,000 B`。runId `db33a20aa0764f068b34a3028ec06beb`、`eab8b0f052634b82be807b3af9ddaec9`、`38e6aed2c8834a4fa0cea8a35e18b6f5`；不替代 Steam 可见性能门槛 | 2026-08-30 |
+| `MULTICORE-V020-MECHA-DOP8-FINAL` | 通过（headless 冷进程） | 当前合并态 DOP8 保持 `4319` 展开、`33087` 转移、`18399` 选牌分支与同一路线；`6366.8 ms / 4,441,356,192 B`，实际最大并发 `8`，结果时工作集 `6,011,162,624 B`，GC `0 ms`、最大帧 `18.0 ms`、无 `>50 ms` 帧。runId `2c38044b3fb44bef85b66032b488271c`；可见 Steam 启动未形成游戏进程，故不写成生产帧率结论 | 2026-08-30 |
 
 ## 0.20.0：在线问题包、跨平台测试与选牌修复
 

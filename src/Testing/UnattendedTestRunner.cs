@@ -54,6 +54,7 @@ internal sealed partial class UnattendedTestRunner
     public static bool MeasureSearchPhases => Host.MeasureSearchPhases;
     public static int? ShortSearchBudgetOverrideMilliseconds => Host.ShortSearchBudgetOverrideMilliseconds;
     public static int? DeepSearchBudgetOverrideMilliseconds => Host.DeepSearchBudgetOverrideMilliseconds;
+    public static int? SearchMaxDegreeOfParallelismOverride => Host.SearchMaxDegreeOfParallelismOverride;
 
     private readonly NGame _host;
     private readonly UnattendedTestRequest _request;
