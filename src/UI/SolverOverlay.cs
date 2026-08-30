@@ -86,6 +86,8 @@ internal static class SolverOverlay
     internal static string? ExecuteButtonTextForTesting => _executeButton?.Text;
     internal static bool MessageWrappingEnabledForTesting
         => _summaryText is { FitContent: true, AutowrapMode: TextServer.AutowrapMode.WordSmart };
+    internal static bool UploadProgressConfiguredForTesting
+        => _settingsPanel?.UploadProgressConfiguredForTesting == true;
 
     public static void Show(Node host, string text)
     {

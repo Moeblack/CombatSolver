@@ -16,12 +16,27 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private readonly OptionButton _performancePreset;
     private readonly Button _exportBugReport;
     private readonly Button _uploadBugReport;
+    private readonly ProgressBar _uploadProgress;
     private readonly Label _status;
     private readonly List<Action<SolverSettingsData>> _reloadInputs = [];
     private readonly List<Func<bool>> _commitInputs = [];
+    private BugReportUploadDialog? _uploadDialog;
+    private CancellationTokenSource? _uploadCancellation;
     private bool _loading;
+    private volatile bool _exportInProgress;
+    private volatile bool _uploadInProgress;
+    private volatile bool _uploadCancelRequested;
+    private long _uploadBytesSent;
+    private long _uploadTotalBytes;
+    private int _lastRenderedUploadPercentage = -1;
 
     public event Action? ResetPositionRequested;
+
+    internal bool UploadProgressConfiguredForTesting
+        => !_uploadProgress.Visible
+           && _uploadProgress.MinValue == 0
+           && _uploadProgress.MaxValue == 100
+           && _uploadBugReport.Text == "上传问题包";
 
     public SolverSettingsPanel()
     {
@@ -194,6 +209,17 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             SolverUiTokens.Type.Caption,
             SolverUiTokens.Palette.TextMuted);
         root.AddChild(hint);
+        _uploadProgress = new ProgressBar
+        {
+            Visible = false,
+            MinValue = 0,
+            MaxValue = 100,
+            Value = 0,
+            ShowPercentage = true,
+            CustomMinimumSize = new Vector2(0, 18),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        root.AddChild(_uploadProgress);
         _status = SolverUiTokens.CreateLabel(
             string.Empty,
             SolverUiTokens.Type.Caption,
@@ -202,7 +228,31 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         _status.CustomMinimumSize = new Vector2(0, 20);
         root.AddChild(_status);
         AddChild(root);
+        SetProcess(false);
         Reload();
+    }
+
+    public override void _Process(double delta)
+    {
+        if (!_uploadInProgress || _uploadCancelRequested)
+            return;
+        long total = Interlocked.Read(ref _uploadTotalBytes);
+        long sent = Interlocked.Read(ref _uploadBytesSent);
+        int percentage = total <= 0
+            ? 0
+            : (int)Math.Clamp(sent * 100L / total, 0L, 100L);
+        if (percentage == _lastRenderedUploadPercentage)
+            return;
+        _lastRenderedUploadPercentage = percentage;
+        _uploadProgress.Value = percentage;
+        _status.Text = $"正在上传… {percentage}%";
+    }
+
+    public override void _ExitTree()
+    {
+        _uploadCancellation?.Cancel();
+        if (_uploadDialog != null && GodotObject.IsInstanceValid(_uploadDialog))
+            _uploadDialog.QueueFree();
     }
 
     public void Reload()
@@ -675,7 +725,10 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
 
     private void OnExportBugReportPressed()
     {
-        _exportBugReport.Disabled = true;
+        if (_exportInProgress || _uploadInProgress || HasOpenUploadDialog())
+            return;
+        _exportInProgress = true;
+        RefreshBugReportControls();
         _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextSecondary);
         _status.Text = "正在打包日志和当前战斗…";
         TaskHelper.RunSafely(ExportBugReportAsync());
@@ -686,65 +739,223 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         try
         {
             string path = await CombatBugReportExporter.ExportCurrentAsync();
-            OS.ShellShowInFileManager(path);
-            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
-            _status.Text = $"已导出到桌面：{Path.GetFileName(path)}";
+            PostUi(() =>
+            {
+                OS.ShellShowInFileManager(path);
+                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+                _status.Text = $"已导出到桌面：{Path.GetFileName(path)}";
+            });
         }
         catch (Exception ex)
         {
             Entry.Logger.Error($"[CombatSolver/Test] BUG_REPORT_EXPORT_FAILED exception={ex}");
-            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
-            _status.Text = $"导出失败：{ex.Message}";
+            PostUi(() =>
+            {
+                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
+                _status.Text = $"导出失败：{DescribeUiFailure(ex)}";
+            });
         }
         finally
         {
-            _exportBugReport.Disabled = false;
+            _exportInProgress = false;
+            PostUi(RefreshBugReportControls);
         }
     }
 
     private void OnUploadBugReportPressed()
     {
+        if (_uploadInProgress)
+        {
+            _uploadCancelRequested = true;
+            _uploadCancellation?.Cancel();
+            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Warning);
+            _status.Text = "正在取消上传…";
+            _uploadBugReport.Disabled = true;
+            return;
+        }
+        if (_exportInProgress || HasOpenUploadDialog())
+            return;
         BugReportUploadDialog dialog = new(SolverSettings.Current.ReporterContactQq ?? string.Empty);
+        _uploadDialog = dialog;
         dialog.UploadConfirmed += OnUploadConfirmed;
+        dialog.DialogClosed += () => OnUploadDialogClosed(dialog);
         GetTree().Root.AddChild(dialog);
+        RefreshBugReportControls();
     }
 
     private void OnUploadConfirmed(string description)
     {
-        _uploadBugReport.Disabled = true;
+        if (_uploadInProgress || _exportInProgress)
+            return;
+        _uploadInProgress = true;
+        _uploadCancelRequested = false;
+        _uploadCancellation = new CancellationTokenSource();
+        Interlocked.Exchange(ref _uploadBytesSent, 0);
+        Interlocked.Exchange(ref _uploadTotalBytes, 0);
+        _lastRenderedUploadPercentage = -1;
+        _uploadProgress.Value = 0;
+        _uploadProgress.Visible = true;
+        SetProcess(true);
+        RefreshBugReportControls();
         _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextSecondary);
-        _status.Text = "正在打包并上传…";
-        TaskHelper.RunSafely(UploadBugReportAsync(description));
+        _status.Text = "正在打包问题包…";
+        string submissionId = Guid.NewGuid().ToString("N");
+        TaskHelper.RunSafely(UploadBugReportAsync(
+            description,
+            submissionId,
+            _uploadCancellation.Token));
     }
 
-    private async Task UploadBugReportAsync(string description)
+    private async Task UploadBugReportAsync(
+        string description,
+        string submissionId,
+        CancellationToken cancellationToken)
     {
         string? path = null;
         try
         {
             string descriptionWithClassification = SolverController.BuildBugReportDescription(description);
-            path = await CombatBugReportExporter.ExportCurrentAsync();
-            string contactQq = SolverSettings.Current.ReporterContactQq ?? string.Empty;
-            string reportId = await CombatBugReportUploader.UploadAsync(
-                path,
+            string uploadDescription = CombatBugReportDescription.AppendSubmissionId(
                 descriptionWithClassification,
-                contactQq);
-            File.Delete(path);
-            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
-            _status.Text = $"已上传，反馈编号：{reportId}";
+                submissionId);
+            path = await CombatBugReportExporter.ExportCurrentAsync();
+            cancellationToken.ThrowIfCancellationRequested();
+            FileInfo archive = new(path);
+            Interlocked.Exchange(ref _uploadBytesSent, 0);
+            Interlocked.Exchange(ref _uploadTotalBytes, archive.Length);
+            string contactQq = SolverSettings.Current.ReporterContactQq ?? string.Empty;
+            DirectProgress<CombatBugReportUploadProgress> progress = new(value =>
+            {
+                Interlocked.Exchange(ref _uploadBytesSent, value.BytesSent);
+                Interlocked.Exchange(ref _uploadTotalBytes, value.TotalBytes);
+            });
+            CombatBugReportUploadReceipt receipt = await CombatBugReportUploader.UploadAsync(
+                path,
+                uploadDescription,
+                contactQq,
+                submissionId,
+                progress,
+                cancellationToken);
+            string? cleanupWarning = DeleteUploadedArchive(path);
+            PostUi(() =>
+            {
+                _uploadProgress.Value = 100;
+                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
+                _status.Text = cleanupWarning == null
+                    ? $"已上传，反馈编号：{receipt.ReportId}"
+                    : $"已上传，反馈编号：{receipt.ReportId}；{cleanupWarning}";
+            });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            Entry.Logger.Info($"[CombatSolver/Test] BUG_REPORT_UPLOAD_CANCELED submission_id={submissionId}");
+            PostUi(() =>
+            {
+                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Warning);
+                _status.Text = path == null
+                    ? "上传已取消"
+                    : "已停止等待上传结果；问题包已保留，请勿立即重复提交";
+            });
+        }
+        catch (TaskCanceledException ex)
+        {
+            Entry.Logger.Error(
+                $"[CombatSolver/Test] BUG_REPORT_UPLOAD_UNCONFIRMED submission_id={submissionId} exception={ex}");
+            PostUi(() =>
+            {
+                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
+                _status.Text = "上传结果未确认；问题包已保留，请勿立即重复提交";
+            });
         }
         catch (Exception ex)
         {
-            Entry.Logger.Error($"[CombatSolver/Test] BUG_REPORT_UPLOAD_FAILED exception={ex}");
-            _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
-            _status.Text = path == null
-                ? $"上传失败：{ex.Message}"
-                : $"上传失败：{ex.Message}（问题包已保留在桌面 CombatSolver-BugReports）";
+            Entry.Logger.Error(
+                $"[CombatSolver/Test] BUG_REPORT_UPLOAD_FAILED submission_id={submissionId} exception={ex}");
+            PostUi(() =>
+            {
+                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
+                _status.Text = path == null
+                    ? $"打包失败：{DescribeUiFailure(ex)}"
+                    : $"上传未完成：{DescribeUiFailure(ex)}（问题包已保留）";
+            });
         }
         finally
         {
-            _uploadBugReport.Disabled = false;
+            _uploadInProgress = false;
+            _uploadCancelRequested = false;
+            _uploadCancellation?.Dispose();
+            _uploadCancellation = null;
+            PostUi(() =>
+            {
+                SetProcess(false);
+                _uploadProgress.Visible = false;
+                RefreshBugReportControls();
+            });
         }
+    }
+
+    private void OnUploadDialogClosed(BugReportUploadDialog dialog)
+    {
+        if (!ReferenceEquals(_uploadDialog, dialog))
+            return;
+        _uploadDialog = null;
+        if (CanUpdateUi())
+            RefreshBugReportControls();
+    }
+
+    private bool HasOpenUploadDialog()
+        => _uploadDialog != null && GodotObject.IsInstanceValid(_uploadDialog);
+
+    private void RefreshBugReportControls()
+    {
+        bool dialogOpen = HasOpenUploadDialog();
+        _exportBugReport.Disabled = _exportInProgress || _uploadInProgress || dialogOpen;
+        if (_uploadInProgress)
+        {
+            _uploadBugReport.Disabled = false;
+            _uploadBugReport.Text = "取消上传";
+            SolverUiTokens.ApplyButtonStyle(_uploadBugReport, SolverButtonStyle.Danger);
+            return;
+        }
+        _uploadBugReport.Disabled = _exportInProgress || dialogOpen;
+        _uploadBugReport.Text = "上传问题包";
+        SolverUiTokens.ApplyButtonStyle(_uploadBugReport, SolverButtonStyle.Secondary);
+    }
+
+    private bool CanUpdateUi()
+        => GodotObject.IsInstanceValid(this)
+           && GodotObject.IsInstanceValid(_status)
+           && GodotObject.IsInstanceValid(_uploadBugReport)
+           && GodotObject.IsInstanceValid(_uploadProgress);
+
+    private void PostUi(Action action)
+        => SolverDispatcher.Post(() =>
+        {
+            if (CanUpdateUi())
+                action();
+        });
+
+    private static string? DeleteUploadedArchive(string path)
+    {
+        try
+        {
+            File.Delete(path);
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Entry.Logger.Warn($"[CombatSolver/Test] BUG_REPORT_UPLOAD_CLEANUP_FAILED path={path} exception={ex}");
+            return "本地问题包未能删除";
+        }
+    }
+
+    private static string DescribeUiFailure(Exception exception)
+        => CombatBugReportDescription.NormalizeDetail(exception.GetBaseException().Message)
+           ?? exception.GetType().Name;
+
+    private sealed class DirectProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     private void ResetDefaults()

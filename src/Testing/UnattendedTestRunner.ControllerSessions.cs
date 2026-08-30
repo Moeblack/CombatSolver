@@ -19,6 +19,8 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("搜索期间执行按钮没有切换为停止计算。");
         if (!SolverOverlay.MessageWrappingEnabledForTesting)
             throw new InvalidOperationException("求解器消息区域没有启用自动换行。");
+        if (!SolverOverlay.UploadProgressConfiguredForTesting)
+            throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
 
         SolverController.StopSearchByUser(host);
         if (SolverController.IsSearching
@@ -51,6 +53,7 @@ internal sealed partial class UnattendedTestRunner
         }
 
         AssertBugReportAutomaticClassification();
+        await AssertBugReportUploadBoundariesAsync();
 
         SolverController.RequestSearch(host, combat, SearchReason.Manual);
         if (!SolverController.IsSearching || SolverController.AutomaticSearchPaused)

@@ -218,6 +218,29 @@ internal sealed partial class UnattendedTestRunner
             if (archive.GetEntry(entry) == null)
                 throw new InvalidDataException($"问题包缺少 {entry}。");
         }
+        if (archive.Entries.Any(entry =>
+                Path.IsPathRooted(entry.FullName)
+                || entry.FullName.Split('/').Contains("..", StringComparer.Ordinal))
+            || archive.Entries.GroupBy(entry => entry.FullName, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            throw new InvalidDataException("问题包存在不安全或重复的条目名。");
+        }
+
+        using Stream settingsStream = archive.GetEntry("combat-solver/settings.json")!.Open();
+        using JsonDocument settingsDocument = JsonDocument.Parse(settingsStream);
+        if (settingsDocument.RootElement.TryGetProperty("reporterContactQq", out _))
+            throw new InvalidDataException("问题包设置仍包含反馈联系QQ。");
+
+        using Stream environmentStream = archive.GetEntry("combat-solver/environment.json")!.Open();
+        using JsonDocument environmentDocument = JsonDocument.Parse(environmentStream);
+        JsonElement environment = environmentDocument.RootElement;
+        if (Path.IsPathRooted(environment.GetProperty("gameExecutable").GetString())
+            || Path.IsPathRooted(environment.GetProperty("userDataDirectory").GetString())
+            || environment.GetProperty("loadedAssemblies").EnumerateArray().Any(assembly =>
+                assembly.TryGetProperty("location", out _)))
+        {
+            throw new InvalidDataException("问题包环境信息仍包含本机绝对路径。");
+        }
 
         string checkpointPrefix = $"combat-solver/forensics/{forensicSlot}/checkpoints/";
         ZipArchiveEntry checkpoint = archive.Entries.FirstOrDefault(entry =>

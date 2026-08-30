@@ -34,7 +34,7 @@ Entry / turn hooks
 | `src/Runtime/NativeChoiceRuntime.cs` | 观测原版战斗选择请求，按卡牌语义状态匹配计划实例，并锁定、驱动真实页面控件 | 选择分支枚举和战斗结算 |
 | `src/Runtime/CombatBugReportExporter.cs` | 当前/最近战斗取证包导出 | 通用 replay/native-state 导入 |
 | `src/Runtime/CombatBugReportDescription.cs` | 汇总本场结构化异常、重算和战损信号，并把自动分类附到玩家问题描述后 | 后端字段、问题包内容和搜索决策 |
-| `src/Runtime/CombatBugReportUploader.cs` | 把已导出的问题包 zip 以 multipart 上传到开发者接收服务 | 问题包内容生成、隐私脱敏、UI 确认流程 |
+| `src/Runtime/CombatBugReportUploader.cs` | 校验问题包与文本上限，以 multipart 流式上传并报告字节进度，限制和解析服务端响应 | 问题包内容生成、隐私脱敏、UI 单实例与确认流程 |
 
 `SolverCombatSession` 持有本场路线、续用和重算状态；`SolverSearchSession` 持有 generation、取消、进度和帧观测；`SolverDeploymentSession` 持有部署取消。旧回调只能写回创建它的 search session。
 
@@ -117,6 +117,8 @@ Entry / turn hooks
 - `SolverActionPill.Create(SolverOverlayActionSnapshot)`。
 
 renderer 不得重新读取 `SolverResult`、`PlanAction`、`PlanCardChoice` 或 `ModelDb`。部署需要的标量由 Runtime 单独持有，不从控件反向读取。
+
+`SolverSettingsPanel` 持有问题包导出/上传的单实例 UI 生命周期、取消令牌与进度条；`CombatBugReportUploader` 不持有 Godot 控件，后台传输只通过 `IProgress<CombatBugReportUploadProgress>` 发布字节计数。
 
 ## 7. Unattended 测试
 

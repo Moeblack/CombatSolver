@@ -113,12 +113,18 @@ internal sealed record CombatBugReportClassificationSnapshot(
 
 internal static class CombatBugReportDescription
 {
+    public const int MaximumPlayerDescriptionCharacters = 4_000;
     private const int MaximumDetailLength = 320;
 
     public static string AppendAutomaticClassification(
         string playerDescription,
         CombatBugReportClassificationSnapshot snapshot)
     {
+        if (playerDescription.Length > MaximumPlayerDescriptionCharacters)
+        {
+            throw new InvalidDataException(
+                $"玩家问题描述最长 {MaximumPlayerDescriptionCharacters} 个字符。");
+        }
         List<string> classifications = BuildClassifications(snapshot);
         StringBuilder builder = new();
         if (!string.IsNullOrWhiteSpace(playerDescription))
@@ -143,6 +149,15 @@ internal static class CombatBugReportDescription
                 builder.AppendLine();
         }
         return builder.ToString();
+    }
+
+    public static string AppendSubmissionId(string description, string submissionId)
+    {
+        if (!Guid.TryParseExact(submissionId, "N", out _))
+            throw new InvalidDataException("提交编号格式无效。");
+        return description.TrimEnd() +
+               System.Environment.NewLine + System.Environment.NewLine +
+               $"【CombatSolver 提交编号】{submissionId}";
     }
 
     internal static string? NormalizeDetail(string? detail)

@@ -486,6 +486,18 @@ for renderer_path in "${overlay_renderer_paths[@]}"; do
     done
 done
 
+bug_report_uploader_path="$repository_root/src/Runtime/CombatBugReportUploader.cs"
+solver_settings_panel_path="$repository_root/src/UI/SolverSettingsPanel.cs"
+while IFS=$'\t' read -r path text; do
+    require_fixed "$path" "$text" 'missing upload ownership boundary'
+done <<EOF
+$bug_report_uploader_path	IProgress<CombatBugReportUploadProgress>
+$bug_report_uploader_path	HttpCompletionOption.ResponseHeadersRead
+$solver_settings_panel_path	private readonly ProgressBar _uploadProgress;
+$solver_settings_panel_path	private volatile bool _uploadInProgress;
+EOF
+forbid_fixed "$bug_report_uploader_path" 'using Godot' 'uploader must not own Godot UI state:'
+
 mirror_registry_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistry.cs"
 mirror_descriptor_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistryDescriptor.cs"
 coverage_catalog_path="$repository_root/tools/CoverageCatalog/Program.cs"
