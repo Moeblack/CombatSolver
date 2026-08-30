@@ -85,7 +85,11 @@ internal interface ICombatPredictionCardEventSink
 
     void RecordStarsGained(MegaCrit.Sts2.Core.Entities.Players.Player player, int amount);
 
-    void RecordCardDrawn(MegaCrit.Sts2.Core.Entities.Players.Player player, bool fromHandDraw);
+    void RecordCardDrawn(
+        CombatSolver.Engine.Common.PredictedCard card,
+        bool fromHandDraw);
+
+    int GetStatusCardsDrawnThisTurn(MegaCrit.Sts2.Core.Entities.Players.Player player);
 
     void AfterCardEnteredCombat(
         CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,
@@ -123,6 +127,13 @@ internal interface ICombatPredictionCardExecutionSink
 
     void CompleteCardExecution(
         CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator);
+}
+
+internal interface ICombatPredictionEnemyDeathSink
+{
+    void ResolvePendingEnemyDeaths(
+        CombatSolver.Engine.InCombat.Simulation.CombatPredictionSimulator simulator,
+        ISet<uint> processedEnemyDeaths);
 }
 
 internal interface ICombatPredictionEffectSink

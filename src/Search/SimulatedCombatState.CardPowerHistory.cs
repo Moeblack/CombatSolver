@@ -98,20 +98,9 @@ internal sealed partial class SimulatedCombatState
     {
         FeralPower power = GetPower<FeralPower>(owner)
             ?? throw new InvalidOperationException("野性状态施加后未找到对应 Power。");
-        int liveAttacks = _rootHistory.CardPlaysStarted.Count(entry =>
-            entry.HappenedThisTurn(this)
-            && entry.CardPlay.Player.Creature == owner
-            && entry.CardPlay.Card.Type == CardType.Attack
-            && entry.CardPlay.Resources.EnergyValue == 0);
-        int predictedAttacks = simulator.History.Entries
-            .OfType<CombatPredictionCardPlayStartedEntry>()
-            .Count(entry =>
-                entry.CardPlay.Player.Creature == owner
-                && entry.CardPlay.Card.Type == CardType.Attack
-                && entry.CardPlay.Resources.EnergyValue == 0);
         simulator.StateStore
             .Get(power, () => new FeralPredictionState(power))
-            .ZeroCostAttacksPlayed = liveAttacks + predictedAttacks;
+            .ZeroCostAttacksPlayed = GetZeroCostAttackStartsThisTurn(owner);
     }
 
     public void InitializeJugglingAfterApplied(

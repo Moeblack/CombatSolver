@@ -1,5 +1,7 @@
+using System.Text;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Combat.History.Entries;
+using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
@@ -46,11 +48,63 @@ internal sealed partial class SimulatedCombatState
             (_starsGainedThisTurn ??= [])[player] = GetStarsGainedThisTurn(player) + amount;
     }
 
-    public void RecordCardDrawn(Player player, bool fromHandDraw)
+    public void RecordCardDrawn(PredictedCard card, bool fromHandDraw)
     {
+        Player player = card.Preview.Owner;
         if (!fromHandDraw)
             (_nonHandDrawsThisTurn ??= [])[player] = GetNonHandDrawsThisTurn(player) + 1;
+        if (card.Preview.Type == CardType.Status)
+        {
+            (_statusCardsDrawnThisTurn ??= [])[player] =
+                GetStatusCardsDrawnThisTurn(player) + 1;
+        }
     }
+
+    public int GetStatusCardsDrawnThisTurn(Player player)
+    {
+        if (_statusCardsDrawnThisTurn?.TryGetValue(player, out int value) == true)
+            return value;
+        value = _rootHistory.CardsDrawn.Count(entry =>
+            entry.HappenedThisTurn(this)
+            && entry.Actor.Player == player
+            && entry.Card.Type == CardType.Status);
+        (_statusCardsDrawnThisTurn ??= [])[player] = value;
+        return value;
+    }
+
+    public static void AppendLiveTurnCardHistory(
+        StringBuilder text,
+        CombatState combatState,
+        Player player)
+    {
+        int statusCardsDrawn = CombatManager.Instance.History.Entries
+            .OfType<CardDrawnEntry>()
+            .Count(entry =>
+            entry.HappenedThisTurn(combatState)
+            && entry.Actor.Player == player
+            && entry.Card.Type == CardType.Status);
+        int zeroCostAttackStarts = CombatManager.Instance.History.CardPlaysStarted.Count(entry =>
+            entry.HappenedThisTurn(combatState)
+            && entry.CardPlay.Player == player
+            && entry.CardPlay.Card.Type == CardType.Attack
+            && entry.CardPlay.Resources.EnergyValue == 0);
+        AppendTurnCardHistory(text, statusCardsDrawn, zeroCostAttackStarts);
+    }
+
+    public void AppendPredictedTurnCardHistory(StringBuilder text, Player player)
+        => AppendTurnCardHistory(
+            text,
+            GetStatusCardsDrawnThisTurn(player),
+            GetZeroCostAttackStartsThisTurn(player.Creature));
+
+    private static void AppendTurnCardHistory(
+        StringBuilder text,
+        int statusCardsDrawn,
+        int zeroCostAttackStarts)
+        => text.Append(";Y=")
+            .Append(statusCardsDrawn)
+            .Append('/')
+            .Append(zeroCostAttackStarts);
 
     public void AfterCardEnteredCombat(CombatPredictionSimulator simulator, PredictedCard card)
     {

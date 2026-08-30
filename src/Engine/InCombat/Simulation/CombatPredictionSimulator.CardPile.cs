@@ -73,7 +73,7 @@ internal sealed partial class CombatPredictionSimulator
             AddToPile(card, state.Hand);
             var entry = History.CardDrawn(card, fromHandDraw);
             if (State.CombatState is ICombatPredictionCardEventSink eventSink)
-                eventSink.RecordCardDrawn(card.Preview.Owner, fromHandDraw);
+                eventSink.RecordCardDrawn(card, fromHandDraw);
 
             HookMirrors.AfterCardDrawn(this, card, fromHandDraw);
             History.CardDrawResolved(entry, card);

@@ -387,7 +387,12 @@ internal sealed partial class UnattendedTestRunner
         OrbModel canonical = ResolveUnique(ModelDb.Orbs, injection.OrbId, "充能球");
         var choiceContext = new BlockingPlayerChoiceContext();
         for (int index = 0; index < injection.Count; index++)
-            await OrbCmd.Channel(choiceContext, canonical.ToMutable(), player);
+        {
+            OrbModel orb = canonical.ToMutable();
+            foreach ((string memberName, decimal value) in injection.DecimalMembers)
+                SetObjectStateMember(orb, orb.Id.Entry, memberName, value);
+            await OrbCmd.Channel(choiceContext, orb, player);
+        }
     }
 
     private static async Task InjectRelicAsync(

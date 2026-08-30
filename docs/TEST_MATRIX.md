@@ -4,6 +4,16 @@
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
+## 下一版本（版本号待定，开发中）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `BATCH-164623-TRANSFORM-ENTERED-COMBAT-CONTINUATION` | 通过 | 先打出一张虚无牌，再把手牌固定变换为费用随本场虚无牌变化的牌；原版与预测的变换入场、费用、打出后牌堆和完整状态严格一致，并启用增量核对。runId `c84456dc9b214cf7a7542579a8cd521f` | 2026-08-30 |
+| `BATCH-164623-TURN-SCOPED-CARD-HISTORY-CONTINUATION-FINAL` | 通过 | 同一夹具覆盖两个回合：迭代在新回合重新响应首张状态牌；上一回合零费攻击不污染本回合施加的野性。原版与预测完整状态严格一致，并启用增量核对。runId `98adb2c4b3df4c65aed9cd3fb850512b` | 2026-08-30 |
+| `BATCH-164623-ORB-DEATH-POWER-ORDER-CONTINUATION` | 通过 | 双巨斧机器人中，累计 `30` 伤害的暗黑球连续激发：第一击击杀后先触发另一只敌人的 CrabRage Power，第二击再消耗所得格挡；原版与预测完整状态严格一致。runId `99dc41bee83243cf9bad3c6b32826c0b` | 2026-08-30 |
+| `BATCH-164623-LAGAVULIN-REUSE-FINAL2` | 超时，不计通过 | 从母体问题包战前存档恢复并使用原高预算；第 1 回合搜索未在 `360` 秒总时限内完成，没有进入自动部署，不能证明第 7 回合复用。runId `c4d32e6bde1d4e01a122dce45caa69b6` | 2026-08-30 |
+| `BATCH-164623-LAGAVULIN-REUSE-SHORT` | 超时，不计通过 | 同一战前状态改用固定 `8` 秒短搜并启用增量核对；仍在第 1 回合达到 `180` 秒总时限，没有观察到第 7 回合复用。runId `a5edd7975b4645baa6dd8cde97bfe0d3` | 2026-08-30 |
+
 ## 0.21.2
 
 | 场景 | 结果 | 验证内容 | 日期 |
@@ -560,7 +570,7 @@
 | `MONSTER-MOVES-BATCH-031` | 通过 | 同一 PID `42532` 连续执行三场、共 `11` 条差分；关闭 `22` 个目录条目，验证下回合能量/抽牌/格挡、禁止抽牌/回能、费用/伤害/格挡修正、保留手牌时序和一次性 Power 生命周期 | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-032` | 通过 | 同一 PID `41596` 连续执行六场；关闭 `22` 个持续 Power 生命周期条目，验证抽牌、能量、辉星、Orb、全场目标、生成牌、仪式延迟，以及愤怒复制与活力消费回归 | 2026-08-20 |
 
-运行命令按平台分列。两组命令覆盖同一批场景和断言：Windows 使用仓库保留的 PowerShell 启动器及 PascalCase 参数；Linux 使用原生 Bash 启动器及 GNU kebab-case 参数。修改场景时必须同步更新两组命令，并保持 `ScenarioId / --scenario-id` 集合一致。当前每端各有 `235` 条命令、`234` 个唯一 ScenarioId（`PERFORMANCE-PRESET-HIGH-172` 作为不同历史门禁重复一次）；未提供本机问题包时，矩阵只跳过 `CHOICES-PARADOX-SCROLLS-0160`、`QUEEN-CHAINS-REUSE-FINAL-085` 和 `CORPSE-SLUGS-USER-RUN-073` 这 `3` 个外部快照场景。
+运行命令按平台分列。两组命令覆盖同一批场景和断言：Windows 使用仓库保留的 PowerShell 启动器及 PascalCase 参数；Linux 使用原生 Bash 启动器及 GNU kebab-case 参数。修改场景时必须同步更新两组命令，并保持 `ScenarioId / --scenario-id` 集合一致。当前每端各有 `238` 条命令、`237` 个唯一 ScenarioId（`PERFORMANCE-PRESET-HIGH-172` 作为不同历史门禁重复一次）；未提供本机问题包时，矩阵只跳过 `CHOICES-PARADOX-SCROLLS-0160`、`QUEEN-CHAINS-REUSE-FINAL-085` 和 `CORPSE-SLUGS-USER-RUN-073` 这 `3` 个外部快照场景。
 
 全量运行优先使用两端等价的 `tools/run-headless-matrix.ps1` / `tools/run-headless-matrix.sh`：
 
@@ -576,6 +586,9 @@ pwsh -NoProfile -File tools\run-headless-matrix.ps1 -ContinueOnFailure
 本机问题包不进入仓库：运行 `CHOICES-PARADOX-SCROLLS-0160` 前必须设置 `$env:CHOICES_PARADOX_RUN_SNAPSHOT_PATH` 和 `$env:CHOICES_PARADOX_PROGRESS_SNAPSHOT_PATH`；运行 `QUEEN-CHAINS-REUSE-FINAL-085` 或 `CORPSE-SLUGS-USER-RUN-073` 前必须设置 `$env:RUN_SNAPSHOT_PATH`。
 
 ```powershell
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BATCH-164623-TRANSFORM-ENTERED-COMBAT-CONTINUATION -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\batch-164623-transform-entered-combat.json -VerifyIncrementalSearch -KeepGameOpen -TimeoutSeconds 180
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BATCH-164623-TURN-SCOPED-CARD-HISTORY-CONTINUATION-FINAL -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\batch-164623-turn-scoped-card-history.json -VerifyIncrementalSearch -KeepGameOpen -TimeoutSeconds 180
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BATCH-164623-ORB-DEATH-POWER-ORDER-CONTINUATION -CharacterId DEFECT -EncounterId AXEBOTS_NORMAL -InitialEnemyCurrentHpsJson '[5,50]' -MonsterMoveChecksPath coverage\unattended\batch-164623-orb-death-power-order.json -VerifyIncrementalSearch -ExitOnComplete -TimeoutSeconds 180
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-SCRAPE-NEGATIVE-COST-FINAL -CharacterId DEFECT -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\scrape-negative-cost-discard-0201.json -TimeoutSeconds 120 -KeepGameOpen
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-WHISTLE-STUN-FOLLOW-UP-FINAL -CharacterId DEFECT -EncounterId THE_INSATIABLE_BOSS -EnemyCurrentHp 281 -MonsterMoveChecksPath coverage\unattended\whistle-stun-follow-up-0201.json -TimeoutSeconds 120 -KeepGameOpen
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-BRAND-POST-CHOICE-POWER-FORK-FINAL -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\brand-post-choice-power-fork-0201.json -TimeoutSeconds 120 -ExitOnComplete
@@ -817,6 +830,9 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MOVES-BA
 ### Linux（Bash）
 
 ```bash
+./tools/run-unattended-test.sh --scenario-id BATCH-164623-TRANSFORM-ENTERED-COMBAT-CONTINUATION --character-id IRONCLAD --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/batch-164623-transform-entered-combat.json --verify-incremental-search --keep-game-open --timeout-seconds 180
+./tools/run-unattended-test.sh --scenario-id BATCH-164623-TURN-SCOPED-CARD-HISTORY-CONTINUATION-FINAL --character-id IRONCLAD --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/batch-164623-turn-scoped-card-history.json --verify-incremental-search --keep-game-open --timeout-seconds 180
+./tools/run-unattended-test.sh --scenario-id BATCH-164623-ORB-DEATH-POWER-ORDER-CONTINUATION --character-id DEFECT --encounter-id AXEBOTS_NORMAL --initial-enemy-current-hps-json '[5,50]' --monster-move-checks-path coverage/unattended/batch-164623-orb-death-power-order.json --verify-incremental-search --exit-on-complete --timeout-seconds 180
 ./tools/run-unattended-test.sh --scenario-id POST0201-SCRAPE-NEGATIVE-COST-FINAL --character-id DEFECT --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/scrape-negative-cost-discard-0201.json --timeout-seconds 120 --keep-game-open
 ./tools/run-unattended-test.sh --scenario-id POST0201-WHISTLE-STUN-FOLLOW-UP-FINAL --character-id DEFECT --encounter-id THE_INSATIABLE_BOSS --enemy-current-hp 281 --monster-move-checks-path coverage/unattended/whistle-stun-follow-up-0201.json --timeout-seconds 120 --keep-game-open
 ./tools/run-unattended-test.sh --scenario-id POST0201-BRAND-POST-CHOICE-POWER-FORK-FINAL --character-id IRONCLAD --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/brand-post-choice-power-fork-0201.json --timeout-seconds 120 --exit-on-complete

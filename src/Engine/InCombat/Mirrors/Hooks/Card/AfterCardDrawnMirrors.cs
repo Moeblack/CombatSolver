@@ -269,18 +269,9 @@ internal static class AfterCardDrawnMirrors
 
     private static int CountStatusCardsDrawnThisTurn(CombatPredictionSimulator simulator, Player player)
     {
-        var count = CombatManager.Instance.History.Entries
-            .OfType<CardDrawnEntry>()
-            .Count(entry =>
-                entry.HappenedThisTurn(simulator.State.CombatState) &&
-                entry.Actor == player.Creature &&
-                entry.Card.Type == CardType.Status);
-        count += simulator.History
-            .OfType<CombatPredictionCardDrawnEntry>()
-            .Count(entry =>
-                entry.Card.Owner == player &&
-                entry.Card.Type == CardType.Status);
-        return count;
+        if (simulator.State.CombatState is not ICombatPredictionCardEventSink eventSink)
+            throw new InvalidOperationException("迭代效果缺少可读取的本回合抽牌历史。");
+        return eventSink.GetStatusCardsDrawnThisTurn(player);
     }
 
 }

@@ -282,6 +282,7 @@ internal sealed class UnattendedMonsterMoveCheck
     public UnattendedCardInjection[] CardsBeforeMove { get; init; } = [];
     public UnattendedCardInjection? CardAfterMove { get; init; }
     public UnattendedCardInjection[] CardsAfterMove { get; init; } = [];
+    public UnattendedCardTransformCheck[] CardTransformsAfterMove { get; init; } = [];
     public UnattendedCardInjection? PlayCardAfterMove { get; init; }
     public UnattendedCardPlayCheck[] CardPlayChecksBeforeMove { get; init; } = [];
     public UnattendedCardPlayCheck[] CardPlayChecksAfterMove { get; init; } = [];
@@ -341,6 +342,13 @@ internal sealed class UnattendedCardPlayCheck
     public bool AssertForkableAfterPlay { get; init; }
 }
 
+internal sealed class UnattendedCardTransformCheck
+{
+    public string OriginalCardId { get; init; } = string.Empty;
+    public string ReplacementCardId { get; init; } = string.Empty;
+    public int Occurrence { get; init; }
+}
+
 internal sealed class UnattendedPowerInjection
 {
     public string PowerId { get; init; } = string.Empty;
@@ -387,6 +395,7 @@ internal sealed class UnattendedOrbInjection
 {
     public string OrbId { get; init; } = string.Empty;
     public int Count { get; init; } = 1;
+    public Dictionary<string, decimal> DecimalMembers { get; init; } = new(StringComparer.Ordinal);
 }
 
 internal sealed class UnattendedTestResult

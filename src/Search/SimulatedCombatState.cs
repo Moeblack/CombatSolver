@@ -35,7 +35,8 @@ internal sealed partial class SimulatedCombatState
     : ICombatState, ICombatPredictionForkableState, ICombatPredictionHookListenerSource,
       ICombatPredictionCardEventSink, ICombatPredictionEffectSink, ICombatPredictionRosterSink,
       ICombatPredictionCreatureSemantics, ICombatPredictionMonsterStateSink,
-      ICombatPredictionCardExecutionSink, ICombatPredictionPendingChoiceState,
+      ICombatPredictionCardExecutionSink, ICombatPredictionEnemyDeathSink,
+      ICombatPredictionPendingChoiceState,
       ICombatPredictionRunSnapshot, ICombatPredictionPlayerLimits, ICombatPredictionPlayerCardRules,
       ICombatPredictionPetState,
       ICombatPredictionStateOwner, ICombatPredictionRootCaptureBoundary,
@@ -178,7 +179,9 @@ internal sealed partial class SimulatedCombatState
     private ForkableDictionary<Player, int>? _energySpentThisTurn;
     private ForkableDictionary<Player, int>? _starsGainedThisTurn;
     private ForkableDictionary<Player, int>? _nonHandDrawsThisTurn;
+    private ForkableDictionary<Player, int>? _statusCardsDrawnThisTurn;
     private ForkableDictionary<Creature, int>? _cardPlaysStartedThisTurn;
+    private ForkableDictionary<Creature, int>? _zeroCostAttackStartsThisTurn;
     private ForkableSet<Creature>? _enemiesIntendingAttack;
     private bool _hasPredictedEnemyIntents;
     private ForkableDictionary<Player, int>? _playerTurnNumbers;
@@ -498,6 +501,7 @@ internal sealed partial class SimulatedCombatState
     {
         int nextTurn = GetPlayerTurnNumber(player) + 1;
         (_playerTurnNumbers ??= [])[player] = nextTurn;
+        (_statusCardsDrawnThisTurn ??= [])[player] = 0;
     }
 
     public void SnapshotPowerAmountsAtTurnStart(IEnumerable<Creature> participants)
@@ -1109,6 +1113,7 @@ internal sealed partial class SimulatedCombatState
         (_cardsDiscardedThisTurn ??= [])[owner] = 0;
         (_creatureAttacksThisTurn ??= [])[owner] = 0;
         (_cardPlaysStartedThisTurn ??= [])[owner] = 0;
+        (_zeroCostAttackStartsThisTurn ??= [])[owner] = 0;
         if (owner.Player is { } ownerPlayer)
         {
             (_energySpentThisTurn ??= [])[ownerPlayer] = 0;
@@ -1661,6 +1666,7 @@ internal sealed partial class SimulatedCombatState
             _ = GetSkillCardsPlayedThisTurn(creature);
             _ = GetCardsPlayedThisTurn(creature);
             _ = GetCardPlaysStartedThisTurn(creature);
+            _ = GetZeroCostAttackStartsThisTurn(creature);
             _ = GetAttacksPlayedThisTurn(creature);
             _ = GetShivsPlayedThisTurn(creature);
             _ = GetBlockCardsPlayedThisTurn(creature);
@@ -1672,6 +1678,7 @@ internal sealed partial class SimulatedCombatState
             _ = GetEnergySpentThisTurn(player);
             _ = GetStarsGainedThisTurn(player);
             _ = GetNonHandDrawsThisTurn(player);
+            _ = GetStatusCardsDrawnThisTurn(player);
             _ = GetPreviousTurnAttack(simulator, player);
         }
         _ = GetFetchCardsPlayedThisTurn();
@@ -1774,7 +1781,9 @@ internal sealed partial class SimulatedCombatState
         AddPlayerIntMap(ref fingerprint, 'e', _energySpentThisTurn);
         AddPlayerIntMap(ref fingerprint, 'z', _starsGainedThisTurn);
         AddPlayerIntMap(ref fingerprint, 'n', _nonHandDrawsThisTurn);
+        AddPlayerIntMap(ref fingerprint, 's', _statusCardsDrawnThisTurn);
         AddCreatureIntMap(ref fingerprint, 'Q', _cardPlaysStartedThisTurn);
+        AddCreatureIntMap(ref fingerprint, 'q', _zeroCostAttackStartsThisTurn);
         AddCreatureIntMap(ref fingerprint, 'k', _knowledgeDemonCurseCounters);
         AddCreatureSet(ref fingerprint, 'i', _enemiesIntendingAttack);
         fingerprint.Add(_hasPredictedEnemyIntents);

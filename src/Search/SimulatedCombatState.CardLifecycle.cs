@@ -159,10 +159,28 @@ internal sealed partial class SimulatedCombatState
             return;
         Creature owner = card.Preview.Owner.Creature;
         (_cardPlaysStartedThisTurn ??= [])[owner] = GetCardPlaysStartedThisTurn(owner) + 1;
+        if (card.Preview.Type == CardType.Attack && cardPlay.Resources.EnergyValue == 0)
+        {
+            (_zeroCostAttackStartsThisTurn ??= [])[owner] =
+                GetZeroCostAttackStartsThisTurn(owner) + 1;
+        }
         if (!cardPlay.IsAutoPlay)
         {
             (_manualCardsPlayedThisTurn ??= [])[owner] = GetManualCardsPlayedThisTurn(owner) + 1;
         }
+    }
+
+    public int GetZeroCostAttackStartsThisTurn(Creature owner)
+    {
+        if (_zeroCostAttackStartsThisTurn?.TryGetValue(owner, out int value) == true)
+            return value;
+        value = _rootHistory.CardPlaysStarted.Count(entry =>
+            entry.HappenedThisTurn(this)
+            && entry.CardPlay.Player.Creature == owner
+            && entry.CardPlay.Card.Type == CardType.Attack
+            && entry.CardPlay.Resources.EnergyValue == 0);
+        (_zeroCostAttackStartsThisTurn ??= [])[owner] = value;
+        return value;
     }
 
     void ICombatPredictionCardExecutionSink.ApplyCardPlayEffects(
@@ -214,6 +232,17 @@ internal sealed partial class SimulatedCombatState
             this,
             KnownEnemies,
             processedEnemyDeaths);
+    }
+
+    void ICombatPredictionEnemyDeathSink.ResolvePendingEnemyDeaths(
+        CombatPredictionSimulator simulator,
+        ISet<uint> processedEnemyDeaths)
+    {
+        CorePowerSupport.ApplyEnemyDeathPowers(
+            simulator,
+            this,
+            KnownEnemies,
+            _activeCardExecutionDeaths ?? processedEnemyDeaths);
     }
 
     private void EndCardExecutionScope()

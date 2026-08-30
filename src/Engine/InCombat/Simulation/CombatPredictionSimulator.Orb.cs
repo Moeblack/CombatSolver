@@ -90,9 +90,12 @@ internal sealed partial class CombatPredictionSimulator
         if (orbQueue.Orbs.Count > 0)
         {
             var orb = orbQueue.Orbs[0];
+            ISet<uint> processedEnemyDeaths = new HashSet<uint>();
             for (int i = 0; i < repeat; i++)
             {
                 OrbEvoke(player, orb, dequeue: dequeue && i == repeat - 1);
+                if (State.CombatState is ICombatPredictionEnemyDeathSink deathSink)
+                    deathSink.ResolvePendingEnemyDeaths(this, processedEnemyDeaths);
             }
         }
     }

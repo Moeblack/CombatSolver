@@ -600,8 +600,10 @@ internal sealed partial class UnattendedTestRunner
         {
             OrbQueue queue = player.PlayerCombatState!.OrbQueue;
             foreach (OrbModel orb in queue.Orbs.ToArray())
+            {
+                _ = queue.Remove(orb);
                 orb.RemoveInternal();
-            queue.Clear();
+            }
         }
         if (check.ClearPlayerPilesBeforeMove)
         {
@@ -699,6 +701,8 @@ internal sealed partial class UnattendedTestRunner
             InjectSimulatedCard(simulator, simulatedCombat, player, simulatedCardAfterMove);
         foreach (UnattendedCardInjection injectedAfterMove in check.CardsAfterMove)
             InjectSimulatedCard(simulator, simulatedCombat, player, injectedAfterMove);
+        foreach (UnattendedCardTransformCheck transform in check.CardTransformsAfterMove)
+            TransformSimulatedCard(simulator, player, transform);
         if (check.PlayCardAfterMove is { } simulatedPlay)
         {
             PredictedCard card = InjectSimulatedCard(simulator, simulatedCombat, player, simulatedPlay);
@@ -993,6 +997,11 @@ internal sealed partial class UnattendedTestRunner
         foreach (UnattendedCardInjection injectedAfterMove in check.CardsAfterMove)
         {
             await InjectCardAsync(combatState, player, injectedAfterMove);
+            await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        }
+        foreach (UnattendedCardTransformCheck transform in check.CardTransformsAfterMove)
+        {
+            await TransformActualCardAsync(combatState, player, transform);
             await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         }
         if (check.PlayCardAfterMove is { } actualPlay)
@@ -1602,6 +1611,48 @@ internal sealed partial class UnattendedTestRunner
             .Skip(occurrence)
             .FirstOrDefault()
             ?? throw new InvalidOperationException($"模拟手牌中找不到 {cardId}#{occurrence}。");
+
+    private static void TransformSimulatedCard(
+        CombatPredictionSimulator simulator,
+        Player player,
+        UnattendedCardTransformCheck transform)
+    {
+        PredictedCard original = FindSimulatedHandCard(
+            simulator,
+            player,
+            transform.OriginalCardId,
+            transform.Occurrence);
+        CardModel replacement = ResolveUnique(
+            ModelDb.AllCards,
+            transform.ReplacementCardId,
+            "变换替代卡牌");
+        CardChoiceSupport.TransformCards(simulator, [original], replacement, upgradeReplacement: false);
+    }
+
+    private static async Task TransformActualCardAsync(
+        CombatState combatState,
+        Player player,
+        UnattendedCardTransformCheck transform)
+    {
+        CardModel original = FindActualHandCard(
+            player,
+            transform.OriginalCardId,
+            transform.Occurrence);
+        CardModel canonical = ResolveUnique(
+            ModelDb.AllCards,
+            transform.ReplacementCardId,
+            "变换替代卡牌");
+        CardModel replacement = combatState.CreateCard(canonical, player);
+        CardPileAddResult? result = await CardCmd.Transform(
+            original,
+            replacement,
+            CardPreviewStyle.None);
+        if (result?.success != true)
+        {
+            throw new InvalidOperationException(
+                $"实机未能把 {transform.OriginalCardId} 变换为 {transform.ReplacementCardId}。");
+        }
+    }
 
     private static void AssertLiveEndTurnRiskChoices(
         CombatState combatState,

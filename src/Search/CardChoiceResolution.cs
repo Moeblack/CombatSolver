@@ -173,6 +173,8 @@ internal static partial class CardChoiceSupport
         replacement.MutablePreview.HasBeenRemovedFromState = false;
         pile.Insert(Math.Min(index, pile.Cards.Count), replacement);
         var generation = simulator.History.CardGenerated(replacement, resultKind);
+        if (simulator.State.CombatState is ICombatPredictionCardEventSink eventSink)
+            eventSink.AfterCardEnteredCombat(simulator, replacement);
         original.MutablePreview.AfterTransformedFrom();
         replacement.MutablePreview.AfterTransformedTo();
         HookMirrors.AfterCardGeneratedForCombat(
