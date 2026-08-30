@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
 
 namespace CombatSolver.Engine.Common;
@@ -282,8 +283,13 @@ internal interface IPredictionForkBoundary
 
 internal sealed class PredictionForkContext : IDisposable
 {
+    private const int IndexedLookupThreshold = 64;
+    private const int HashLoadNumerator = 3;
+    private const int HashLoadDenominator = 4;
     private object[] _sources = ArrayPool<object>.Shared.Rent(40);
     private object[] _forks = ArrayPool<object>.Shared.Rent(40);
+    private int[]? _buckets;
+    private int _bucketResizeThreshold;
     private int _count;
 
     public void Register<T>(T source, T fork)
@@ -310,9 +316,14 @@ internal sealed class PredictionForkContext : IDisposable
             _sources = sources;
             _forks = forks;
         }
+        EnsureHashCapacityForAdd();
         _sources[_count] = source;
         _forks[_count] = fork;
         _count++;
+        if (_buckets is not null)
+            InsertHashEntry(_count - 1);
+        else if (_count >= IndexedLookupThreshold)
+            BuildHashIndex(IndexedLookupThreshold * 2);
     }
 
     public T RemapOrSelf<T>(T value)
@@ -347,6 +358,8 @@ internal sealed class PredictionForkContext : IDisposable
 
     private int Find(object source)
     {
+        if (_buckets is not null)
+            return FindIndexed(source);
         for (int index = _count - 1; index >= 0; index--)
         {
             if (ReferenceEquals(_sources[index], source))
@@ -355,14 +368,73 @@ internal sealed class PredictionForkContext : IDisposable
         return -1;
     }
 
+    private int FindIndexed(object source)
+    {
+        int[] buckets = _buckets!;
+        int bucket = GetBucket(source, buckets.Length);
+        while (true)
+        {
+            int entry = buckets[bucket] - 1;
+            if (entry < 0)
+                return -1;
+            if (ReferenceEquals(_sources[entry], source))
+                return entry;
+            bucket++;
+            if (bucket == buckets.Length)
+                bucket = 0;
+        }
+    }
+
+    private void EnsureHashCapacityForAdd()
+    {
+        if (_buckets is null || _count + 1 <= _bucketResizeThreshold)
+            return;
+        BuildHashIndex(checked(_buckets.Length * 2));
+    }
+
+    private void BuildHashIndex(int minimumLength)
+    {
+        int[] buckets = ArrayPool<int>.Shared.Rent(minimumLength);
+        Array.Clear(buckets);
+        int[]? previousBuckets = _buckets;
+        _buckets = buckets;
+        _bucketResizeThreshold = checked(
+            buckets.Length * HashLoadNumerator / HashLoadDenominator);
+        for (int index = 0; index < _count; index++)
+            InsertHashEntry(index);
+        if (previousBuckets is not null)
+            ArrayPool<int>.Shared.Return(previousBuckets);
+    }
+
+    private void InsertHashEntry(int entry)
+    {
+        int[] buckets = _buckets!;
+        int bucket = GetBucket(_sources[entry], buckets.Length);
+        while (buckets[bucket] != 0)
+        {
+            bucket++;
+            if (bucket == buckets.Length)
+                bucket = 0;
+        }
+        buckets[bucket] = entry + 1;
+    }
+
+    private static int GetBucket(object source, int bucketCount)
+        => (int)((uint)RuntimeHelpers.GetHashCode(source) % (uint)bucketCount);
+
     public void Dispose()
     {
         object[] sources = _sources;
         object[] forks = _forks;
+        int[]? buckets = _buckets;
         _sources = [];
         _forks = [];
+        _buckets = null;
+        _bucketResizeThreshold = 0;
         _count = 0;
         ArrayPool<object>.Shared.Return(sources, clearArray: true);
         ArrayPool<object>.Shared.Return(forks, clearArray: true);
+        if (buckets is not null)
+            ArrayPool<int>.Shared.Return(buckets);
     }
 }

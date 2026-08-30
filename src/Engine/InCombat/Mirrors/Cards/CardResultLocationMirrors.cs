@@ -26,10 +26,9 @@ internal static class CardResultLocationMirrors
         CombatPredictionSimulator simulator,
         PredictedCard card)
     {
-        var preview = card.MutablePreview;
         var result = GetBaseResultLocation(simulator, card);
 
-        return Registry.Invoke(preview, new()
+        return Registry.Invoke(card.Preview, new()
         {
             Simulator = simulator,
             Card = card,
@@ -52,15 +51,17 @@ internal static class CardResultLocationMirrors
         CombatPredictionSimulator simulator,
         PredictedCard card)
     {
-        var preview = card.MutablePreview;
+        var preview = card.Preview;
         if (preview.IsDupe || preview.Type is CardType.Power)
         {
             return new(preview.Owner, PileType.None, CardPilePosition.Bottom);
         }
 
-        if (preview.ExhaustOnNextPlay || card.HasKeyword(simulator.State, CardKeyword.Exhaust))
+        bool exhaustOnNextPlay = preview.ExhaustOnNextPlay;
+        if (exhaustOnNextPlay || card.HasKeyword(simulator.State, CardKeyword.Exhaust))
         {
-            preview.ExhaustOnNextPlay = false;
+            if (exhaustOnNextPlay)
+                card.MutablePreview.ExhaustOnNextPlay = false;
             return new(preview.Owner, PileType.Exhaust, CardPilePosition.Bottom);
         }
 

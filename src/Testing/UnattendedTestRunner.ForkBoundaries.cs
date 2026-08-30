@@ -1,9 +1,12 @@
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
 using STS2RitsuLib.Models.Capabilities;
+using System.Collections;
 using System.Reflection;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
@@ -14,6 +17,9 @@ namespace CombatSolver;
 
 internal sealed partial class UnattendedTestRunner
 {
+    private static readonly object RitsuDefaultCapabilityRegistrationTestLock = new();
+    private static bool _ritsuDefaultCapabilityRegistrationTestCompleted;
+
     private static void AssertForkBoundaries(CombatState combat, Player player)
     {
         CardModel card = player.PlayerCombatState?.Hand.Cards.FirstOrDefault()
@@ -22,6 +28,7 @@ internal sealed partial class UnattendedTestRunner
         CombatPredictionSimulator simulator = new(simulatedCombat);
         AssertRitsuCapabilityFastPath(simulator, player, card);
         AssertChoiceRiskScopedToCardPlay(simulator, card);
+        AssertChoiceKeyCache(simulator, player, card);
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -112,6 +119,332 @@ internal sealed partial class UnattendedTestRunner
         fork.State.GetPlayerCombatState(player).GainEnergy(1);
         if (simulator.State.GetPlayerCombatState(player).Energy != originalEnergy)
             throw new InvalidOperationException("稳定边界 Fork 没有隔离玩家能量状态。");
+
+        AssertPredictedCardForkOwnershipAndObservers(combat, player, card);
+        AssertAmountOnTurnStartCacheReuse(combat, player);
+        AssertSparsePowerAfflictionCardTracking(combat, player, card);
+        AssertProjectedShuffleEquivalence(simulator, player);
+        AssertPredictionForkContextIdentityIndex();
+        AssertForkableListEnumeration();
+    }
+
+    private static void AssertPredictedCardForkOwnershipAndObservers(
+        CombatState combat,
+        Player player,
+        CardModel liveCard)
+    {
+        SimulatedCombatState parentCombat = new(combat);
+        CombatPredictionSimulator parentSimulator = new(parentCombat);
+        SimPlayerCombatState parentState = parentSimulator.State.GetPlayerCombatState(player);
+        PredictedCard parentCard = parentState.FindCard(liveCard)
+            ?? throw new InvalidOperationException("预测卡牌 Fork 所有权测试找不到父卡牌。");
+        if (!ReferenceEquals(parentCard.GetPile(parentState), parentState.Hand))
+            throw new InvalidOperationException("预测卡牌没有记录父分支手牌所有权。");
+
+        Action parentObserver = GetCardMutationObserver(parentCard);
+        if (parentState.AllCards.Any(card =>
+                !ReferenceEquals(GetCardMutationObserver(card), parentObserver)))
+        {
+            throw new InvalidOperationException("同一模拟分支没有共享单一卡牌变更 observer。");
+        }
+        IEnumerable<AbstractModel> parentListeners = parentCombat.IterateHookListeners();
+
+        CombatPredictionSimulator childSimulator = parentSimulator.Fork();
+        SimulatedCombatState childCombat = (SimulatedCombatState)childSimulator.State.CombatState;
+        SimPlayerCombatState childState = childSimulator.State.GetPlayerCombatState(player);
+        PredictedCard childCard = childState.FindCard(liveCard)
+            ?? throw new InvalidOperationException("预测卡牌 Fork 所有权测试找不到子卡牌。");
+        Action childObserver = GetCardMutationObserver(childCard);
+        if (ReferenceEquals(parentObserver, childObserver)
+            || childState.AllCards.Any(card =>
+                !ReferenceEquals(GetCardMutationObserver(card), childObserver)))
+        {
+            throw new InvalidOperationException("卡牌变更 observer 没有按父子 Fork 隔离。");
+        }
+        if (!ReferenceEquals(childCard.GetPile(childState), childState.Hand)
+            || childCard.GetPile(parentState) is not null
+            || parentCard.GetPile(childState) is not null)
+        {
+            throw new InvalidOperationException("预测卡牌牌堆反向引用跨 Fork 泄漏。");
+        }
+
+        IEnumerable<AbstractModel> childListenersBefore = childCombat.IterateHookListeners();
+        CardModel childPreviewBefore = childCard.Preview;
+        childCard.MutablePreview.ExhaustOnNextPlay = !childPreviewBefore.ExhaustOnNextPlay;
+        IEnumerable<AbstractModel> childListenersAfter = childCombat.IterateHookListeners();
+        if (ReferenceEquals(childListenersBefore, childListenersAfter)
+            || !childListenersAfter.Contains(childCard.Preview)
+            || childListenersAfter.Contains(childPreviewBefore))
+        {
+            throw new InvalidOperationException("子分支卡牌变更没有精确重建 Hook listener 缓存。");
+        }
+        if (!ReferenceEquals(parentListeners, parentCombat.IterateHookListeners())
+            || !parentListeners.Contains(parentCard.Preview)
+            || parentListeners.Contains(childCard.Preview))
+        {
+            throw new InvalidOperationException("子分支卡牌变更污染了父 Hook listener 缓存。");
+        }
+
+        if (!childState.Hand.Remove(childCard))
+            throw new InvalidOperationException("预测卡牌所有权测试无法从子手牌移除卡牌。");
+        childState.DiscardPile.Add(childCard);
+        if (!ReferenceEquals(childCard.GetPile(childState), childState.DiscardPile)
+            || !ReferenceEquals(parentCard.GetPile(parentState), parentState.Hand))
+        {
+            throw new InvalidOperationException("预测卡牌移动后没有保持父子牌堆所有权隔离。");
+        }
+        if (!childState.DiscardPile.Remove(childCard) || childCard.GetPile(childState) is not null)
+            throw new InvalidOperationException("预测卡牌移除后没有清理牌堆反向引用。");
+
+        PredictedCard clearProbe = new(liveCard);
+        SimCardPile clearPile = new(PileType.Hand, [clearProbe]);
+        clearPile.Clear();
+        if (clearProbe.OwnerPile is not null)
+            throw new InvalidOperationException("预测牌堆清空后没有清理卡牌反向引用。");
+    }
+
+    private static Action GetCardMutationObserver(PredictedCard card)
+    {
+        FieldInfo observerField = typeof(PredictedCard).GetField(
+            "_mutationObserver",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(PredictedCard).FullName, "_mutationObserver");
+        return (Action?)observerField.GetValue(card)
+            ?? throw new InvalidOperationException("预测卡牌没有安装变更 observer。");
+    }
+
+    private static void AssertAmountOnTurnStartCacheReuse(CombatState combat, Player player)
+    {
+        SimulatedCombatState parentCombat = new(combat);
+        CombatPredictionSimulator parentSimulator = new(parentCombat);
+        parentCombat.Apply<StrengthPower>(player.Creature, 2, player.Creature);
+        _ = parentCombat.DrainPowerAmountChanges();
+        StrengthPower parentPower = parentCombat.EffectivePowers()
+            .OfType<StrengthPower>()
+            .Single(power => ReferenceEquals(power.Owner, player.Creature));
+        int parentAmountOnTurnStart = parentPower.AmountOnTurnStart;
+
+        CombatPredictionSimulator childSimulator = parentSimulator.Fork();
+        SimulatedCombatState childCombat = (SimulatedCombatState)childSimulator.State.CombatState;
+        StrengthPower childPower = childCombat.EffectivePowers()
+            .OfType<StrengthPower>()
+            .Single(power => ReferenceEquals(power.Owner, player.Creature));
+        IReadOnlyList<PowerModel> listenersBefore = childCombat.EffectivePowers();
+        childPower.AmountOnTurnStart = childPower.Amount + 1;
+        childCombat.SnapshotPowerAmountsAtTurnStart([player.Creature]);
+        if (!ReferenceEquals(listenersBefore, childCombat.EffectivePowers())
+            || childPower.AmountOnTurnStart != childPower.Amount)
+        {
+            throw new InvalidOperationException(
+                "AmountOnTurnStart 更新没有复用同一分支的 Power listener 缓存。");
+        }
+        if (parentPower.AmountOnTurnStart != parentAmountOnTurnStart)
+            throw new InvalidOperationException("AmountOnTurnStart 更新跨 Fork 污染父 Power。");
+    }
+
+    private static void AssertSparsePowerAfflictionCardTracking(
+        CombatState combat,
+        Player player,
+        CardModel liveCard)
+    {
+        SimulatedCombatState parentCombat = new(combat);
+        CombatPredictionSimulator parentSimulator = new(parentCombat);
+        SimPlayerCombatState parentState = parentSimulator.State.GetPlayerCombatState(player);
+        PredictedCard parentCard = parentState.FindCard(liveCard)
+            ?? throw new InvalidOperationException("Power affliction 稀疏集合测试找不到父卡牌。");
+
+        parentCombat.NormalizePowerCardState(parentSimulator);
+        if (GetPowerAfflictionKnownCards(parentCombat) is not null)
+        {
+            throw new InvalidOperationException(
+                "Power affliction 首次归一化不应记录战斗快照中的初始牌。");
+        }
+
+        PredictedCard generatedCard = parentCard.CreateClone();
+        parentState.DiscardPile.Add(generatedCard);
+        parentCombat.RegisterGeneratedCombatCard(generatedCard);
+        parentCombat.NormalizePowerCardState(parentSimulator);
+        HashSet<PredictedCard> parentKnown = GetPowerAfflictionKnownCards(parentCombat)
+            ?? throw new InvalidOperationException("Power affliction 没有记录生成牌。");
+        if (parentKnown.Count != 1 || !parentKnown.Contains(generatedCard))
+            throw new InvalidOperationException("Power affliction 稀疏集合记录了非生成牌或漏掉生成牌。");
+
+        parentCombat.NormalizePowerCardState(parentSimulator);
+        if (parentKnown.Count != 1)
+            throw new InvalidOperationException("Power affliction 重复归一化再次记录了同一生成牌。");
+
+        CombatPredictionSimulator childSimulator = parentSimulator.Fork();
+        SimulatedCombatState childCombat = (SimulatedCombatState)childSimulator.State.CombatState;
+        PredictedCard childGeneratedCard = childSimulator.State
+            .GetPlayerCombatState(player)
+            .FindCard(generatedCard.Original)
+            ?? throw new InvalidOperationException("Power affliction Fork 后找不到生成牌。");
+        HashSet<PredictedCard> childKnown = GetPowerAfflictionKnownCards(childCombat)
+            ?? throw new InvalidOperationException("Power affliction Fork 后丢失生成牌集合。");
+        if (childKnown.Count != 1
+            || !childKnown.Contains(childGeneratedCard)
+            || childKnown.Contains(generatedCard)
+            || !parentKnown.Contains(generatedCard)
+            || parentKnown.Contains(childGeneratedCard))
+        {
+            throw new InvalidOperationException("Power affliction 稀疏集合没有按 Fork 重映射或隔离。");
+        }
+
+        if (!parentState.DiscardPile.Remove(generatedCard))
+            throw new InvalidOperationException("Power affliction 测试无法移除生成牌。");
+        parentCombat.UnregisterGeneratedCombatCard(generatedCard);
+        parentState.DiscardPile.Add(generatedCard);
+        parentCombat.RegisterGeneratedCombatCard(generatedCard);
+        parentCombat.NormalizePowerCardState(parentSimulator);
+        if (parentKnown.Count != 1)
+        {
+            throw new InvalidOperationException(
+                "Power affliction 把同一 wrapper 重新入场误判为新的生成牌。");
+        }
+
+        PredictedCard secondGeneratedCard = parentCard.CreateClone();
+        parentState.DiscardPile.Add(secondGeneratedCard);
+        parentCombat.RegisterGeneratedCombatCard(secondGeneratedCard);
+        parentCombat.NormalizePowerCardState(parentSimulator);
+        if (parentKnown.Count != 2 || !parentKnown.Contains(secondGeneratedCard))
+            throw new InvalidOperationException("Power affliction 没有区分两个独立生成牌 wrapper。");
+    }
+
+    private static HashSet<PredictedCard>? GetPowerAfflictionKnownCards(
+        SimulatedCombatState combat)
+    {
+        FieldInfo field = typeof(SimulatedCombatState).GetField(
+            "_powerAfflictionKnownCards",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(
+                typeof(SimulatedCombatState).FullName,
+                "_powerAfflictionKnownCards");
+        return (HashSet<PredictedCard>?)field.GetValue(combat);
+    }
+
+    private static void AssertProjectedShuffleEquivalence(
+        CombatPredictionSimulator simulator,
+        Player player)
+    {
+        List<PredictedCard> source = simulator.State
+            .GetPlayerCombatState(player)
+            .AllCards
+            .ToList();
+        if (source.Count == 0)
+            throw new InvalidOperationException("投影洗牌等价测试要求至少一张牌。");
+        source.AddRange(source.AsEnumerable().Reverse().ToArray());
+        source.Add(source[0]);
+
+        List<PredictedCard> baseline = [.. source];
+        List<PredictedCard> optimized = [.. source];
+        var baselineRng = simulator.Rng.Shuffle.Clone();
+        var optimizedRng = simulator.Rng.Shuffle.Clone();
+        int sourceCounter = simulator.Rng.Shuffle.Counter();
+
+        baseline.StableShuffle(baselineRng);
+        CombatBeamSolver.StableShuffleProjection(optimized, optimizedRng);
+        if (!baseline.SequenceEqual(optimized)
+            || baselineRng.Counter() != optimizedRng.Counter()
+            || simulator.Rng.Shuffle.Counter() != sourceCounter)
+        {
+            throw new InvalidOperationException(
+                "投影洗牌的卡牌顺序、RNG 消耗或原 RNG 隔离与 StableShuffle 不等价。");
+        }
+    }
+
+    private static void AssertPredictionForkContextIdentityIndex()
+    {
+        using (PredictionForkContext small = new())
+        {
+            for (int index = 0; index < 32; index++)
+            {
+                ForkIdentityProbe source = new(index);
+                ForkIdentityProbe fork = new(index);
+                small.Register(source, fork);
+                if (!ReferenceEquals(small.RequireRemap(source), fork))
+                    throw new InvalidOperationException("PredictionForkContext 线性映射不正确。");
+            }
+        }
+
+        const int count = 512;
+        ForkIdentityProbe[] sources = new ForkIdentityProbe[count];
+        ForkIdentityProbe[] forks = new ForkIdentityProbe[count];
+        using PredictionForkContext indexed = new();
+        for (int index = 0; index < count; index++)
+        {
+            // All probes deliberately compare equal through their virtual equality members.
+            // Prediction forks must nevertheless be keyed strictly by object identity.
+            sources[index] = new ForkIdentityProbe(1);
+            forks[index] = new ForkIdentityProbe(1);
+            indexed.Register(sources[index], forks[index]);
+        }
+        FieldInfo bucketsField = typeof(PredictionForkContext).GetField(
+            "_buckets",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(PredictionForkContext).FullName, "_buckets");
+        if (bucketsField.GetValue(indexed) is not int[])
+            throw new InvalidOperationException("PredictionForkContext 大映射没有启用身份哈希索引。");
+        for (int index = 0; index < count; index++)
+        {
+            if (!indexed.TryRemap(sources[index], out ForkIdentityProbe? mapped)
+                || !ReferenceEquals(mapped, forks[index])
+                || !ReferenceEquals(indexed.RemapOrSelf(sources[index]), forks[index]))
+            {
+                throw new InvalidOperationException("PredictionForkContext 身份哈希扩容后映射不正确。");
+            }
+        }
+
+        indexed.Register(sources[0], forks[0]);
+        ForkIdentityProbe equalButUnknown = new(1);
+        if (indexed.TryRemap(equalButUnknown, out ForkIdentityProbe? unexpected)
+            || unexpected is not null
+            || !ReferenceEquals(indexed.RemapOrSelf(equalButUnknown), equalButUnknown))
+        {
+            throw new InvalidOperationException("PredictionForkContext 错把值相等对象当成同一引用。");
+        }
+        try
+        {
+            indexed.Register(sources[0], new ForkIdentityProbe(1));
+            throw new InvalidOperationException("PredictionForkContext 接受了同一源对象的不同 Fork。");
+        }
+        catch (InvalidOperationException exception) when (
+            exception.Message.Contains("was forked twice", StringComparison.Ordinal))
+        {
+        }
+    }
+
+    private sealed class ForkIdentityProbe(int equalityKey)
+    {
+        private int EqualityKey { get; } = equalityKey;
+
+        public override bool Equals(object? obj)
+            => obj is ForkIdentityProbe other && EqualityKey == other.EqualityKey;
+
+        public override int GetHashCode()
+            => EqualityKey;
+    }
+
+    private static void AssertForkableListEnumeration()
+    {
+        ForkableList<int> parent = new([1, 2, 3]);
+        List<int>.Enumerator concreteEnumerator = parent.GetEnumerator();
+        List<int> concreteValues = [];
+        while (concreteEnumerator.MoveNext())
+            concreteValues.Add(concreteEnumerator.Current);
+        concreteEnumerator.Dispose();
+        if (!concreteValues.SequenceEqual([1, 2, 3]))
+            throw new InvalidOperationException("ForkableList 具体 enumerator 顺序不正确。");
+
+        ForkableList<int> child = parent.Fork();
+        child.Add(4);
+        parent.Remove(1);
+        if (!parent.SequenceEqual([2, 3])
+            || !child.SequenceEqual([1, 2, 3, 4])
+            || !((IEnumerable<int>)parent).SequenceEqual([2, 3])
+            || !((IEnumerable)parent).Cast<int>().SequenceEqual([2, 3]))
+        {
+            throw new InvalidOperationException("ForkableList 枚举或 COW 父子隔离不正确。");
+        }
     }
 
     private static void AssertChoiceRiskScopedToCardPlay(
@@ -142,6 +475,7 @@ internal sealed partial class UnattendedTestRunner
         using IDisposable isolation = SimulationNotificationIsolation.Enter();
         if (!RitsuEmptyCapabilityFastPath.CanSkip(preview))
             throw new InvalidOperationException("无 capability 卡牌没有进入 Ritsu 空路径。");
+        AssertRitsuDefaultCapabilityRegistrationInvalidatesCache(preview);
 
         CardType overrideType = preview.Type == CardType.Attack ? CardType.Curse : CardType.Attack;
         TestCardTypeCapability capability = new(overrideType);
@@ -170,6 +504,107 @@ internal sealed partial class UnattendedTestRunner
         }
     }
 
+    private static void AssertRitsuDefaultCapabilityRegistrationInvalidatesCache(
+        AbstractModel cachedModel)
+    {
+        lock (RitsuDefaultCapabilityRegistrationTestLock)
+        {
+            if (_ritsuDefaultCapabilityRegistrationTestCompleted)
+                return;
+
+            int generationBefore =
+                RitsuEmptyCapabilityFastPath.DefaultCapabilitySourceGenerationForTesting;
+            Type cachedModelType = cachedModel.GetType();
+            if (!RitsuEmptyCapabilityFastPath.HasCachedDefaultCapabilitySourceGenerationForTesting(
+                    cachedModelType,
+                    generationBefore))
+            {
+                throw new InvalidOperationException("Ritsu 默认 capability 注册测试缺少旧缓存条目。");
+            }
+
+            RegisterRitsuDefaultCapabilityCacheProbe();
+
+            int generationAfter =
+                RitsuEmptyCapabilityFastPath.DefaultCapabilitySourceGenerationForTesting;
+            if (unchecked(generationAfter - generationBefore) != 1)
+                throw new InvalidOperationException("Ritsu 默认 capability 注册没有推进缓存 generation。");
+            if (RitsuEmptyCapabilityFastPath.HasCachedDefaultCapabilitySourceGenerationForTesting(
+                    cachedModelType,
+                    generationAfter))
+            {
+                throw new InvalidOperationException("Ritsu 默认 capability 注册后没有清理旧类型缓存。");
+            }
+            if (!RitsuEmptyCapabilityFastPath.CanSkip(cachedModel)
+                || !RitsuEmptyCapabilityFastPath.HasCachedDefaultCapabilitySourceGenerationForTesting(
+                    cachedModelType,
+                    generationAfter))
+            {
+                throw new InvalidOperationException("Ritsu 默认 capability 注册后没有按新 generation 重建缓存。");
+            }
+
+            _ritsuDefaultCapabilityRegistrationTestCompleted = true;
+        }
+    }
+
+    private static void RegisterRitsuDefaultCapabilityCacheProbe()
+    {
+        Type defaults = typeof(ModelCapabilities).Assembly.GetType(
+            "STS2RitsuLib.Models.Capabilities.ModelCapabilityDefaults")
+            ?? throw new TypeLoadException(
+                "STS2RitsuLib.Models.Capabilities.ModelCapabilityDefaults");
+        MethodInfo modify = defaults.GetMethod(
+            "Modify",
+            BindingFlags.Static | BindingFlags.Public,
+            binder: null,
+            types:
+            [
+                typeof(string),
+                typeof(string),
+                typeof(Type),
+                typeof(Action<AbstractModel, ModelCapabilityList>),
+                typeof(int),
+            ],
+            modifiers: null)
+            ?? throw new MissingMethodException(defaults.FullName, "Modify");
+        Action<AbstractModel, ModelCapabilityList> noOpModifier = static (_, _) => { };
+        modify.Invoke(
+            null,
+            [
+                Entry.ModId,
+                "unattended_default_capability_cache_probe",
+                typeof(RitsuDefaultCapabilityCacheProbeModel),
+                noOpModifier,
+                0,
+            ]);
+    }
+
+    private static void AssertChoiceKeyCache(
+        CombatPredictionSimulator simulator,
+        Player player,
+        CardModel liveCard)
+    {
+        PredictedCard card = simulator.State.GetPlayerCombatState(player).FindCard(liveCard)
+            ?? throw new InvalidOperationException("选牌键缓存测试找不到预测卡牌。");
+        string originalKey = CardChoiceSupport.ChoiceCardKey(card);
+        CombatPredictionSimulator fork = simulator.Fork();
+        PredictedCard forkedCard = fork.State.GetPlayerCombatState(player).FindCard(liveCard)
+            ?? throw new InvalidOperationException("选牌键缓存测试找不到 Fork 卡牌。");
+        if (!forkedCard.TryGetCachedChoiceKey(out string forkedCachedKey)
+            || forkedCachedKey != originalKey)
+        {
+            throw new InvalidOperationException("选牌键缓存没有直接跨 Fork 复制。");
+        }
+        if (CardChoiceSupport.ChoiceCardKey(forkedCard) != originalKey)
+            throw new InvalidOperationException("选牌键缓存没有跨 Fork 保留。");
+
+        bool originalExhaust = forkedCard.Preview.ExhaustOnNextPlay;
+        forkedCard.MutablePreview.ExhaustOnNextPlay = !originalExhaust;
+        if (CardChoiceSupport.ChoiceCardKey(forkedCard) == originalKey)
+            throw new InvalidOperationException("选牌键缓存没有在卡牌变更后失效。");
+        if (CardChoiceSupport.ChoiceCardKey(card) != originalKey)
+            throw new InvalidOperationException("选牌键缓存在 Fork 变更后泄漏到父状态。");
+    }
+
     private sealed class TestCardTypeCapability(CardType type)
         : IModelCapability, ICardPropertyContributor
     {
@@ -185,6 +620,8 @@ internal sealed partial class UnattendedTestRunner
         public CardType? GetCardType(CardModel card)
             => type;
     }
+
+    private abstract class RitsuDefaultCapabilityCacheProbeModel : AbstractModel;
 
     private static void AssertForkRejected(
         CombatPredictionSimulator simulator,

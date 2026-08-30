@@ -46,6 +46,7 @@ public static class Entry
         patcher.RegisterPatch<RitsuFreePlayVoidIsolationPatch>();
         patcher.RegisterPatch<RitsuFreePlayBoolIsolationPatch>();
         patcher.RegisterPatch<RitsuFreePlayResolveIsolationPatch>();
+        patcher.RegisterPatch<RitsuDefaultCapabilityRegistrationPatch>();
         patcher.RegisterPatch<RitsuEmptyCardTypeFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyEnergyContributorFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyEnergyCostFastPathPatch>();

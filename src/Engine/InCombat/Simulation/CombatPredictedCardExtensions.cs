@@ -25,15 +25,10 @@ internal static class CombatPredictedCardExtensions
     // Mirrors CardModel.Pile property, but returns the simulated pile instead of the actual pile.
     public static SimCardPile? GetPile(this PredictedCard card, SimPlayerCombatState playerCombatState)
     {
-        foreach (SimCardPile pile in playerCombatState.AllPiles)
-        {
-            foreach (PredictedCard candidate in pile.Cards)
-            {
-                if (ReferenceEquals(candidate, card))
-                    return pile;
-            }
-        }
-        return null;
+        SimCardPile? pile = card.OwnerPile;
+        return pile is not null && playerCombatState.ContainsPile(pile)
+            ? pile
+            : null;
     }
 
     // Mirrors CardModel.CreateClone, but returns a PredictedCard instead of a CardModel.

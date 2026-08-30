@@ -340,7 +340,7 @@ internal static class TurnStartChoiceSupport
         List<PredictedCard> selected = [];
         foreach (PlanCardToken token in choice.Cards)
         {
-            PredictedCard card = options.Where(candidate => CardChoiceSupport.MatchesToken(candidate.Preview, token))
+            PredictedCard card = options.Where(candidate => CardChoiceSupport.MatchesToken(candidate, token))
                 .Skip(token.OptionOccurrence)
                 .FirstOrDefault()
                 ?? throw new InvalidOperationException(

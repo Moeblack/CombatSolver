@@ -150,10 +150,11 @@ internal sealed partial class SimulatedCombatState
     private Dictionary<PowerModel, PowerModel>? _rootMultiInstancePowerClones;
     private List<PredictedCard>? _generatedCombatCards;
     private List<PredictedCard>? _registeredCombatCards;
-    private AbstractModel[]? _baseHookListeners;
+    private IReadOnlyList<AbstractModel>? _baseHookListeners;
     private IReadOnlyList<AbstractModel>? _effectiveHookListeners;
     private IReadOnlyList<AbstractModel>? _effectiveRunHookListeners;
     private IReadOnlyList<PowerModel>? _effectivePowers;
+    private Action? _invalidateBaseHookListenersObserver;
     private ForkableDictionary<Player, int>? _drawNextTurn;
     private ForkableDictionary<Creature, int>? _temporaryDexterity;
     private ForkableSet<(Creature Owner, Type Type)>? _skipNextDurationTick;
@@ -514,7 +515,6 @@ internal sealed partial class SimulatedCombatState
             PowerModel mutable = GetMutablePowerInstance(power);
             mutable.AmountOnTurnStart = mutable.Amount;
         }
-        InvalidateHookListeners();
     }
 
     public void Apply<T>(Creature target, int amount, Creature? applier = null) where T : PowerModel
@@ -1323,8 +1323,10 @@ internal sealed partial class SimulatedCombatState
         {
             foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).AllCards)
             {
-                if (card.MutablePreview is not Wither wither)
+                if (card.Preview is not Wither preview
+                    || preview._fakeUpgradeLevel >= expectedUpgradeLevel)
                     continue;
+                var wither = (Wither)card.MutablePreview;
                 while (wither._fakeUpgradeLevel < expectedUpgradeLevel)
                     wither.FakeUpgrade();
             }
@@ -1399,7 +1401,12 @@ internal sealed partial class SimulatedCombatState
         if (_effectivePowers is not null)
             return _effectivePowers;
         IReadOnlyList<AbstractModel> listeners = GetEffectiveHookListeners();
-        List<PowerModel> powers = new(listeners.Count);
+        int expectedPowerCount = _rootPowerAmounts.Count
+            + _rootMultiInstancePowers.Count
+            + (_powers?.Count ?? 0)
+            + (_addedPowerInstances?.Count ?? 0)
+            + 8;
+        List<PowerModel> powers = new(Math.Min(listeners.Count, expectedPowerCount));
         foreach (AbstractModel listener in listeners)
         {
             if (listener is PowerModel power)
@@ -1440,7 +1447,7 @@ internal sealed partial class SimulatedCombatState
         foreach (Player player in predictionState.Players)
         {
             predictionState.GetPlayerCombatState(player).OrbQueue
-                .SetMutationObserver(InvalidateBaseHookListeners);
+                .SetMutationObserver(InvalidateBaseHookListenersObserver);
         }
     }
 
@@ -1483,14 +1490,14 @@ internal sealed partial class SimulatedCombatState
         if (_effectiveHookListeners is not null)
             return _effectiveHookListeners;
 
-        AbstractModel[] baseListeners = GetBaseHookListeners();
+        IReadOnlyList<AbstractModel> baseListeners = GetBaseHookListeners();
         if (_powers is null && _addedPowerInstances is null)
         {
             _effectiveHookListeners = baseListeners;
             return _effectiveHookListeners;
         }
 
-        List<AbstractModel> listeners = new(baseListeners.Length
+        List<AbstractModel> listeners = new(baseListeners.Count
             + (_powers?.Count ?? 0)
             + (_addedPowerInstances?.Count ?? 0));
         foreach (AbstractModel listener in baseListeners)
@@ -1528,19 +1535,27 @@ internal sealed partial class SimulatedCombatState
         _effectivePowers = null;
     }
 
-    private AbstractModel[] GetBaseHookListeners()
+    private IReadOnlyList<AbstractModel> GetBaseHookListeners()
     {
         if (_baseHookListeners != null)
             return _baseHookListeners;
-        List<AbstractModel> listeners = _rootHookListeners
-            .Where(listener => listener switch
+        int initialCapacity = _rootHookListeners.Length
+            + (_registeredCombatCards?.Count ?? 0)
+            + 16;
+        List<AbstractModel> listeners = new(initialCapacity);
+        foreach (AbstractModel listener in _rootHookListeners)
+        {
+            if (listener switch
             {
                 MonsterModel monster => ContainsCreature(monster.Creature),
                 PowerModel power => ContainsCreature(power.Owner) || _knownEnemies.Contains(power.Owner),
                 PotionModel potion => ContainsPotion(potion),
                 _ => true,
             })
-            .ToList();
+            {
+                listeners.Add(listener);
+            }
+        }
         foreach (Player player in Players)
         {
             for (int slot = 0; slot < PotionSlotCount(player); slot++)
@@ -1578,7 +1593,7 @@ internal sealed partial class SimulatedCombatState
             if (cardAttachedListenerOwners != null)
                 _modHookSubscribers.AppendCardAttachedListeners(cardAttachedListenerOwners, listeners);
         }
-        _baseHookListeners = listeners.ToArray();
+        _baseHookListeners = listeners;
         return _baseHookListeners;
     }
 
@@ -1604,7 +1619,7 @@ internal sealed partial class SimulatedCombatState
             .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
             .ToList();
         foreach (PredictedCard card in _registeredCombatCards)
-            card.SetMutationObserver(InvalidateBaseHookListeners);
+            card.SetMutationObserver(InvalidateBaseHookListenersObserver);
         _ = GetBaseHookListeners();
         foreach (PowerModel power in _rootHookListeners.OfType<PowerModel>())
         {
@@ -1686,7 +1701,7 @@ internal sealed partial class SimulatedCombatState
     void ICombatPredictionRootMaterializable.MaterializeRoot(CombatPredictionSimulator simulator)
         => MaterializeRoot(simulator);
 
-    internal int RootHookListenerCount => _baseHookListeners?.Length ?? _rootHookListeners.Length;
+    internal int RootHookListenerCount => _baseHookListeners?.Count ?? _rootHookListeners.Length;
     internal int RootRunHookListenerCount => _rootRunHookListeners.Length;
     internal int RootRunModSubscriberCount => _modHookSubscribers.RunSubscribers.Length;
     internal int RootCombatModSubscriberCount => _modHookSubscribers.CombatSubscribers.Length;
@@ -1709,14 +1724,14 @@ internal sealed partial class SimulatedCombatState
     {
         if (_registeredCombatCards?.Contains(card) != true)
             (_registeredCombatCards ??= []).Add(card);
-        card.SetMutationObserver(InvalidateBaseHookListeners);
+        card.SetMutationObserver(InvalidateBaseHookListenersObserver);
         if (_rootHookListeners.Any(card.References)
             || _generatedCombatCards?.Contains(card) == true)
         {
             return;
         }
         (_generatedCombatCards ??= []).Add(card);
-        card.SetMutationObserver(InvalidateBaseHookListeners);
+        card.SetMutationObserver(InvalidateBaseHookListenersObserver);
         InvalidateBaseHookListeners();
     }
 
@@ -1734,6 +1749,9 @@ internal sealed partial class SimulatedCombatState
         _baseHookListeners = null;
         InvalidateHookListeners();
     }
+
+    private Action InvalidateBaseHookListenersObserver
+        => _invalidateBaseHookListenersObserver ??= InvalidateBaseHookListeners;
 
     public void AppendFingerprint(
         ref StateFingerprintBuilder fingerprint,
@@ -2254,9 +2272,18 @@ internal sealed partial class SimulatedCombatState
     public bool ContainsCreature(Creature creature) => _allies.Contains(creature) || _enemies.Contains(creature);
     public bool ContainsMonster<T>() where T : MonsterModel => _enemies.Any(static creature => creature.Monster is T);
     bool ICombatPredictionCreatureSemantics.IsPrimaryEnemy(Creature creature)
-        => creature.Side == CombatSide.Enemy
-            && !EffectivePowers().Any(power =>
-                power.Owner == creature && power.Amount > 0 && power.OwnerIsSecondaryEnemy);
+    {
+        if (creature.Side != CombatSide.Enemy)
+            return false;
+        IReadOnlyList<PowerModel> powers = EffectivePowers();
+        for (int index = 0; index < powers.Count; index++)
+        {
+            PowerModel power = powers[index];
+            if (power.Owner == creature && power.Amount > 0 && power.OwnerIsSecondaryEnemy)
+                return false;
+        }
+        return true;
+    }
     bool ICombatPredictionCreatureSemantics.IsHittable(Creature creature)
     {
         if (_deathPhases?.GetValueOrDefault(creature) is PredictedDeathPhase.Reviving

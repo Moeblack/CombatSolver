@@ -17,6 +17,7 @@ internal sealed class PredictedCard : IComparable<PredictedCard>
     private bool _hasCachedFingerprint;
     private ulong _cachedFingerprintFirst;
     private ulong _cachedFingerprintSecond;
+    private string? _cachedChoiceKey;
     private SimCardPile? _ownerPile;
     private Action? _mutationObserver;
 
@@ -38,12 +39,15 @@ internal sealed class PredictedCard : IComparable<PredictedCard>
 
     public int MutationVersion => _mutationVersion;
 
+    internal SimCardPile? OwnerPile => _ownerPile;
+
     public CardModel MutablePreview
     {
         get
         {
             _mutationVersion++;
             _hasCachedFingerprint = false;
+            _cachedChoiceKey = null;
             _ownerPile?.InvalidateFingerprint();
             _mutationObserver?.Invoke();
             CardModel? preview = _previewStorage.Preview;
@@ -106,6 +110,7 @@ internal sealed class PredictedCard : IComparable<PredictedCard>
             _hasCachedFingerprint = _hasCachedFingerprint,
             _cachedFingerprintFirst = _cachedFingerprintFirst,
             _cachedFingerprintSecond = _cachedFingerprintSecond,
+            _cachedChoiceKey = _cachedChoiceKey,
         };
         context.Register(this, fork);
         return fork;
@@ -124,6 +129,15 @@ internal sealed class PredictedCard : IComparable<PredictedCard>
         _cachedFingerprintSecond = second;
         _hasCachedFingerprint = true;
     }
+
+    internal bool TryGetCachedChoiceKey(out string key)
+    {
+        key = _cachedChoiceKey ?? string.Empty;
+        return _cachedChoiceKey is not null;
+    }
+
+    internal void SetCachedChoiceKey(string key)
+        => _cachedChoiceKey = key;
 
     internal void SetOwnerPile(SimCardPile? pile)
     {

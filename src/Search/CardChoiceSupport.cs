@@ -132,7 +132,7 @@ internal static partial class CardChoiceSupport
         List<PredictedCard> selection = (fromHand
                 ? spec.Options.OrderBy(card => CardValue(card.Preview))
                 : spec.Options.OrderByDescending(card => CardValue(card.Preview)))
-            .ThenBy(card => ChoiceCardKey(card.Preview), StringComparer.Ordinal)
+            .ThenBy(ChoiceCardKey, StringComparer.Ordinal)
             .Take(count)
             .ToList();
         return new PlanCardChoice(
@@ -160,7 +160,7 @@ internal static partial class CardChoiceSupport
             return false;
         PlanCardToken token = outerChoice.Cards[0];
         PredictedCard selected = outerSpec.Options
-            .Where(card => MatchesToken(card.Preview, token))
+            .Where(card => MatchesToken(card, token))
             .Skip(token.OptionOccurrence)
             .FirstOrDefault()
             ?? throw new InvalidOperationException(
@@ -201,7 +201,7 @@ internal static partial class CardChoiceSupport
                 or PlanChoiceEffect.Transform
                 ? spec.Options.OrderBy(card => RemovalPriority(spec.Effect, card))
                 : spec.Options.OrderByDescending(card => CardValue(card.Preview)))
-            .ThenBy(card => ChoiceCardKey(card.Preview), StringComparer.Ordinal)
+            .ThenBy(ChoiceCardKey, StringComparer.Ordinal)
             .ToList();
         List<IReadOnlyList<PredictedCard>> selections = [];
         List<IReadOnlyList<PredictedCard>> cardinalityRepresentatives = [];
@@ -278,7 +278,7 @@ internal static partial class CardChoiceSupport
         List<PredictedCard> selected = [];
         foreach (PlanCardToken token in choice.Cards)
         {
-            PredictedCard card = options.Where(candidate => MatchesToken(candidate.Preview, token))
+            PredictedCard card = options.Where(candidate => MatchesToken(candidate, token))
                 .Skip(token.OptionOccurrence)
                 .FirstOrDefault()
                 ?? throw new InvalidOperationException(
@@ -366,7 +366,7 @@ internal static partial class CardChoiceSupport
         string? previousKey = null;
         for (int i = start; i <= options.Count - (count - current.Count); i++)
         {
-            string optionKey = ChoiceCardKey(options[i].Preview);
+            string optionKey = ChoiceCardKey(options[i]);
             if (optionKey == previousKey)
                 continue;
             previousKey = optionKey;
@@ -387,11 +387,11 @@ internal static partial class CardChoiceSupport
         List<PlanCardToken> tokens = [];
         foreach (PredictedCard card in selected)
         {
-            string stateKey = ChoiceCardKey(card.Preview);
+            string stateKey = ChoiceCardKey(card);
             int sourceOccurrence = source.TakeWhile(item => !ReferenceEquals(item, card))
-                .Count(item => ChoiceCardKey(item.Preview) == stateKey);
+                .Count(item => ChoiceCardKey(item) == stateKey);
             int optionOccurrence = options.TakeWhile(item => !ReferenceEquals(item, card))
-                .Count(item => ChoiceCardKey(item.Preview) == stateKey);
+                .Count(item => ChoiceCardKey(item) == stateKey);
             tokens.Add(new PlanCardToken(
                 card.Preview.Id.Entry,
                 card.Preview.CurrentUpgradeLevel,
@@ -405,12 +405,12 @@ internal static partial class CardChoiceSupport
 
     private static PredictedCard Find(IReadOnlyList<PredictedCard> cards, PlanCardToken token)
     {
-        return cards.Where(card => MatchesToken(card.Preview, token))
+        return cards.Where(card => MatchesToken(card, token))
             .Skip(token.SourceOccurrence)
             .FirstOrDefault()
             ?? throw new InvalidPlannedChoiceBranchException(
                 $"选牌回放时找不到 {token.CardId}+{token.UpgradeLevel}#{token.SourceOccurrence}；" +
-                $"候选={string.Join(',', cards.Select(card => ChoiceCardKey(card.Preview)))}。");
+                $"候选={string.Join(',', cards.Select(ChoiceCardKey))}。");
     }
 
     private static double ChoicePriority(CardChoiceSpec spec, IReadOnlyList<PredictedCard> cards)
@@ -461,8 +461,22 @@ internal static partial class CardChoiceSupport
                $"{card.Affliction?.Id.Entry}:{card.Affliction?.Amount ?? 0}";
     }
 
+    internal static string ChoiceCardKey(PredictedCard card)
+    {
+        if (card.TryGetCachedChoiceKey(out string key))
+            return key;
+        key = ChoiceCardKey(card.Preview);
+        card.SetCachedChoiceKey(key);
+        return key;
+    }
+
     internal static bool MatchesToken(CardModel card, PlanCardToken token)
         => card.Id.Entry == token.CardId
             && card.CurrentUpgradeLevel == token.UpgradeLevel
+            && (token.StateKey.Length == 0 || ChoiceCardKey(card) == token.StateKey);
+
+    internal static bool MatchesToken(PredictedCard card, PlanCardToken token)
+        => card.Preview.Id.Entry == token.CardId
+            && card.Preview.CurrentUpgradeLevel == token.UpgradeLevel
             && (token.StateKey.Length == 0 || ChoiceCardKey(card) == token.StateKey);
 }

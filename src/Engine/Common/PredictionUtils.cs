@@ -136,9 +136,10 @@ internal static class PredictionUtils
         }
 
         CardEnergyCost cost = card.EnergyCost;
-        if (!cost.HasLocalModifiers)
+        List<LocalCostModifier> localModifiers = GetLocalCostModifiers(cost);
+        if (localModifiers.Count == 0)
             return false;
-        foreach (LocalCostModifier modifier in GetLocalCostModifiers(cost))
+        foreach (LocalCostModifier modifier in localModifiers)
         {
             if (modifier.Expiration.HasFlag(LocalCostModifierExpiration.EndOfTurn))
                 return true;

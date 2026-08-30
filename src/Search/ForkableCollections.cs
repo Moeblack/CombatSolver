@@ -73,7 +73,8 @@ internal sealed class ForkableList<T> : IReadOnlyList<T>
 
     public int IndexOf(T value) => _storage.Values.IndexOf(value);
     public bool Contains(T value) => _storage.Values.Contains(value);
-    public IEnumerator<T> GetEnumerator() => _storage.Values.GetEnumerator();
+    public List<T>.Enumerator GetEnumerator() => _storage.Values.GetEnumerator();
+    IEnumerator<T> IEnumerable<T>.GetEnumerator() => GetEnumerator();
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     private void EnsureWritable()
