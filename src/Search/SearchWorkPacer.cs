@@ -39,6 +39,21 @@ internal sealed class SearchWorkPacer(SearchFramePressureSignal framePressureSig
         _slice.Restart();
     }
 
+    /// <summary>合并并清空一个已经越过完成 barrier 的持久 worker 节流指标。</summary>
+    public void DrainFrom(SearchWorkPacer worker)
+    {
+        ArgumentNullException.ThrowIfNull(worker);
+        YieldCount += worker.YieldCount;
+        if (worker.MaxObservedGcPause > MaxObservedGcPause)
+            MaxObservedGcPause = worker.MaxObservedGcPause;
+        FrameRecoveryWaitCount += worker.FrameRecoveryWaitCount;
+        _frameRecoveryWaitTicks += worker._frameRecoveryWaitTicks;
+        worker.YieldCount = 0;
+        worker.MaxObservedGcPause = TimeSpan.Zero;
+        worker.FrameRecoveryWaitCount = 0;
+        worker._frameRecoveryWaitTicks = 0;
+    }
+
     private void ObserveGcPause()
     {
         int gen0 = GC.CollectionCount(0);

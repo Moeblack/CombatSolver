@@ -77,6 +77,8 @@ param(
     [switch]$VerifyIncrementalSearch,
     [switch]$ForceShortSearchOnly,
     [switch]$MeasureSearchPhases,
+    [ValidateSet(-1, 1, 2, 3, 4)]
+    [int]$SearchMaxDegreeOfParallelismForTest = -1,
     [switch]$HoldAfterInitialSearch,
     [int]$ShortSearchBudgetOverrideMilliseconds = -1,
     [int]$DeepSearchBudgetOverrideMilliseconds = -1,
@@ -648,6 +650,7 @@ $request = [ordered]@{
     verifyIncrementalSearch = $VerifyIncrementalSearch.IsPresent
     forceShortSearchOnly = $ForceShortSearchOnly.IsPresent
     measureSearchPhases = $MeasureSearchPhases.IsPresent
+    searchMaxDegreeOfParallelismForTest = if ($SearchMaxDegreeOfParallelismForTest -gt 0) { $SearchMaxDegreeOfParallelismForTest } else { $null }
     holdAfterInitialSearch = $HoldAfterInitialSearch.IsPresent
     shortSearchBudgetOverrideMilliseconds = if ($ShortSearchBudgetOverrideMilliseconds -gt 0) { $ShortSearchBudgetOverrideMilliseconds } else { $null }
     deepSearchBudgetOverrideMilliseconds = if ($DeepSearchBudgetOverrideMilliseconds -gt 0) { $DeepSearchBudgetOverrideMilliseconds } else { $null }

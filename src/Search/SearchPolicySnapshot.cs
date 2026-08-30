@@ -8,6 +8,7 @@ internal sealed record SearchPolicySnapshot(
     bool VerifyIncrementalSearch,
     bool ForceShortOnly,
     bool MeasurePhasePerformance,
+    int MaxDegreeOfParallelism,
     int? ShortBudgetOverrideMilliseconds,
     int? DeepBudgetOverrideMilliseconds,
     bool IncludeTurnSetup,

@@ -8,7 +8,7 @@ internal sealed class PredictedCard : IComparable<PredictedCard>
     private sealed class PreviewStorage(CardModel? preview)
     {
         public CardModel? Preview { get; } = preview;
-        public bool Shared { get; set; }
+        public volatile bool Shared;
     }
 
     private readonly CardModel _original;

@@ -71,6 +71,7 @@ internal sealed class UnattendedTestRequest
     public bool HoldAfterInitialSearch { get; init; }
     public int? ShortSearchBudgetOverrideMilliseconds { get; init; }
     public int? DeepSearchBudgetOverrideMilliseconds { get; init; }
+    public int? SearchMaxDegreeOfParallelismForTest { get; init; }
     public SolverSearchPhase? ExpectedInitialSearchPhase { get; init; }
     public bool? ExpectedInitialDeepSearchTriggered { get; init; }
     public bool? ExpectedInitialDeepSearchImprovedResult { get; init; }

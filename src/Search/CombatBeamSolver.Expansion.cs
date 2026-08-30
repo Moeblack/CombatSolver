@@ -28,23 +28,19 @@ internal sealed partial class CombatBeamSolver
     {
         cancellationToken.ThrowIfCancellationRequested();
         SimulationSnapshot snapshot = node.Snapshot;
+        if (node.IsTerminal
+            || snapshot.PlayerDead
+            || snapshot.AllEnemiesDead
+            || snapshot.BoundaryReason != SearchBoundaryReason.None)
+        {
+            throw new InvalidOperationException("终结搜索节点不应进入展开阶段。");
+        }
         _run.ReusedNodeSnapshots++;
         if (!TryMarkExpandedState(node))
             yield break;
         _run.Expanded++;
         CombatPredictionSimulator simulator = (CombatPredictionSimulator)snapshot.Simulator;
         SimulatedCombatState simulatedCombat = (SimulatedCombatState)simulator.State.CombatState;
-
-        if (snapshot.PlayerDead || snapshot.AllEnemiesDead)
-        {
-            yield return node with
-            {
-                IsTerminal = true,
-                Score = ApplySoldHpPenalty(snapshot.Score, node.FutureSoldHp),
-                BoundaryReason = snapshot.BoundaryReason,
-            };
-            yield break;
-        }
 
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
         List<ActionCandidate> nonDominated = new(16);

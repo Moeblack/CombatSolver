@@ -101,6 +101,7 @@ for name in \
 done
 add_option short-search-budget-override-milliseconds -1 int positive_int
 add_option deep-search-budget-override-milliseconds -1 int positive_int
+add_option search-max-degree-of-parallelism-for-test -1 int positive_int
 add_option expected-initial-search-phase "" string optional_string "Short|Deep"
 add_option expected-initial-deep-search-triggered -1 int tri_bool
 add_option expected-initial-deep-search-improved-result -1 int tri_bool
@@ -339,6 +340,9 @@ for name in "${option_order[@]}"; do
 done
 
 ((option_value[ascension] >= 0 && option_value[ascension] <= 10)) || die "--ascension must be between 0 and 10"
+search_max_dop="${option_value[search-max-degree-of-parallelism-for-test]}"
+((search_max_dop == -1 || (search_max_dop >= 1 && search_max_dop <= 4))) || \
+    die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 4"
 for name in expected-initial-deep-search-triggered expected-initial-deep-search-improved-result \
     expected-initial-only-death-routes-found expected-initial-act-ending-boss \
     enable-detailed-diagnostic-logs-for-test; do

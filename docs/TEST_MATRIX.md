@@ -4,10 +4,16 @@
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
-## 下一版本（开发中）：跨平台原生入口与 Linux headless 提速
+## 下一版本（开发中）：跨平台原生入口、Linux headless 与多核搜索
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `MULTICORE-NIBBITS-DOP1/DOP2-AB` | 通过（headless 迭代基准） | 固定双小啃兽快照在上游 DOP1、当前 DOP1、当前 DOP2 均为 `573` 展开、`2759` 转移、同一 5 回合零战损/零药路线。独立冷进程求解耗时 `1424.5 / 1449.3 / 955.2 ms`，当前 DOP2 缩短约 `34.1%`；累计分配 `177,425,048 / 177,767,800 / 179,165,392 B`，DOP2 并行遥测为 `286 waves / 572 items / max concurrency 2`。runId `e8bfb02cf9714c98ae9230842c756ff3`、`9314522060164435b551c18f16d7d093`、`ca238f1462874e7d8c67069b4b71077c`；不替代 Steam 可见性能门槛 | 2026-08-30 |
+| `MULTICORE-POLICY-EQUIVALENCE` | 通过 | 带初始力量与 `SURVIVOR` 弃牌选择的固定根先执行冷缓存 DOP2，再执行 DOP1；递归核对完整动作/选择、评分、展开、转移、各类剪枝、快照、continuation 与回合标注。DOP1 并行遥测全零，DOP2 实际最大并发不小于 2。runId `3f8d240bda57441c8352bfb749424017` | 2026-08-30 |
+| `MULTICORE-FULL-AUTO-DOP2` | 通过 | 默认并行路径完成双小啃兽整场自动部署，第 5 回合结束，第 3 回合精确复用；零药、零预计战损。runId `eda5d69feb774389a8990d788434ac6d` | 2026-08-30 |
+| `MULTICORE-EARRING-NESTED-CHOICE-DOP2` | 通过 | 工具盒形成首回合多根，低语耳环连续自动打出高密度 `SURVIVOR` 并消费嵌套弃牌选择；精确原版状态检查通过，搜索记录 `4 waves / 8 items / max concurrency 2`。runId `f577be1a8e0a4ebb84aa115d3ab28734` | 2026-08-30 |
+| `MULTICORE-NIBBITS-DOP4` | 通过 | 四条 lane 完成固定双小啃兽搜索，仍为 `573 / 2759`、同一路线与全部剪枝指标；并行遥测 `159 waves / 572 items / max concurrency 4`。runId `54243577aa984e8eb68f2d242a216eb9` | 2026-08-30 |
+| `MULTICORE-INCREMENTAL-FORCED-SERIAL` | 通过 | 请求 DOP4 并开启严格增量回放；首轮完整结果的 `parallel_waves / work_items / max_concurrency` 均为 `0`，逐转移回放一致，第 5 回合结束且计划外重算 `0`。runId `96b7d9fdfbb245d68f4effefcd748b1e` | 2026-08-30 |
 | `LINUX-HEADLESS-INSTANT-AB` | 通过 | 同一 PID `66703` 先后运行 `Normal / Instant / Normal`；内部耗时分别为 `7098.0 / 2917.7 / 7064.5 ms`，Instant 稳定节省约 `59%`。三次均应用并恢复测试速度，runId `e8dede980dbb4daab57cc1c6a1d71730`、`8851e4147f9940e2921088474c8c7e5f`、`42148ebf930243b59d9230d2cb68f913` | 2026-08-29 |
 | `LINUX-HEADLESS-REUSE-REGRESSION` | 通过 | 同一 PID 连续通过怪物严格差分、铁甲战士跨回合复用、跨角色切换到星辰、再切回铁甲战士完成精灵药自动战斗；对应 runId `74da3eefb1e841219c5721323dad83d6`、`dbd5cf92f61043b28d38978aa8307a6e`、`8605ff494b604c019323e222f5247314`、`261c9007073d40709a5f388d698063e9`，两项复用场景和完整战斗的计划外重算均为 `0` | 2026-08-29 |
 | `LINUX-HEADLESS-LIFECYCLE` | 通过 | 原生日志为 `N/A (headless) / VRAM 0B`；marker 验证 PID starttime、隔离环境及 DLL/manifest 哈希。无变化复用同一 PID；Release 重建后输出 `UNATTENDED_RESTART reason=mod_changed` 并自动换 PID。失败退出约 `510 ms`，最终进程、marker、临时 RitsuLib 投影均清理 | 2026-08-29 |

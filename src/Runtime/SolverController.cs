@@ -145,6 +145,15 @@ internal static class SolverController
         SolverTheftPolicy? theftPolicy)
     {
         FramePressureSignal.ResetPressure();
+        int maxDegreeOfParallelism = UnattendedTestRunner.SearchMaxDegreeOfParallelismOverride
+            ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism;
+        if (maxDegreeOfParallelism < 1
+            || maxDegreeOfParallelism > SolverWeights.MaximumSearchMaxDegreeOfParallelism)
+        {
+            throw new InvalidOperationException(
+                $"搜索并行度必须在 1..{SolverWeights.MaximumSearchMaxDegreeOfParallelism} 之间，" +
+                $"实际为 {maxDegreeOfParallelism}。");
+        }
         return new SearchPolicySnapshot(
             settings.ShortProfile,
             settings.DeepProfile,
@@ -153,6 +162,7 @@ internal static class SolverController
             UnattendedTestRunner.VerifyIncrementalSearch,
             UnattendedTestRunner.ForceShortSearchOnly,
             UnattendedTestRunner.MeasureSearchPhases,
+            maxDegreeOfParallelism,
             UnattendedTestRunner.ShortSearchBudgetOverrideMilliseconds,
             UnattendedTestRunner.DeepSearchBudgetOverrideMilliseconds,
             includeTurnSetup,
@@ -567,7 +577,8 @@ internal static class SolverController
                 $"[CombatSolver/Test] SEARCH_REQUEST generation={generation} reason={reason} " +
                 $"cause={CauseToken(replanCause)} previous_boundary={previousBoundary?.ToString() ?? "-"} " +
                 $"turn={turn} deploy_when_ready={deployWhenReady} " +
-                $"theft_policy={theftPolicy?.ToString() ?? "-"}");
+                $"theft_policy={theftPolicy?.ToString() ?? "-"} " +
+                $"max_dop={searchPolicy.MaxDegreeOfParallelism}");
             Entry.Logger.Info(SolverDiagnostics.DescribeStart(
                 state,
                 settings.ShortProfile,

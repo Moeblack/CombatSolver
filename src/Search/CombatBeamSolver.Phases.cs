@@ -43,12 +43,22 @@ internal sealed partial class CombatBeamSolver
                     : "只能在玩家出牌阶段计算。");
         }
 
+        int expansionParallelism = _detailedDiagnostics || policy.VerifyIncrementalSearch
+            ? 1
+            : Math.Clamp(
+                policy.MaxDegreeOfParallelism,
+                1,
+                Math.Max(1, Environment.ProcessorCount));
+
         long allocatedBytesAtStart = GC.GetAllocatedBytesForCurrentThread();
         int gen0AtStart = GC.CollectionCount(0);
         int gen1AtStart = GC.CollectionCount(1);
         int gen2AtStart = GC.CollectionCount(2);
         TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
         Stopwatch stopwatch = Stopwatch.StartNew();
+        using ParallelExpansionExecutor? parallelExpansionExecutor = expansionParallelism > 1
+            ? new ParallelExpansionExecutor(this, expansionParallelism)
+            : null;
         long lastProgressMs = -100;
         void PublishProgress(
             int currentTurn,
@@ -119,8 +129,10 @@ internal sealed partial class CombatBeamSolver
                 snapshot.Score,
                 snapshot.StateKey,
                 snapshot.HasRisk,
-                SearchBoundaryReason.None,
-                false,
+                snapshot.BoundaryReason,
+                snapshot.PlayerDead
+                    || snapshot.AllEnemiesDead
+                    || snapshot.BoundaryReason != SearchBoundaryReason.None,
                 null,
                 snapshot,
                 CombatProgressState.Capture(snapshot),
@@ -199,6 +211,7 @@ internal sealed partial class CombatBeamSolver
                         "回收内存",
                         force: true);
                     _run.ResetRebuildableCaches(active);
+                    parallelExpansionExecutor?.ResetRebuildableCaches();
                     policy.MemoryPressureSignal.ReclaimAndContinue(cancellationToken);
                     policy.Diagnostics.Info(
                         $"[CombatSolver/Test] SEARCH_MEMORY_RESUMED " +
@@ -224,37 +237,131 @@ internal sealed partial class CombatBeamSolver
                     break;
                 }
                 List<SearchNode> nextPlays = [];
-                foreach (SearchNode node in active)
+                void AcceptExpandedChild(SearchNode node, SearchNode child)
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-                    foreach (SearchNode child in Expand(node))
+                    if (child.Score > fallback.Score)
+                        fallback = child;
+                    if (child.IsTerminal || child.Turn > node.Turn)
                     {
-                        if (child.Score > fallback.Score)
-                            fallback = child;
-                        if (child.IsTerminal || child.Turn > node.Turn)
+                        if (child.PotionCount == 0 && child.Score > potionFreeBoundaryFallbackScore)
                         {
-                            if (child.PotionCount == 0 && child.Score > potionFreeBoundaryFallbackScore)
-                            {
-                                potionFreeBoundaryFallback = child;
-                                potionFreeBoundaryFallbackScore = child.Score;
-                            }
-                            else if (child.PotionCount > 0 && child.Score > potionBoundaryFallbackScore)
-                            {
-                                potionBoundaryFallback = child;
-                                potionBoundaryFallbackScore = child.Score;
-                            }
-                            ended.Add(child);
+                            potionFreeBoundaryFallback = child;
+                            potionFreeBoundaryFallbackScore = child.Score;
                         }
-                        else
-                            nextPlays.Add(child);
-                        if (_run.Expanded >= _profile.MaxExpandedNodes)
-                            break;
+                        else if (child.PotionCount > 0 && child.Score > potionBoundaryFallbackScore)
+                        {
+                            potionBoundaryFallback = child;
+                            potionBoundaryFallbackScore = child.Score;
+                        }
+                        ended.Add(child);
                     }
+                    else
+                        nextPlays.Add(child);
+                }
+
+                void FinishExpandedParent(SearchNode node)
+                {
                     node.Snapshot.ReleaseSimulator();
                     PublishProgress(node.Turn, searchedTurnLayers, playDepth, active.Count + nextPlays.Count,
                         ended.Count, "展开出牌序列");
-                    if (_run.Expanded >= _profile.MaxExpandedNodes)
-                        break;
+                }
+
+                if (expansionParallelism == 1)
+                {
+                    foreach (SearchNode node in active)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        foreach (SearchNode child in Expand(node))
+                        {
+                            AcceptExpandedChild(node, child);
+                            if (_run.Expanded >= _profile.MaxExpandedNodes)
+                                break;
+                        }
+                        FinishExpandedParent(node);
+                        if (_run.Expanded >= _profile.MaxExpandedNodes)
+                            break;
+                    }
+                }
+                else
+                {
+                    int activeIndex = 0;
+                    while (activeIndex < active.Count
+                           && _run.Expanded < _profile.MaxExpandedNodes)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        int remainingBudget = _profile.MaxExpandedNodes - _run.Expanded;
+                        if (remainingBudget <= 1)
+                        {
+                            // The legacy iterator intentionally yields only the first child from the
+                            // final budget slot. Keep that edge case out of the materialized worker path.
+                            for (; activeIndex < active.Count; activeIndex++)
+                            {
+                                SearchNode node = active[activeIndex];
+                                foreach (SearchNode child in Expand(node))
+                                {
+                                    AcceptExpandedChild(node, child);
+                                    if (_run.Expanded >= _profile.MaxExpandedNodes)
+                                        break;
+                                }
+                                FinishExpandedParent(node);
+                                if (_run.Expanded >= _profile.MaxExpandedNodes)
+                                    break;
+                            }
+                            break;
+                        }
+
+                        int acceptedCapacity = Math.Min(expansionParallelism, remainingBudget - 1);
+                        List<(SearchNode Node, int WorkerIndex)> entries = [];
+                        List<SearchNode> workerNodes = new(acceptedCapacity);
+                        while (activeIndex < active.Count && workerNodes.Count < acceptedCapacity)
+                        {
+                            SearchNode node = active[activeIndex++];
+                            int workerIndex = -1;
+                            if (TryPrepareParallelExpansion(node))
+                            {
+                                workerIndex = workerNodes.Count;
+                                workerNodes.Add(node);
+                            }
+                            entries.Add((node, workerIndex));
+                        }
+
+                        ExpansionWorkerOutcome[]? outcomes = null;
+                        int finishedEntryCount = 0;
+                        try
+                        {
+                            outcomes = parallelExpansionExecutor!.Evaluate(workerNodes);
+                            ExpansionWorkerOutcome? failed = outcomes.FirstOrDefault(
+                                outcome => outcome.Error != null);
+                            failed?.Error!.Throw();
+
+                            foreach ((SearchNode node, int workerIndex) in entries)
+                            {
+                                if (workerIndex >= 0)
+                                {
+                                    ExpansionWorkerOutcome outcome = outcomes[workerIndex];
+                                    MergeExpansionWorker(outcome);
+                                    ExpansionBatch batch = outcome.Batch
+                                        ?? throw new InvalidOperationException("并行展开没有返回候选批次。");
+                                    CommitExpansionBatch(
+                                        node,
+                                        batch,
+                                        child => AcceptExpandedChild(node, child));
+                                }
+                                FinishExpandedParent(node);
+                                finishedEntryCount++;
+                            }
+                        }
+                        finally
+                        {
+                            if (outcomes != null)
+                            {
+                                foreach (ExpansionWorkerOutcome outcome in outcomes)
+                                    outcome.Batch?.Dispose();
+                            }
+                            for (int index = finishedEntryCount; index < entries.Count; index++)
+                                entries[index].Node.Snapshot.ReleaseSimulator();
+                        }
+                    }
                 }
                 List<SearchNode> prunedPlays = Prune(nextPlays);
                 ReleaseDroppedSnapshots(nextPlays, prunedPlays);
@@ -431,7 +538,9 @@ internal sealed partial class CombatBeamSolver
             .ToArray();
         _run.Performance.End(SearchMetricPhase.FinalSelection, finalMeasurement);
         stopwatch.Stop();
-        long workerAllocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart;
+        long workerAllocatedBytes =
+            GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart
+            + _run.OffThreadAllocatedBytes;
         int gen0Collections = GC.CollectionCount(0) - gen0AtStart;
         int gen1Collections = GC.CollectionCount(1) - gen1AtStart;
         int gen2Collections = GC.CollectionCount(2) - gen2AtStart;
@@ -520,6 +629,9 @@ internal sealed partial class CombatBeamSolver
             TranspositionBranchesPruned = _run.TranspositionBranchesPruned,
             RepeatableNoProgressBranchesPruned = _run.RepeatableNoProgressBranchesPruned,
             StandPatProbes = _run.StandPatProbes,
+            ParallelExpansionWaves = _run.ParallelExpansionWaves,
+            ParallelExpansionWorkItems = _run.ParallelExpansionWorkItems,
+            MaxParallelExpansionConcurrency = _run.MaxParallelExpansionConcurrency,
             TransitionCacheHits = 0,
             WorkerAllocatedBytes = workerAllocatedBytes,
             Gen0Collections = gen0Collections,

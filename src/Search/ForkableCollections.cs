@@ -7,7 +7,7 @@ internal sealed class ForkableList<T> : IReadOnlyList<T>
     private sealed class Storage(List<T> values)
     {
         public List<T> Values { get; } = values;
-        public bool Shared { get; set; }
+        public volatile bool Shared;
     }
 
     private Storage _storage;
@@ -90,7 +90,7 @@ internal sealed class ForkableDictionary<TKey, TValue> : IReadOnlyDictionary<TKe
     private sealed class Storage(Dictionary<TKey, TValue> values)
     {
         public Dictionary<TKey, TValue> Values { get; } = values;
-        public bool Shared { get; set; }
+        public volatile bool Shared;
     }
 
     private Storage _storage;
@@ -184,7 +184,7 @@ internal sealed class ForkableSet<T> : ISet<T>, IReadOnlySet<T>
     private sealed class Storage(HashSet<T> values)
     {
         public HashSet<T> Values { get; } = values;
-        public bool Shared { get; set; }
+        public volatile bool Shared;
     }
 
     private Storage _storage;

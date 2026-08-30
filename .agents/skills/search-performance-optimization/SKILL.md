@@ -12,6 +12,7 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 读取 `docs/ARCHITECTURE.md` 的 Search 章节。当前搜索职责已拆开：
 
 - `Expansion` 产生候选；
+- `ParallelExpansion` 用固定 lane 并发物化不同父节点的原始候选，并按输入顺序串行提交；
 - `StateEvaluation` 计算快照、威胁和评分特征；
 - `BeamRetentionPolicy` 决定中间候选保留；
 - `FinalPlanOrdering` 决定终局路线；
@@ -60,6 +61,9 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 ## 4. 性能所有权
 
 - `SearchRunContext` 是单次运行可变指标、转置和缓存的所有者；不要把这些字段退回 solver 入口或静态全局。
+- 并行 worker 只能拥有 lane-local 模拟、缓存、节流和原始候选；transposition、dominance、fallback、预算与最终接收顺序仍由 coordinator 独占。固定 lane 应在一次 `Solve` 内复用，禁止回到每父节点 `Task.Run` / 新建 solver。
+- 一个 wave 在 coordinator 提交前会同时持有多组 raw snapshots；提高 DOP 时必须检查高目标/高选择场景的峰值 live graph，不能只看总分配或平均 bytes/transition。
+- worker 阶段 ticks 合并后是累计 CPU 时间，不是墙钟占比；同时记录 `parallel_waves`、`parallel_work_items` 与 `parallel_max_concurrency`，避免只凭配置值宣称已并行。
 - Runtime 拥有 `SearchGcPolicy`，Search 只通过 `SearchFramePressureSignal` / `SearchWorkPacer` 消费节流信号。
 - 优先避免无价值候选、Fork 和快照产生；No-GC 区内释放引用不会返还预算。
 - 区分 transitions 增长与 bytes/transition 增长，用阶段指标定位实际热点。
@@ -73,7 +77,8 @@ description: 在战斗语义已证明正确后，审计或修改 CombatSolver �
 3. 先跑目标首轮质量，再跑完整自动战斗，固定 `Instant / 0 秒`、零非预期重算；
 4. 跑与改动相关的药水、卖血、延迟伤害、复活、选择等不可退化场景；
 5. 最终候选单独执行一次增量等价，数字不用于性能比较；
-6. 改动涉及 coverage/state 分类时运行对应 CoverageCatalog verify；
-7. 性能最终结论来自关闭诊断的正常可见 Steam 会话。
+6. 并行改动固定节点工作量，至少比较 DOP1/DOP2 的动作、评分、展开、转移和全部非时序剪枝指标，并断言 DOP2 的实际最大并发不小于 2；详细诊断和增量模式继续用 DOP1；
+7. 改动涉及 coverage/state 分类时运行对应 CoverageCatalog verify；
+8. 性能最终结论来自关闭诊断的正常可见 Steam 会话。
 
 职责迁移时同步 `docs/ARCHITECTURE.md` 和结构门禁。搜索行为或指标变化同步开发笔记与测试矩阵。普通优化直接提交；版本和打包时机以 `AGENTS.md` 的活动发布批次和发布口令为准，再转 `release-gate`。

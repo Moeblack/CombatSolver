@@ -100,6 +100,10 @@ internal sealed partial class CombatBeamSolver
         public int TranspositionBranchesPruned;
         public int RepeatableNoProgressBranchesPruned;
         public int StandPatProbes;
+        public long OffThreadAllocatedBytes;
+        public int ParallelExpansionWaves;
+        public int ParallelExpansionWorkItems;
+        public int MaxParallelExpansionConcurrency;
         public int InitialPersistentBuffValue;
         public int InitialEnemyStrengthSuppression;
         public int InitialEnemyWeakTurns;

@@ -7,6 +7,7 @@ Usage: tools/run-visible-steam-benchmark.sh [options]
 
 Options:
   --timeout-seconds SECONDS
+  --search-max-degree-of-parallelism 1..4
   --verify-base-lib-card-modifier-boundary
   --verify-baselib-card-modifier-boundary  Deprecated compatibility alias
   --steam-root DIRECTORY
@@ -34,6 +35,7 @@ require_option_value() {
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(realpath -e -- "$script_dir/..")"
 timeout_seconds=360
+search_max_degree_of_parallelism=2
 verify_baselib_card_modifier_boundary=false
 steam_root_arg=""
 steam_command_arg=""
@@ -49,6 +51,15 @@ while (($# > 0)); do
             ;;
         --timeout-seconds=*)
             timeout_seconds="${1#*=}"
+            shift
+            ;;
+        --search-max-degree-of-parallelism)
+            require_option_value "$1" "${2-}"
+            search_max_degree_of_parallelism="$2"
+            shift 2
+            ;;
+        --search-max-degree-of-parallelism=*)
+            search_max_degree_of_parallelism="${1#*=}"
             shift
             ;;
         --verify-base-lib-card-modifier-boundary|--verify-baselib-card-modifier-boundary)
@@ -102,6 +113,8 @@ while (($# > 0)); do
 done
 
 [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || die "--timeout-seconds must be a positive integer"
+[[ "$search_max_degree_of_parallelism" =~ ^[1-4]$ ]] || \
+    die "--search-max-degree-of-parallelism must be between 1 and 4"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
 if [[ -n "$steam_root_arg" ]]; then
@@ -271,6 +284,7 @@ jq -n \
     --arg run_id "$run_id" \
     --arg run_snapshot_path "$run_snapshot_path" \
     --argjson timeout_seconds "$timeout_seconds" \
+    --argjson search_max_degree_of_parallelism "$search_max_degree_of_parallelism" \
     --argjson verify_baselib "$verify_baselib_card_modifier_boundary" \
     '{
         schemaVersion: 1,
@@ -307,6 +321,7 @@ jq -n \
         assertDeploymentSpeedRestored: true,
         forceShortSearchOnly: false,
         measureSearchPhases: true,
+        searchMaxDegreeOfParallelismForTest: $search_max_degree_of_parallelism,
         holdAfterInitialSearch: false,
         shortSearchBudgetOverrideMilliseconds: 5000,
         deepSearchBudgetOverrideMilliseconds: 60000,
