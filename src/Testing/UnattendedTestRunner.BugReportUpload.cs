@@ -10,6 +10,8 @@ internal sealed partial class UnattendedTestRunner
 {
     private async Task AssertBugReportUploadBoundariesAsync()
     {
+        if (!CombatBugReportUploader.ProductionTransportUsesDirectConnectionForTesting)
+            throw new InvalidOperationException("正式上传仍然继承游戏进程代理设置。");
         string directory = ProjectSettings.GlobalizePath("user://combat-solver-test-upload");
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, $"upload-{_request.RunId}.zip");

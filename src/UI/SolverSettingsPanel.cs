@@ -898,18 +898,44 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         }
         finally
         {
-            _uploadInProgress = false;
-            _uploadCancelRequested = false;
-            _uploadCancellation?.Dispose();
-            _uploadCancellation = null;
-            _uploadSubmissionId = null;
-            PostUi(() =>
-            {
-                SetProcess(false);
-                _uploadProgress.Visible = uploadConfirmed;
-                RefreshBugReportControls();
-            });
+            CancellationTokenSource? completedCancellation = _uploadCancellation;
+            PostUi(() => CompleteUploadOperation(uploadConfirmed, completedCancellation));
         }
+    }
+
+    private void CompleteUploadOperation(
+        bool uploadConfirmed,
+        CancellationTokenSource? completedCancellation)
+    {
+        if (!ReferenceEquals(_uploadCancellation, completedCancellation))
+            return;
+        _uploadInProgress = false;
+        _uploadCancelRequested = false;
+        _uploadCancellation = null;
+        _uploadSubmissionId = null;
+        completedCancellation?.Dispose();
+        SetProcess(false);
+        _uploadProgress.Visible = uploadConfirmed;
+        RefreshBugReportControls();
+    }
+
+    internal bool ExerciseUploadCompletionTransitionForTesting()
+    {
+        if (_uploadInProgress || _exportInProgress || HasOpenUploadDialog())
+            return false;
+        CancellationTokenSource cancellation = new();
+        _uploadInProgress = true;
+        _uploadCancelRequested = false;
+        _uploadCancellation = cancellation;
+        _uploadSubmissionId = "test";
+        RefreshBugReportControls();
+        bool remainsCancelableUntilUiCompletion = _uploadInProgress
+                                                  && _uploadBugReport.Text == "取消上传";
+        CompleteUploadOperation(uploadConfirmed: false, cancellation);
+        return remainsCancelableUntilUiCompletion
+               && !_uploadInProgress
+               && _uploadCancellation == null
+               && _uploadBugReport.Text == "上传问题包";
     }
 
     private void OnUploadDialogClosed(BugReportUploadDialog dialog)

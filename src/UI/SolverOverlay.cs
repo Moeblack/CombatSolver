@@ -88,6 +88,8 @@ internal static class SolverOverlay
         => _summaryText is { FitContent: true, AutowrapMode: TextServer.AutowrapMode.WordSmart };
     internal static bool UploadProgressConfiguredForTesting
         => _settingsPanel?.UploadProgressConfiguredForTesting == true;
+    internal static bool ExerciseUploadCompletionTransitionForTesting()
+        => _settingsPanel?.ExerciseUploadCompletionTransitionForTesting() == true;
 
     public static void Show(Node host, string text)
     {

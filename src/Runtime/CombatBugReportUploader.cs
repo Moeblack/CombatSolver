@@ -31,7 +31,14 @@ internal static class CombatBugReportUploader
     // 仅用于过滤扫描器和误触的公共流量，不是访问控制。
     private const string UploadToken = "9d61747056101b511150372adcf98bf61aa49394803dcdd4";
 
-    private static readonly HttpClient Client = new() { Timeout = TimeSpan.FromMinutes(2) };
+    private static readonly HttpClientHandler ProductionHandler = new() { UseProxy = false };
+    private static readonly HttpClient Client = new(ProductionHandler)
+    {
+        Timeout = TimeSpan.FromMinutes(2),
+    };
+
+    internal static bool ProductionTransportUsesDirectConnectionForTesting
+        => !ProductionHandler.UseProxy;
 
     public static Task<CombatBugReportUploadReceipt> UploadAsync(
         string zipPath,
