@@ -49,6 +49,7 @@ public static class Entry
         patcher.RegisterPatch<RitsuEmptyCardTypeFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyEnergyContributorFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyEnergyCostFastPathPatch>();
+        patcher.RegisterPatch<BaseLibCloneConcurrencyPatch>();
         patcher.RegisterPatch<UnattendedTestIsolationPatch>();
         patcher.RegisterPatch<UnattendedHeadlessFtuePatch>();
         RitsuLibFramework.ApplyRequiredPatcher(patcher, DisableMod);
