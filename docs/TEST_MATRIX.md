@@ -8,6 +8,10 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `POST021-SMARTFORMAT-DIRECT-PATCH-ATTEMPT` | 失败实验，已撤回 | `LocManager.SmartFormat` 含异常过滤器，Harmony 无法生成 Prefix/Finalizer 或 Prefix-only 改写，CombatSolver patch 整体回滚；runId `f15cebdaa235481d970942bbdf5c7232`、`b8f16a2de9ea4779a738604ab8a247c9`、`0e0f3425cc104417bdf083ccf6cdcca0`，不计回归通过 | 2026-08-30 |
+| `POST021-POWER-DYNAMIC-WARMUP-SMOKE` | 通过 | 主线程物化与 Power 惰性变量 guard 正常加载；铁甲战士首回合自动结束 1 HP 小爬虫战斗，没有 patch 回滚。runId `8b4446b6e4a34fa9b68bcdbd971441af` | 2026-08-30 |
+| `POST021-INFESTED-PRISM-SMARTFORMAT-DOP4` | 通过 | 从玩家包恢复受感染棱镜战前存档、手牌与 RNG；DOP4 短搜约 `2976.8 ms` 返回 5 个可执行动作和第 4 回合路线，没有集合并发异常。runId `cb71d23a0baf4046b65dc0348c355041` | 2026-08-30 |
+| `POST021-POWER-DYNAMIC-DOP1-DOP2` | 通过 | 固定长线根比较 DOP1/DOP2；动作、选择、评分、展开、转移、全部非时序剪枝、快照、continuation 与回合标注一致。runId `614d4ac8af3749cd92b9676662956dae` | 2026-08-30 |
 | `POST021-BASELIB-PARALLEL-ENCHANTED-TERROR-EEL` | 通过 | 完整加载 BaseLib `3.4.5`，从玩家包恢复骇鳗首回合手牌、牌序、迅捷生存者、螺旋防御与 RNG；DOP4 短搜正常返回第 8 回合可执行路线，没有重复键异常。runId `ad3c8c31ef054a459a3f27dc9c45b16f` | 2026-08-30 |
 | `POST021-BASELIB-ENCHANTED-DOP1-DOP2-EQUIVALENCE` | 通过 | 同一附魔牌根在 BaseLib 完整加载时比较 DOP1/DOP2；动作、选择、评分、展开、转移、非时序剪枝、快照、continuation 与回合标注一致。runId `258ec69dbc1b45c8bb6afa809623f4b6` | 2026-08-30 |
 | `POST021-BASELIB-PARALLEL-ENCHANTED-TERROR-EEL-FULL-AUTO` | 通过 | 玩家包根以 DOP4、Instant/0 秒完成整场自动部署，第 8 回合结束，计划外重算 `0`，没有重复键异常。runId `75cbc36d31d045778a72fa3acf60c080` | 2026-08-30 |

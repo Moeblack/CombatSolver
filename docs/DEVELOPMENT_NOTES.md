@@ -4,13 +4,18 @@
 > 本文是项目的持续记录。每次改变搜索语义、评分、模拟覆盖、性能策略、UI 或测试方式时，都应同步更新对应章节和文末变更记录。  
 > “未来构想”均不是已经实现的功能。
 
-## 下一版本（版本号待定，开发中）：BaseLib 并行克隆稳定性
+## 下一版本（版本号待定，开发中）：并行克隆与 Power 显示变量稳定性
 
 - `combatsolver-reports-20260830-150924.zip` 中的五份报告不是五个独立缺陷。四份骇鳗与一份永世沙漏都运行 `CombatSolver 0.21.0 + BaseLib 3.4.5`，在 DOP2/4 克隆带迅捷或螺旋附魔的共享卡牌状态时抛出同一 `ConditionalWeakTable.Add` 重复键异常。
 - BaseLib 的克隆扩展在首次读取模型键时使用非原子的“先查后加”。不同 worker 同时写时复制同一张附魔牌，会并发克隆同一个附魔模型并争用该弱表；异常位置随调度落在不同回合和卡牌，但调用链一致。该问题由 `0.21.0` 并行展开暴露，不是骇鳗、永世沙漏或具体卡牌的战斗语义错误。
 - Runtime 新增窄并发边界：只在后台模拟作用域且 BaseLib 克隆扩展存在时，串行执行原版 `AbstractModel.MutableClone` 及其第三方扩展；候选物化的其他部分、搜索评估、剪枝和 coordinator 提交继续按原并行设计运行。锁由 Harmony finalizer 释放，原始异常继续传播，不增加吞错或默认值。
 - 玩家包的首个 `combat_start` 检查点位于抽牌和补能之前，用它建立的两次夹具只得到 `0` 个动作，明确不计通过。改用同一包的 `001-search_request_AutoTurnStart` 后，DOP4 短搜返回第 8 回合可执行路线，runId `ad3c8c31ef054a459a3f27dc9c45b16f`；同根 DOP1/DOP2 完整政策等价，runId `258ec69dbc1b45c8bb6afa809623f4b6`；DOP4 完整自动战斗在第 8 回合结束且计划外重算 `0`，runId `75cbc36d31d045778a72fa3acf60c080`。
 - “似乎 AI 不会打交锋”的同包描述没有形成第二个缺陷：修复并发失败后，最终路线明确在第 9 回合规划交锋；本轮不修改交锋评分或候选政策。
+- `combatsolver-reports-20260830-152821.zip` 共含 18 份问题包，其中 10 份构成新的同根主类：6 份受感染棱镜、2 份缩小甲虫和 2 份蔓生爬虫都出现 `Collection was modified`。外层导出还混有 8 份首个异常不同的旧问题，本轮没有展开，也不计为已修。
+- 两份代表日志显示，并行 worker 在 `PowerModel.DeepCloneFields` 中首次读取尚未物化的显示变量；活力火花会由 `CanonicalVars` 进入游戏共享的 `LocManager.SmartFormat`，蔓生爬虫也在同一格式化器及对象池链上抛出集合修改或空引用。这是主线程根捕获遗漏了 Power 惰性显示状态，不是三个遭遇的专用语义，也不是上一批 BaseLib 弱表重复键。
+- 根捕获现在先在主线程物化所有规范 Power 与当前战斗 Power 的 `DynamicVars`；搜索模拟若仍尝试惰性创建显示变量会立即报告具体 Power，保证 worker 不承担本地化。没有给全局格式化器加锁，也没有为失败格式化提供默认值。
+- 第一轮尝试直接给 `LocManager.SmartFormat` 加 Harmony 锁，因原方法含异常过滤器而触发 `Incorrect code generation for exception block`，CombatSolver patch 整体回滚；相关 runId `f15cebdaa235481d970942bbdf5c7232`、`b8f16a2de9ea4779a738604ab8a247c9`、`0e0f3425cc104417bdf083ccf6cdcca0` 均为失败或超时证据，该设计已完全删除。
+- 最终实现通过 Release 构建和结构门禁；基础启动 runId `8b4446b6e4a34fa9b68bcdbd971441af`，受感染棱镜玩家包 DOP4 短搜 runId `cb71d23a0baf4046b65dc0348c355041`，固定根 DOP1/DOP2 完整政策等价 runId `614d4ac8af3749cd92b9676662956dae`。按用户要求没有逐份跑完 18 个包，也没有执行本场完整自动战斗。
 
 ## 0.21.0：多核搜索、抽牌费用与眩晕续接
 

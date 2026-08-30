@@ -92,6 +92,8 @@ internal sealed class CombatRootSnapshot
             throw new InvalidOperationException("Combat root snapshot must be captured on the main thread.");
         Stopwatch stopwatch = Stopwatch.StartNew();
 
+        PowerDynamicVarWarmup.EnsureMaterialized(state);
+
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("找不到本地玩家。");
         PlayerCombatState playerState = player.PlayerCombatState

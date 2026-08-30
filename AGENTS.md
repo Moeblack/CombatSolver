@@ -58,6 +58,8 @@ CombatSolver 是《杀戮尖塔 2》的单人战斗路线求解器 Mod，使用 
 - `src/Runtime/PlayerTurnSetupPatches.cs`：首回合选牌后搜索、全自动后续回合的计划重放，以及单步执行在下一回合原生选牌页交还玩家并允许执行/全自动入口接管既有选择。
 - `src/Runtime/NativeChoiceRuntime.cs`：原生选牌页面观察与计划卡牌逐实例匹配；不枚举搜索分支。
 - `src/Runtime/BaseLibCloneConcurrencyPatch.cs`：只在后台求解且 BaseLib 克隆扩展已加载时，串行保护原版 `MutableClone` 的第三方扩展段；不得扩大成整段搜索串行化。
+- `src/Runtime/PowerDynamicVarWarmup.cs`：主线程捕获根状态时物化规范 Power 与当前战斗 Power 的显示变量，禁止把惰性本地化工作带入 worker。
+- `src/Runtime/PowerDynamicVarMaterializationGuardPatch.cs`：搜索模拟期间禁止惰性创建 Power 显示变量；命中表示根捕获缺少必要实例的物化。
 
 ### 4.2 Search
 

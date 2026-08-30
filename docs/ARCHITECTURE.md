@@ -29,6 +29,8 @@ Entry / turn hooks
 | `src/Runtime/CombatRootSnapshot.cs` | 主线程捕获完整预测根，比较捕获前后 live 状态，并向 worker 提供 Fork 根 | worker 惰性读取 live 战斗 |
 | `src/Runtime/ContinuationStamp.cs` | 跨回合 live/predicted 状态文本、首个差异与完整差异 | Beam 状态去重 |
 | `src/Runtime/BaseLibCloneConcurrencyPatch.cs` | 后台求解且 BaseLib 克隆扩展存在时，串行保护原版 `MutableClone` 的第三方扩展段 | 整段搜索串行化、BaseLib 业务语义与候选政策 |
+| `src/Runtime/PowerDynamicVarWarmup.cs` | 主线程根捕获时物化规范 Power 与当前战斗 Power 的显示变量 | 搜索评分、Power 语义与 worker 本地化 |
+| `src/Runtime/PowerDynamicVarMaterializationGuardPatch.cs` | 搜索模拟惰性创建 Power 显示变量时立即报告根捕获缺失 | Power 语义、显示内容与搜索阶段串行化 |
 | `src/Runtime/SearchGcPolicy.cs` | 战斗级 No-GC、搜索内后台全代回收续搜、战斗结束后台回收及新搜索入口协调 | Beam 剪枝、候选评分与模拟语义 |
 | `src/Runtime/SearchMemoryPressureSignal.cs` | 将 Runtime 的进程分配边界和回收入口注入搜索；不让 Search 直接操作 GC 模式 | 设置读取与搜索评分 |
 | `src/Runtime/SolverSettings.cs` | 持久化性能、执行和搜索并行度设置，并在主线程捕获不可变 snapshot | 搜索期读取全局设置 |
