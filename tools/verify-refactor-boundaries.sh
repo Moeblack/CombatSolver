@@ -493,6 +493,10 @@ done
 bug_report_exporter_path="$repository_root/src/Runtime/CombatBugReportExporter.cs"
 bug_report_uploader_path="$repository_root/src/Runtime/CombatBugReportUploader.cs"
 solver_settings_panel_path="$repository_root/src/UI/SolverSettingsPanel.cs"
+solver_settings_general_path="$repository_root/src/UI/SolverSettingsPanel.General.cs"
+solver_settings_performance_path="$repository_root/src/UI/SolverSettingsPanel.Performance.cs"
+solver_settings_bug_reports_path="$repository_root/src/UI/SolverSettingsPanel.BugReports.cs"
+solver_settings_controls_path="$repository_root/src/UI/SolverSettingsPanel.Controls.cs"
 while IFS=$'\t' read -r path text; do
     require_fixed "$path" "$text" 'missing bug-report ownership boundary'
 done <<EOF
@@ -505,11 +509,11 @@ $bug_report_uploader_path	HttpCompletionOption.ResponseHeadersRead
 $bug_report_uploader_path	CancellationToken requestCancellationToken
 $bug_report_uploader_path	ReadServerReceipt(body)
 $bug_report_uploader_path	UseProxy = false
-$solver_settings_panel_path	private readonly ProgressBar _uploadProgress;
-$solver_settings_panel_path	private volatile bool _uploadInProgress;
-$solver_settings_panel_path	Interlocked.Exchange(ref _uploadCompletion, completion)
-$solver_settings_panel_path	TryApplyUploadCompletion()
-$solver_settings_panel_path	等待服务器确认
+$solver_settings_bug_reports_path	private ProgressBar _uploadProgress = null!;
+$solver_settings_bug_reports_path	private volatile bool _uploadInProgress;
+$solver_settings_bug_reports_path	Interlocked.Exchange(ref _uploadCompletion, completion)
+$solver_settings_bug_reports_path	TryApplyUploadCompletion()
+$solver_settings_bug_reports_path	等待服务器确认
 EOF
 forbid_fixed "$bug_report_uploader_path" 'using Godot' 'uploader must not own Godot UI state:'
 
@@ -525,7 +529,19 @@ $search_completion_notifier_path	GetWindowThreadProcessId(foreground, out uint p
 $search_completion_notifier_path	ShellNotifyIcon(NotifyIconDelete, ref data)
 $repository_root/src/Runtime/SolverController.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)
 $repository_root/src/Runtime/PlayerTurnSetupPatches.cs	SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed)
-$solver_settings_panel_path	CreateSearchCompletionNotificationModeInput()
+$solver_settings_general_path	CreateSearchCompletionNotificationPolicyInput()
+EOF
+
+while IFS=$'\t' read -r path text; do
+    require_fixed "$path" "$text" 'missing settings panel ownership boundary'
+done <<EOF
+$solver_settings_panel_path	TrySelectPage(SettingsPage page)
+$solver_settings_panel_path	CommitPending()
+$solver_settings_general_path	CreateGeneralPage()
+$solver_settings_performance_path	CreatePerformancePage()
+$solver_settings_performance_path	SetAdvancedParametersExpanded
+$solver_settings_bug_reports_path	CreateBugReportsPage()
+$solver_settings_controls_path	CreatePageScroll(Control content)
 EOF
 
 mirror_registry_path="$repository_root/src/Engine/Common/Mirrors/MethodMirrorRegistry.cs"

@@ -22,7 +22,14 @@ internal sealed partial class UnattendedTestRunner
         if (!SolverOverlay.UploadProgressConfiguredForTesting)
             throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
         if (!SolverOverlay.SearchCompletionNotificationSettingsConfiguredForTesting)
-            throw new InvalidOperationException("搜索结束通知的开关或通知时机没有按持久化设置加载。");
+            throw new InvalidOperationException("搜索结束通知三态选项没有按持久化设置加载。");
+        if (!SolverOverlay.SettingsTabsConfiguredForTesting
+            || !SolverOverlay.ExerciseSettingsTabSwitchingForTesting())
+        {
+            throw new InvalidOperationException("设置页没有按常规、性能、反馈三页独立切换。");
+        }
+        if (!SolverOverlay.ExerciseSearchCompletionNotificationPolicyForTesting())
+            throw new InvalidOperationException("搜索结束通知三态选项不能无损回读旧设置字段。");
         SolverSettingsData notificationDefaults = new();
         if (!notificationDefaults.SearchCompletionNotificationsEnabled
             || notificationDefaults.SearchCompletionNotificationMode

@@ -10,6 +10,7 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `SETTINGS-TABS-LIFECYCLE-NEXT` | 通过（headless） | 实际创建设置控件并验证“常规 / 性能 / 反馈”三页独立切换；通知“关闭 / 仅后台 / 始终”无损回读旧字段，预设重载不误判自定义，上传成功/取消终态和控制器停止/恢复链路同时通过。第 1 回合结束，runId `852a0f03f4724d6598212e309d11a2b4`；不替代人工视觉检查。 | 2026-08-30 |
 | `NOTIFICATION-SETTINGS-LIFECYCLE-NEXT` | 通过（headless） | 验证通知默认开启且默认为“仅游戏不在前台”，关闭、仅后台和始终通知的决策正确；设置 UI 按持久化值加载。用户停止搜索产生一次结束通知请求，headless 不进入 Windows 原生调用。runId `99e510b870fc4ad6ab0611ce36f8f3b1` | 2026-08-30 |
 | `WINDOWS-NATIVE-NOTIFICATION-ENTRYPOINT-NEXT` | 通过（系统声音量未检测） | 可见游戏日志确认旧入口连续 5 次抛出 `EntryPointNotFoundException`；显式绑定 `Shell_NotifyIconW` / `LoadIconW` 后，独立 Win32 窗口按与 Mod 相同的结构提交通知，返回 `shown=True / win32_error=0`。通知未设置静音标志，实际音量与是否播放由 Windows 通知策略决定。 | 2026-08-30 |
 
@@ -626,6 +627,7 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-SCRAPE-
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-WHISTLE-STUN-FOLLOW-UP-FINAL -CharacterId DEFECT -EncounterId THE_INSATIABLE_BOSS -EnemyCurrentHp 281 -MonsterMoveChecksPath coverage\unattended\whistle-stun-follow-up-0201.json -TimeoutSeconds 120 -KeepGameOpen
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-BRAND-POST-CHOICE-POWER-FORK-FINAL -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\brand-post-choice-power-fork-0201.json -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId QOL-CONTROLLER-STOP-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId SETTINGS-TABS-LIFECYCLE-NEXT -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-DIRECT-STATE-OWNERSHIP-NEXT -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-PANEL-MAILBOX-LIFECYCLE-NEXT -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete

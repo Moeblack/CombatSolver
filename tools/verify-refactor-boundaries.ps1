@@ -632,6 +632,10 @@ foreach ($rendererPath in $overlayRendererPaths) {
 $bugReportExporterPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportExporter.cs"
 $bugReportUploaderPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportUploader.cs"
 $solverSettingsPanelPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.cs"
+$solverSettingsGeneralPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.General.cs"
+$solverSettingsPerformancePath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.Performance.cs"
+$solverSettingsBugReportsPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.BugReports.cs"
+$solverSettingsControlsPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.Controls.cs"
 foreach ($check in @(
     @{ Path = $bugReportExporterPath; Text = "private static readonly BlockingCollection<Action> BackgroundOperations = new();" },
     @{ Path = $bugReportExporterPath; Text = "QueueCheckpointWrite(session, capture);" },
@@ -642,11 +646,11 @@ foreach ($check in @(
     @{ Path = $bugReportUploaderPath; Text = "CancellationToken requestCancellationToken" },
     @{ Path = $bugReportUploaderPath; Text = "ReadServerReceipt(body)" },
     @{ Path = $bugReportUploaderPath; Text = "UseProxy = false" },
-    @{ Path = $solverSettingsPanelPath; Text = "private readonly ProgressBar _uploadProgress;" },
-    @{ Path = $solverSettingsPanelPath; Text = "private volatile bool _uploadInProgress;" },
-    @{ Path = $solverSettingsPanelPath; Text = "Interlocked.Exchange(ref _uploadCompletion, completion)" },
-    @{ Path = $solverSettingsPanelPath; Text = "TryApplyUploadCompletion()" },
-    @{ Path = $solverSettingsPanelPath; Text = "等待服务器确认" })) {
+    @{ Path = $solverSettingsBugReportsPath; Text = "private ProgressBar _uploadProgress = null!;" },
+    @{ Path = $solverSettingsBugReportsPath; Text = "private volatile bool _uploadInProgress;" },
+    @{ Path = $solverSettingsBugReportsPath; Text = "Interlocked.Exchange(ref _uploadCompletion, completion)" },
+    @{ Path = $solverSettingsBugReportsPath; Text = "TryApplyUploadCompletion()" },
+    @{ Path = $solverSettingsBugReportsPath; Text = "等待服务器确认" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing bug-report ownership boundary '$($check.Text)'")
     }
@@ -665,9 +669,22 @@ foreach ($check in @(
     @{ Path = $searchCompletionNotifierPath; Text = "ShellNotifyIcon(NotifyIconDelete, ref data)" },
     @{ Path = $controllerPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale)" },
     @{ Path = $turnSetupPath; Text = "SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed)" },
-    @{ Path = $solverSettingsPanelPath; Text = "CreateSearchCompletionNotificationModeInput()" })) {
+    @{ Path = $solverSettingsGeneralPath; Text = "CreateSearchCompletionNotificationPolicyInput()" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing search completion notification boundary '$($check.Text)'")
+    }
+}
+
+foreach ($check in @(
+    @{ Path = $solverSettingsPanelPath; Text = "TrySelectPage(SettingsPage page)" },
+    @{ Path = $solverSettingsPanelPath; Text = "CommitPending()" },
+    @{ Path = $solverSettingsGeneralPath; Text = "CreateGeneralPage()" },
+    @{ Path = $solverSettingsPerformancePath; Text = "CreatePerformancePage()" },
+    @{ Path = $solverSettingsPerformancePath; Text = "SetAdvancedParametersExpanded" },
+    @{ Path = $solverSettingsBugReportsPath; Text = "CreateBugReportsPage()" },
+    @{ Path = $solverSettingsControlsPath; Text = "CreatePageScroll(Control content)" })) {
+    if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
+        $violations.Add("$($check.Path): missing settings panel ownership boundary '$($check.Text)'")
     }
 }
 
