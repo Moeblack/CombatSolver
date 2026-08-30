@@ -220,20 +220,31 @@ internal sealed partial class SolverSettingsPanel
             track,
             SolverUiTokens.Radius.Pill,
             horizontalPadding: 0,
-            verticalPadding: 0));
-        slider.AddThemeStyleboxOverride("grabber_area", SolverUiTokens.CreateBox(
-            Colors.Transparent,
-            Colors.Transparent,
-            0,
-            horizontalPadding: 7,
-            verticalPadding: 0,
+            verticalPadding: 3,
             borderWidth: 0));
-        Texture2D grabber = SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.Accent, 14);
+        slider.AddThemeStyleboxOverride("grabber_area", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.Accent,
+            SolverUiTokens.Palette.Accent,
+            SolverUiTokens.Radius.Pill,
+            horizontalPadding: 0,
+            verticalPadding: 3,
+            borderWidth: 0));
+        slider.AddThemeStyleboxOverride("grabber_area_highlight", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.AccentHover,
+            SolverUiTokens.Palette.AccentHover,
+            SolverUiTokens.Radius.Pill,
+            horizontalPadding: 0,
+            verticalPadding: 3,
+            borderWidth: 0));
+        slider.AddThemeConstantOverride("center_grabber", 1);
+        Texture2D grabber = SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.Accent, 16);
         slider.AddThemeIconOverride("grabber", grabber);
-        slider.AddThemeIconOverride("grabber_highlight", grabber);
+        slider.AddThemeIconOverride(
+            "grabber_highlight",
+            SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.AccentHover, 16));
         slider.AddThemeIconOverride(
             "grabber_disabled",
-            SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.TextMuted, 14));
+            SolverUiTokens.CreateCircleTexture(SolverUiTokens.Palette.TextMuted, 16));
     }
 
     private static void AddBasicRow(
