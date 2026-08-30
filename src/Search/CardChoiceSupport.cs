@@ -1,4 +1,5 @@
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using CombatSolver.Engine.Common;
@@ -439,12 +440,17 @@ internal static partial class CardChoiceSupport
 
     internal static double CardValue(CardModel card)
     {
-        double damage = card.DynamicVars.ContainsKey("Damage") ? (double)card.DynamicVars.Damage.BaseValue : 0d;
-        double block = card.DynamicVars.ContainsKey("Block") ? (double)card.DynamicVars.Block.BaseValue : 0d;
-        double draw = card.DynamicVars.ContainsKey("Cards") ? (double)card.DynamicVars.Cards.BaseValue : 0d;
+        double damage = DynamicVarBaseValue(card.DynamicVars, "Damage");
+        double block = DynamicVarBaseValue(card.DynamicVars, "Block");
+        double draw = DynamicVarBaseValue(card.DynamicVars, "Cards");
         double power = card.Type == CardType.Power ? 8d : 0d;
         return damage + block * 0.8d + draw * 3d + power;
     }
+
+    internal static double DynamicVarBaseValue(DynamicVarSet dynamicVars, string key)
+        => dynamicVars.TryGetValue(key, out DynamicVar? dynamicVar)
+            ? (double)dynamicVar.BaseValue
+            : 0d;
 
     internal static string ChoiceCardKey(CardModel card)
     {

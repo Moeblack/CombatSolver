@@ -385,10 +385,10 @@ internal static class SearchGcPolicy
 
     private static async Task<GCMemoryInfo> CollectGeneration2InBackgroundAsync()
     {
-        long backgroundIndexBefore = GC.GetGCMemoryInfo(GCKind.Background).Index;
-        long fullBlockingIndexBefore = GC.GetGCMemoryInfo(GCKind.FullBlocking).Index;
+        int generation = GC.MaxGeneration;
+        int collectionCountBefore = GC.CollectionCount(generation);
         GC.Collect(
-            GC.MaxGeneration,
+            generation,
             GCCollectionMode.Forced,
             blocking: false,
             compacting: false);
@@ -396,14 +396,8 @@ internal static class SearchGcPolicy
         long deadline = Environment.TickCount64 + ReclaimCompletionTimeoutMilliseconds;
         while (true)
         {
-            GCMemoryInfo background = GC.GetGCMemoryInfo(GCKind.Background);
-            GCMemoryInfo fullBlocking = GC.GetGCMemoryInfo(GCKind.FullBlocking);
-            if (background.Index > backgroundIndexBefore || fullBlocking.Index > fullBlockingIndexBefore)
-            {
-                return background.Index > fullBlocking.Index
-                    ? background
-                    : fullBlocking;
-            }
+            if (GC.CollectionCount(generation) > collectionCountBefore)
+                return GC.GetGCMemoryInfo();
             if (Environment.TickCount64 >= deadline)
             {
                 throw new TimeoutException(

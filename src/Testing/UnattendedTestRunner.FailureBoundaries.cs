@@ -1,6 +1,7 @@
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
@@ -46,6 +47,21 @@ internal sealed partial class UnattendedTestRunner
         }
         if (computed.CalculateCalled)
             throw new InvalidOperationException("未知计算型动态变量仍调用了原生求值器。");
+
+        bool scoreEvaluatorCalled = false;
+        ComputedDynamicVar computedDamage = new(
+            "Damage",
+            17m,
+            _ =>
+            {
+                scoreEvaluatorCalled = true;
+                return 99m;
+            });
+        DynamicVarSet computedVars = new([computedDamage]);
+        if (CardChoiceSupport.DynamicVarBaseValue(computedVars, "Damage") != 17d)
+            throw new InvalidOperationException("选牌估值没有读取计算型动态变量的基础值。");
+        if (scoreEvaluatorCalled)
+            throw new InvalidOperationException("选牌估值错误调用了计算型动态变量的实机求值器。");
 
         IncompatibleGameplayModException incompatible = new(
             "Watcher",
