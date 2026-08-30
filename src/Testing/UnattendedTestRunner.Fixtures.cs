@@ -32,7 +32,8 @@ internal sealed partial class UnattendedTestRunner
 
         using JsonDocument document = JsonDocument.Parse(await File.ReadAllTextAsync(snapshotPath));
         JsonElement root = document.RootElement;
-        LoadRunRng(runState, root);
+        if (root.TryGetProperty("rng", out _))
+            LoadRunRng(runState, root);
         JsonElement savedPlayer = root.GetProperty("players")[0];
 
         CardModel[] startingDeck = player.Deck.Cards.ToArray();
