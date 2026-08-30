@@ -290,6 +290,7 @@ internal sealed class UnattendedMonsterMoveCheck
     public string? LiveEndTurnRiskCardId { get; init; }
     public string LiveEndTurnRiskChoiceSourceId { get; init; } = string.Empty;
     public string[] LiveEndTurnRiskChoiceCardIds { get; init; } = [];
+    public string? LiveEndTurnRiskKnowledgeChoiceCardId { get; init; }
     public UnattendedPowerInjection? PowerBeforeMove { get; init; }
     public UnattendedPowerInjection[] PowersBeforeMove { get; init; } = [];
     public UnattendedPowerInjection[] PowersAfterMove { get; init; } = [];

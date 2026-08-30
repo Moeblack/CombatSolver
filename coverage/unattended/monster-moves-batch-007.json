@@ -91,6 +91,7 @@
   {
     "monsterId": "KnowledgeDemon",
     "moveId": "PONDER_MOVE",
+    "liveEndTurnRiskKnowledgeChoiceCardId": "MIND_ROT",
     "expectedPlayerHpLoss": 11,
     "expectedEnemyHpGain": 30,
     "expectedPlayerPowers": {

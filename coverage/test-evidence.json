@@ -1377,11 +1377,11 @@
   },
   "MONSTER-MOVES-BATCH-007": {
     "status": "Passed",
-    "level": "VisibleGameProcessDifferentialBatchWithHealing",
-    "procedure": "单次启动真实可见游戏，进入 LivingFogNormal 并召唤同族信徒、同族神官和知识恶魔，连续强制 10 个行动。每项运行生产预测和真实 PerformMove 差分；除既有生命、格挡、Power、牌堆与全场敌人格挡外，思考额外断言目标怪物生命变化。",
-    "expected": "同族信徒造成 5、2×2 伤害并获得 2 力量；同族神官分别造成 8 伤害加 1 脆弱、8 伤害加 1 虚弱、3×3 伤害并获得 2 力量；知识恶魔造成 17、3×8、11 伤害，思考随后治疗 30 并获得 2 力量。",
-    "observed": "runId 5c3ca152159a44858940d7f6fed0515c 返回 Passed，completedChecks 完整列出 10 项；日志含 monster_move_differential_1_of_10 至 10_of_10，总耗时约 18.6 秒。",
-    "evidence": "coverage/unattended/monster-moves-batch-007.json；user://combat_solver_test_result.json；同一 runId 的 Godot/CombatSolver 日志，验证日期 2026-08-20。"
+    "level": "VisibleGameProcessDifferentialBatchWithHealingAndLiveRiskChoice",
+    "procedure": "单次启动真实可见游戏，进入 LivingFogNormal 并召唤同族信徒、同族神官和知识恶魔，连续强制 10 个行动。每项运行生产预测和真实 PerformMove 差分；除既有生命、格挡、Power、牌堆与全场敌人格挡外，思考额外断言目标怪物生命变化。最后强制知识恶魔诅咒行动，向实时结束回合战损复核提供 MIND_ROT 计划。",
+    "expected": "同族信徒造成 5、2×2 伤害并获得 2 力量；同族神官分别造成 8 伤害加 1 脆弱、8 伤害加 1 虚弱、3×3 伤害并获得 2 力量；知识恶魔造成 17、3×8、11 伤害，思考随后治疗 30 并获得 2 力量；实时战损复核按敌方回合来源消费 MIND_ROT 计划并把诅咒计数增加 1。",
+    "observed": "runId 901066cdbaaa41329876325cd8a06ad5 返回 Passed，completedChecks 完整列出 10 项；实时战损复核完成知识恶魔计划选择，未留下普通选牌游标项。",
+    "evidence": "coverage/unattended/monster-moves-batch-007.json；隔离 headless 的 combat_solver_test_result.json；同一 runId 的 Godot/CombatSolver 日志，验证日期 2026-08-30。"
   },
   "MONSTER-MOVES-BATCH-008": {
     "status": "Passed",

@@ -9,9 +9,12 @@ internal sealed partial class BugReportUploadDialog : CanvasLayer
     private readonly PanelContainer _dialogPanel;
     private readonly TextEdit _description;
     private bool _dragging;
+    private bool _closed;
+    private bool _truncatingDescription;
     private Vector2 _dragOffset;
 
     public event Action<string>? UploadConfirmed;
+    public event Action? DialogClosed;
 
     public BugReportUploadDialog(string contactQq)
     {
@@ -57,16 +60,8 @@ internal sealed partial class BugReportUploadDialog : CanvasLayer
         };
         root.AddChild(divider);
 
-        RichTextLabel notice = SolverUiTokens.CreateRichText(SolverUiTokens.Type.Caption);
-        notice.FitContent = true;
-        notice.MouseFilter = Control.MouseFilterEnum.Ignore;
-        notice.Text =
-            $"[color={SolverUiTokens.Palette.DangerHex}]问题包含日志、存档和截图，可能带有 Steam 账号标识；" +
-            "点击“确认上传”即上传到开发者服务器。[/color]";
-        root.AddChild(notice);
-
         root.AddChild(SolverUiTokens.CreateLabel(
-            "问题描述（选填，简述现象和复现步骤）",
+            $"问题描述（选填，最多 {CombatBugReportDescription.MaximumPlayerDescriptionCharacters} 字）",
             SolverUiTokens.Type.Caption,
             SolverUiTokens.Palette.TextSecondary));
         _description = new TextEdit
@@ -75,6 +70,7 @@ internal sealed partial class BugReportUploadDialog : CanvasLayer
             WrapMode = TextEdit.LineWrappingMode.Boundary,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
+        _description.TextChanged += OnDescriptionTextChanged;
         _description.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
         _description.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         _description.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
@@ -117,9 +113,10 @@ internal sealed partial class BugReportUploadDialog : CanvasLayer
         };
         buttons.AddChild(confirm);
         root.AddChild(buttons);
-
-        TaskHelper.RunSafely(CenterOnScreenAsync());
     }
+
+    public override void _Ready()
+        => TaskHelper.RunSafely(CenterOnScreenAsync());
 
     private async Task CenterOnScreenAsync()
     {
@@ -183,6 +180,26 @@ internal sealed partial class BugReportUploadDialog : CanvasLayer
         header.AddChild(close);
 
         return header;
+    }
+
+    public override void _ExitTree()
+    {
+        if (_closed)
+            return;
+        _closed = true;
+        DialogClosed?.Invoke();
+    }
+
+    private void OnDescriptionTextChanged()
+    {
+        if (_truncatingDescription
+            || _description.Text.Length <= CombatBugReportDescription.MaximumPlayerDescriptionCharacters)
+        {
+            return;
+        }
+        _truncatingDescription = true;
+        _description.Text = _description.Text[..CombatBugReportDescription.MaximumPlayerDescriptionCharacters];
+        _truncatingDescription = false;
     }
 
     private void Close() => QueueFree();

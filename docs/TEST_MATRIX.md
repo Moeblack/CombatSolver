@@ -1,10 +1,10 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.19.0`（2026-08-30）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.17`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant` 出牌与 `0` 额外停顿。
+> 基线：CombatSolver `0.20.0`（2026-08-30）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
-## 下一版本（开发中）：跨平台原生入口、Linux headless 与多核搜索
+## 下一版本（开发中）：多核搜索与内存优化
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
@@ -14,6 +14,11 @@
 | `MULTICORE-EARRING-NESTED-CHOICE-DOP2` | 通过 | 工具盒形成首回合多根，低语耳环连续自动打出高密度 `SURVIVOR` 并消费嵌套弃牌选择；精确原版状态检查通过，搜索记录 `4 waves / 8 items / max concurrency 2`。runId `f577be1a8e0a4ebb84aa115d3ab28734` | 2026-08-30 |
 | `MULTICORE-NIBBITS-DOP4` | 通过 | 四条 lane 完成固定双小啃兽搜索，仍为 `573 / 2759`、同一路线与全部剪枝指标；并行遥测 `159 waves / 572 items / max concurrency 4`。runId `54243577aa984e8eb68f2d242a216eb9` | 2026-08-30 |
 | `MULTICORE-INCREMENTAL-FORCED-SERIAL` | 通过 | 请求 DOP4 并开启严格增量回放；首轮完整结果的 `parallel_waves / work_items / max_concurrency` 均为 `0`，逐转移回放一致，第 5 回合结束且计划外重算 `0`。runId `96b7d9fdfbb245d68f4effefcd748b1e` | 2026-08-30 |
+
+## 0.20.0：在线问题包、跨平台测试与选牌修复
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
 | `LINUX-HEADLESS-INSTANT-AB` | 通过 | 同一 PID `66703` 先后运行 `Normal / Instant / Normal`；内部耗时分别为 `7098.0 / 2917.7 / 7064.5 ms`，Instant 稳定节省约 `59%`。三次均应用并恢复测试速度，runId `e8dede980dbb4daab57cc1c6a1d71730`、`8851e4147f9940e2921088474c8c7e5f`、`42148ebf930243b59d9230d2cb68f913` | 2026-08-29 |
 | `LINUX-HEADLESS-REUSE-REGRESSION` | 通过 | 同一 PID 连续通过怪物严格差分、铁甲战士跨回合复用、跨角色切换到星辰、再切回铁甲战士完成精灵药自动战斗；对应 runId `74da3eefb1e841219c5721323dad83d6`、`dbd5cf92f61043b28d38978aa8307a6e`、`8605ff494b604c019323e222f5247314`、`261c9007073d40709a5f388d698063e9`，两项复用场景和完整战斗的计划外重算均为 `0` | 2026-08-29 |
 | `LINUX-HEADLESS-LIFECYCLE` | 通过 | 原生日志为 `N/A (headless) / VRAM 0B`；marker 验证 PID starttime、隔离环境及 DLL/manifest 哈希。无变化复用同一 PID；Release 重建后输出 `UNATTENDED_RESTART reason=mod_changed` 并自动换 PID。失败退出约 `510 ms`，最终进程、marker、临时 RitsuLib 投影均清理 | 2026-08-29 |
@@ -25,6 +30,16 @@
 | `PR6-EMOTION-CHIP-EXTRA-TURN-INTEGRATED` | 通过 | 琥珀灰触发额外回合；当前回合使用放血受伤后，情感芯片的损血窗口在跳过敌方阶段时正确滚动，额外回合开始的充能球被动与原生完整状态一致，实际伤害 `3`。runId `aaa8223a916b4b24b8c2983596010e31` | 2026-08-30 |
 | `TOASTY-FIRST-TURN-USER-BOUNDARY-0190` | 通过 | 烘焙手套原生手牌页显示后开始搜索；计划就绪时仍为 `Selected=0 / CardsPlayed=0`，模拟玩家启动后才确认选择。严格增量/完整回放一致，开启结束回合变差复核后完整自动执行到第 2 回合，计划外重算 `0`。runId `a2a1fd688e71465d9458c5cbb1c743d4` | 2026-08-30 |
 | `TOASTY-PHANTASMAL-BUNDLE-0190` | 通过 | 使用花园幽灵鳗问题包的战前牌组、遗物与 RNG；首回合计划展示时未选牌、未出牌，玩家启动后完整自动执行到第 5 回合。结束回合复核开启，计划外重算 `0`；严格完整回放从同一份首回合准备选择起步。runId `0451b77331a94c96ae507e2ccdb4603a` | 2026-08-30 |
+| `UPLOAD-HARDENING-PR4-FINAL` | 通过 | 真实问题包导出保持完整夹具且移除联系QQ与本机绝对路径；本地假服务验证 multipart 三字段不变、字节进度到 `100%`、非 JSON/数字编号的成功响应回退客户端提交编号、超长描述联网前失败、超长错误响应截断并折叠换行。设置面板同时存在隐藏初始进度条与单实例上传按钮状态。导出/脱敏与上传协议 runId `8a4144cb3a264bb7abf33ea6461ddcb7`；最终 UI/进度状态 runId `c90d6b854c3446ffad4c09b4da1753bf`；最终成功响应兼容矩阵 runId `85861ebc16a04cb09fbd9894bfb3d088` | 2026-08-30 |
+| `UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL` | 通过 | 取代上一条中“任意成功响应回退客户端编号”的旧口径：文件发送完成只显示到 `95%` 并进入“等待服务器确认”，只有反馈编号与实收字节数匹配才确认成功。假服务分别在正文传输中和等待回执时取消，任务均在两秒内结束；无效回执与大小不一致均保留本地包。真实接收服务 test ZIP 返回 HTTP `201`、反馈编号 `9264c0f65854423e8254de5ff5e5449f` 并确认 `259 B`。runId `f328c2f5fe9f4ccca11826bcbb8b1f6c` | 2026-08-30 |
+| `UPLOAD-DIRECT-STATE-OWNERSHIP-NEXT` | 通过 | 正式上传不继承游戏进程中指向失效 `127.0.0.1:7890` 的代理；同一环境下直连 test ZIP 于 `427 ms` 返回 HTTP `201`，反馈编号 `d186e8a6495d4f0291529595667e0a43`，实收 `259 B`。孤立状态转移夹具验证活动态与按钮文字可在同一主线程回调内切回空闲；后续实机证明该全局回调本身可能不被消费，最终实现由下一条面板完成邮箱回归取代。runId `ba1c33c4e68946129314dff1a61928cf` | 2026-08-30 |
+| `UPLOAD-PANEL-MAILBOX-LIFECYCLE-NEXT` | 通过 | 实机已经记录 HTTP `201 / 1,340,897 B` 后仍卡等待，证明全局 dispatcher 未消费上传终态。上传会话改由设置面板完成邮箱独占；成功与取消两条路径都在面板进程中消费终态、收起进度条、释放令牌并恢复空闲按钮，“正在取消…”不再等待搜索 dispatcher。runId `fa5ba87bf06d4dac9c17b052192d0be8` | 2026-08-30 |
+| `KNOWLEDGE-LIVE-END-RISK-BASELINE` | 失败（修复前基线） | 开启结束回合实时战损复核后，知识恶魔敌方回合诅咒计划被放入普通选牌游标；真正提交结束回合前稳定抛出“回合开始仍有 1 个计划选牌没有触发”，随后测试超时。runId `bc12f0e513ec4634b5c2f3dea0f84a66` | 2026-08-30 |
+| `KNOWLEDGE-LIVE-RISK-CHOICE-PHASE-NEXT` | 通过 | `MONSTER-MOVES-BATCH-007` 在既有 10 项严格差分后，额外强制知识恶魔诅咒行动并向实时战损复核提供 `MIND_ROT` 计划；复核按来源和次数消费该计划，诅咒计数精确前进 `1`。runId `901066cdbaaa41329876325cd8a06ad5` | 2026-08-30 |
+| `KNOWLEDGE-LIVE-END-RISK-FIXED` | 通过 | 开启结束回合实时战损复核，首轮路线计划 `MIND_ROT`；提交结束回合后原生页面完成选择、玩家获得对应 Power，计划外重算 `0`。runId `a43e0dc90cad444989efde50a99ba33b` | 2026-08-30 |
+| `KNOWLEDGE-LIVE-END-RISK-INCREMENTAL` | 通过 | 与上一项相同的实时战损复核路径同时开启严格增量校验；初始搜索、完整回放、结束回合后的原生 `MIND_ROT` 选择一致，计划外重算 `0`。runId `b199bf29f0054c1789e1a2c2d2886435` | 2026-08-30 |
+| `KNOWLEDGE-ANGER-BUNDLE-FIXED` | 通过 | 从铁甲战士问题包恢复战前存档、精确牌堆和 RNG；完整自动执行到第 6 回合结束，实机打出愤怒并通过两次知识恶魔原生选牌，计划外重算 `0`。runId `28ac269f1be64674976a8d5075965947` | 2026-08-30 |
+| `KNOWLEDGE-TOASTY-BUNDLE-FIXED` | 通过 | 从静默猎手问题包恢复战前存档、精确牌堆和 RNG；开启实时战损复核后完成首个知识恶魔原生选牌并获得瓦解，计划外重算 `0`。runId `9d988afbd8f240e3af519755d35aff3b` | 2026-08-30 |
 
 ## 0.19.0
 
@@ -37,7 +52,7 @@
 | `POST018-DECIMILLIPEDE-UPGRADE-CHOICE-DEPLOY` | 通过 | 千足虫升级选牌完成原生部署，完整自动执行到第 4 回合且零重算。runId `dc190ef3c1784f27b0d9e2ef85f49b80` | 2026-08-30 |
 | `POST018-OVICOPTER-CONTINUATION` | 通过 | 产卵飞虫完整自动执行到第 5 回合，计划外重算 `0`。runId `c8e98d81c2c24c7d9de1baeb2d67e6ce` | 2026-08-30 |
 | `POST018-BYGONE-EFFIGY-TOOLS-CHOICE` | 通过 | 必备工具选择按下一玩家回合阶段消费，完整自动执行到第 7 回合且零重算。runId `1dbadbe59d9147879d62f44d38a55cf0` | 2026-08-30 |
-| `POST018-KNOWLEDGE-ANGER-END-RISK` | 通过 | 知识恶魔敌方回合选择不再被当前结束回合复核误判为计划外；完整自动执行到第 8 回合且零重算。runId `2612caee23e14c42a274aa7567ae2251` | 2026-08-30 |
+| `POST018-KNOWLEDGE-ANGER-END-RISK` | 通过（历史邻接覆盖） | 完整自动执行到第 8 回合且零重算，但该场景没有让实时战损复核与知识恶魔敌方回合选择同时进入同一个模拟根，不能覆盖本次问题；由下一版本的实时复核专项取代。runId `2612caee23e14c42a274aa7567ae2251` | 2026-08-30 |
 | `POST018-SCROLLS-AUTO-CHOICE-PHASE` | 通过（邻接覆盖） | 三卷轴怪当前路线首回合结束战斗，自动执行不中止且零重算；第 2 回合必备工具由独立阶段回归覆盖。runId `a9f7d23ea7d5439c97a78ddf327d520f` | 2026-08-30 |
 | `POST018-SOUL-NEXUS-GRID-SCROLL` | 通过 | 原生 37 张卡牌网格滚动到底部并通过真实节点选择主宰，完整自动执行到第 7 回合且零重算。runId `b1a13ffbde4c46a6b64825cb2a3e8049` | 2026-08-30 |
 | `POST018-OVERGROWTH-ENTROPIC-CONTINUATION` | 通过（未复现旧重算） | 从蔓生爬虫问题根完整执行到第 2 回合且零重算；旧包在搜索期间实机药水栏与 RNG 已变化，因此保留为证据不足。runId `17fb59dfc1284928912eba1644b1ead5` | 2026-08-30 |
@@ -487,7 +502,7 @@
 | `MONSTER-MOVES-BATCH-004` | 通过 | 单次进入 `LivingFogNormal`，按需召唤青蛙骑士、电球头和气态炸弹；连续完成 `7` 个生产预测与真实 `PerformMove` 差分；全部逐字段一致 | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-005` | 通过 | 单次进入 `LivingFogNormal`，召唤幽灵船和猎人杀手；连续完成 `6` 个行动差分，并新增四个战斗牌堆的卡牌计数比较；纠缠的 `5` 张暈眩与真实弃牌堆一致 | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-006` | 通过 | 单次进入 `LivingFogNormal`，召唤守护机器人、感染棱柱、墨宝和环境组装师；连续完成 `8` 项差分，并按模型比较全场敌人格挡；首次缺少组装师的夹具失败已保留 | 2026-08-20 |
-| `MONSTER-MOVES-BATCH-007` | 通过 | 单次进入 `LivingFogNormal`，召唤同族信徒、同族神官和知识恶魔；连续完成 `10` 项差分；思考额外验证攻击后治疗 `30` 及力量增加 | 2026-08-20 |
+| `MONSTER-MOVES-BATCH-007` | 通过 | 单次进入 `LivingFogNormal`，召唤同族信徒、同族神官和知识恶魔；连续完成 `10` 项差分；思考额外验证攻击后治疗 `30` 及力量增加，随后验证实时战损复核按敌方回合语义消费知识恶魔诅咒计划。最新 runId `901066cdbaaa41329876325cd8a06ad5` | 2026-08-30 |
 | `MONSTER-MOVES-BATCH-008` | 通过 | 单次进入 `LivingFogNormal`，召唤乐加维林族母和两种树叶史莱姆；连续完成 `9` 项差分；验证负数力量/敏捷、族母格挡和弃牌堆黏液 `0 → 2 → 3` | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-009` | 通过 | 单次进入 `LivingFogNormal`，召唤活体盾、蛮兽、异螨、小啃兽和啃咬机；连续完成 `13` 项差分；验证多段攻击、格挡、力量、易伤及手牌/弃牌堆状态牌 | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-010` | 通过 | 单次进入 `LivingFogNormal`，在五个空槽位召唤五类怪物；连续完成 `16` 项差分；验证攻击、格挡、力量、脆弱、手牌灼傷和条件初始状态机 | 2026-08-20 |
@@ -531,6 +546,9 @@ pwsh -NoProfile -File tools\run-headless-matrix.ps1 -ContinueOnFailure
 
 ```powershell
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId QOL-CONTROLLER-STOP-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-DIRECT-STATE-OWNERSHIP-NEXT -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-PANEL-MAILBOX-LIFECYCLE-NEXT -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-LOW-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Low -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-MEDIUM-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Medium -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-HIGH-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest High -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
@@ -551,6 +569,7 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRES
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId PERFORMANCE-PRESET-CUSTOM-173 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -PerformancePresetForTest Custom -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId INFESTED-PRISM-VITAL-SPARK-152 -CharacterId REGENT -EncounterId INFESTED_PRISMS_ELITE -EnemyCurrentHp 171 -MonsterMoveChecksPath coverage\unattended\infested-prism-vital-spark-152.json -TimeoutSeconds 180 -KeepGameOpen
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId KNOWLEDGE-DEMON-SEARCH-CHOICE-162 -CharacterId REGENT -EncounterId KNOWLEDGE_DEMON_BOSS -EnemyCurrentHp 399 -ExpectedInitialChoiceBranchesEvaluatedAtLeast 2 -ExpectedInitialPlannedChoiceCardId MIND_ROT -ExpectedInitialActEndingBoss 1 -ExpectedObservedPlayerPowerId MIND_ROT_POWER -StopAfterExpectedPlayerPower -TimeoutSeconds 120 -ExitOnComplete
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId KNOWLEDGE-LIVE-END-RISK-INCREMENTAL -CharacterId REGENT -EncounterId KNOWLEDGE_DEMON_BOSS -EnemyCurrentHp 399 -ExpectedInitialChoiceBranchesEvaluatedAtLeast 2 -ExpectedInitialPlannedChoiceCardId MIND_ROT -ExpectedInitialActEndingBoss 1 -ExpectedObservedPlayerPowerId MIND_ROT_POWER -StopAfterExpectedPlayerPower -EnableStopOnWorseRecalculationForTest -ExpectedUnexpectedReplansAtMost 0 -VerifyIncrementalSearch -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId DEATH-TURN-PAUSE-165 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 57 -InitialPlayerHp 1 -ClearPlayerPiles -CardsJson '[]' -InitialEnemyMoveIdsJson '["FIRST_ACID_GOOP"]' -ExpectedInitialOnlyDeathRoutesFound 1 -ExpectedInitialDeathTurn 1 -ExpectedFullAutoPausedAtDeathTurn -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId SCULPTING-STRIKE-CHOICE-151 -CharacterId NECROBINDER -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 50 -ClearPlayerPiles -CardsPath coverage\unattended\sculpting-strike-choice-151-cards.json -ExpectedPlayedCardId SCULPTING_STRIKE -ExpectedReusedTurn 2 -StopAfterExpectedReuse -VerifyIncrementalSearch -TimeoutSeconds 120 -KeepGameOpen
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId ARMAMENTS-IMPLICIT-UPGRADE-OBSERVATION-534 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 9 -ClearPlayerPiles -CardsJson '[{"cardId":"ARMAMENTS","pile":"Hand","count":1},{"cardId":"STRIKE_IRONCLAD","pile":"Hand","count":1}]' -ExpectedPlayedCardId ARMAMENTS -ExpectedFinishedTurn 1 -ExpectedUnexpectedReplansAtMost 0 -VerifyIncrementalSearch -DeploymentFastModeForTest Instant -DeploymentInterActionDelaySecondsForTest 0 -TimeoutSeconds 180 -KeepGameOpen
@@ -765,6 +784,9 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MOVES-BA
 
 ```bash
 ./tools/run-unattended-test.sh --scenario-id QOL-CONTROLLER-STOP-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
+./tools/run-unattended-test.sh --scenario-id UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
+./tools/run-unattended-test.sh --scenario-id UPLOAD-DIRECT-STATE-OWNERSHIP-NEXT --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
+./tools/run-unattended-test.sh --scenario-id UPLOAD-PANEL-MAILBOX-LIFECYCLE-NEXT --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-LOW-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test Low --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-MEDIUM-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test Medium --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-HIGH-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test High --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
@@ -785,6 +807,7 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MOVES-BA
 ./tools/run-unattended-test.sh --scenario-id PERFORMANCE-PRESET-CUSTOM-173 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --performance-preset-for-test Custom --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id INFESTED-PRISM-VITAL-SPARK-152 --character-id REGENT --encounter-id INFESTED_PRISMS_ELITE --enemy-current-hp 171 --monster-move-checks-path coverage/unattended/infested-prism-vital-spark-152.json --timeout-seconds 180 --keep-game-open
 ./tools/run-unattended-test.sh --scenario-id KNOWLEDGE-DEMON-SEARCH-CHOICE-162 --character-id REGENT --encounter-id KNOWLEDGE_DEMON_BOSS --enemy-current-hp 399 --expected-initial-choice-branches-evaluated-at-least 2 --expected-initial-planned-choice-card-id MIND_ROT --expected-initial-act-ending-boss 1 --expected-observed-player-power-id MIND_ROT_POWER --stop-after-expected-player-power --timeout-seconds 120 --exit-on-complete
+./tools/run-unattended-test.sh --scenario-id KNOWLEDGE-LIVE-END-RISK-INCREMENTAL --character-id REGENT --encounter-id KNOWLEDGE_DEMON_BOSS --enemy-current-hp 399 --expected-initial-choice-branches-evaluated-at-least 2 --expected-initial-planned-choice-card-id MIND_ROT --expected-initial-act-ending-boss 1 --expected-observed-player-power-id MIND_ROT_POWER --stop-after-expected-player-power --enable-stop-on-worse-recalculation-for-test --expected-unexpected-replans-at-most 0 --verify-incremental-search --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id DEATH-TURN-PAUSE-165 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 57 --initial-player-hp 1 --clear-player-piles --cards-json '[]' --initial-enemy-move-ids-json '["FIRST_ACID_GOOP"]' --expected-initial-only-death-routes-found 1 --expected-initial-death-turn 1 --expected-full-auto-paused-at-death-turn --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id SCULPTING-STRIKE-CHOICE-151 --character-id NECROBINDER --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 50 --clear-player-piles --cards-path coverage/unattended/sculpting-strike-choice-151-cards.json --expected-played-card-id SCULPTING_STRIKE --expected-reused-turn 2 --stop-after-expected-reuse --verify-incremental-search --timeout-seconds 120 --keep-game-open
 ./tools/run-unattended-test.sh --scenario-id ARMAMENTS-IMPLICIT-UPGRADE-OBSERVATION-534 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 9 --clear-player-piles --cards-json '[{"cardId":"ARMAMENTS","pile":"Hand","count":1},{"cardId":"STRIKE_IRONCLAD","pile":"Hand","count":1}]' --expected-played-card-id ARMAMENTS --expected-finished-turn 1 --expected-unexpected-replans-at-most 0 --verify-incremental-search --deployment-fast-mode-for-test Instant --deployment-inter-action-delay-seconds-for-test 0 --timeout-seconds 180 --keep-game-open

@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
@@ -28,6 +29,8 @@ internal static class CombatBugReportExporter
     private const long MaximumCombatLogBytes = 32L * 1024 * 1024;
     private const long MaximumCapturedSaveBytes = 4L * 1024 * 1024;
     private const int MaximumCheckpoints = 32;
+    private const int MaximumGeneralLogFiles = 8;
+    private const int MaximumSaveFiles = 16;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -162,7 +165,7 @@ internal static class CombatBugReportExporter
             RecordCheckpoint(state, "export_clicked", result, replanAudit);
 
         SolverSettingsSnapshot profiles = SolverSettings.Capture();
-        string settingsJson = JsonSerializer.Serialize(SolverSettings.Current, JsonOptions);
+        string settingsJson = CaptureSettingsForBugReport();
         string combatJson = CaptureCombatState(state, profiles);
         string routeText = DescribeRoute(result);
         string exportContextJson = CaptureExportContext(state);
@@ -171,8 +174,8 @@ internal static class CombatBugReportExporter
             schemaVersion = 2,
             capturedAt = DateTimeOffset.Now,
             modVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
-            gameExecutable = OS.GetExecutablePath(),
-            userDataDirectory = OS.GetUserDataDir(),
+            gameExecutable = Path.GetFileName(OS.GetExecutablePath()),
+            userDataDirectory = Path.GetFileName(OS.GetUserDataDir()),
             os = System.Environment.OSVersion.ToString(),
             processArchitecture = RuntimeInformation.ProcessArchitecture.ToString(),
             framework = RuntimeInformation.FrameworkDescription,
@@ -182,7 +185,6 @@ internal static class CombatBugReportExporter
                 {
                     name = assembly.GetName().Name,
                     version = assembly.GetName().Version?.ToString(),
-                    assembly.Location,
                 })
                 .OrderBy(assembly => assembly.name, StringComparer.Ordinal)
                 .ToArray(),
@@ -241,24 +243,31 @@ internal static class CombatBugReportExporter
         string logsDirectory = Path.Combine(userDataDirectory, "logs");
         if (Directory.Exists(logsDirectory))
         {
-            foreach (string log in Directory.EnumerateFiles(logsDirectory, "*.log", SearchOption.AllDirectories))
+            int logIndex = 0;
+            foreach (string log in EnumerateFilesSafely(logsDirectory, "*.log")
+                         .OrderByDescending(File.GetLastWriteTimeUtc)
+                         .Take(MaximumGeneralLogFiles))
             {
                 AddFileTail(
                     archive,
                     log,
-                    "logs/" + NormalizeEntryPath(Path.GetRelativePath(logsDirectory, log)),
+                    $"logs/{logIndex++:D2}-{SanitizeFileName(Path.GetFileName(log))}",
                     MaximumLogBytes);
             }
         }
 
         string[] saveNames = ["current_run.save", "progress.save", "prefs.save", "settings.save", "latest.mcr"];
-        foreach (string file in Directory.EnumerateFiles(userDataDirectory, "*", SearchOption.AllDirectories)
-                     .Where(file => saveNames.Contains(Path.GetFileName(file), StringComparer.OrdinalIgnoreCase)))
+        int saveIndex = 0;
+        foreach (string file in EnumerateFilesSafely(userDataDirectory, "*")
+                     .Where(file => saveNames.Contains(Path.GetFileName(file), StringComparer.OrdinalIgnoreCase))
+                     .OrderByDescending(File.GetLastWriteTimeUtc)
+                     .Take(MaximumSaveFiles))
         {
             AddFile(
                 archive,
                 file,
-                "saves/" + NormalizeEntryPath(Path.GetRelativePath(userDataDirectory, file)));
+                $"saves/{saveIndex++:D2}-{SanitizeFileName(Path.GetFileName(file))}",
+                MaximumCapturedSaveBytes);
         }
         string releaseInfo = Path.Combine(executableDirectory, "release_info.json");
         if (File.Exists(releaseInfo))
@@ -278,13 +287,12 @@ internal static class CombatBugReportExporter
         AddText(
             archive,
             "combat-solver/README.txt",
-            "此问题包由 CombatSolver 设置页导出。包含最近 16 MB 游戏日志、当前档案、截图、当前战斗状态、路线、重算审计、设置和运行环境。\n" +
+            "此问题包由 CombatSolver 设置页导出。\n" +
             "forensics/current 保存当前战斗；forensics/recent 保存最近结束的一场。每场最多 32 个检查点。每个检查点都有 metadata、replay-state、native-state 和 run-state 四份同名材料。\n" +
             "replay-state 是可机器读取的完整中途战斗夹具，含有序牌堆、逐牌存档/动态状态、Power/遗物/怪物字段、行动历史、阵容和全部 RNG；native-state 是游戏原生 NetFullCombatState；run-state 是该检查点时刻的内存跑局存档。\n" +
             "forensics/*/pre-combat 始终包含内存跑局快照；磁盘 current_run.save/progress.save 已写出时会一并原样保存。即使在地图、奖励页或下一场战斗中导出，也优先用 recent 目录还原问题战斗。\n" +
             "session.json、检查点和 export-context.json 会标记 controlMode：solver_only 表示全程由求解器接管，manual_plus_solver 表示本场曾手操后再交给求解器；lastSolverDeployedTurn 记录最近一次完整自动执行的回合。\n" +
-            "存档和日志可能包含 Steam 账号标识；导出本身只保存在本机桌面，不会自动上传。" +
-            "设置页另有独立的“上传问题包”按钮，需要玩家在确认弹窗里再次点击确认才会把同样内容发送到开发者服务器。\n");
+            "设置页另有独立的“上传问题包”按钮。\n");
         Entry.Logger.Info($"[CombatSolver/Test] BUG_REPORT_EXPORTED path={path}");
         return path;
     }
@@ -557,6 +565,14 @@ internal static class CombatBugReportExporter
             currentLastSolverDeployedTurn = _currentSession?.LastSolverDeployedTurn,
             recentLastSolverDeployedTurn = _lastSession?.LastSolverDeployedTurn,
         }, JsonOptions);
+    }
+
+    private static string CaptureSettingsForBugReport()
+    {
+        JsonObject settings = JsonSerializer.SerializeToNode(SolverSettings.Current, JsonOptions)?.AsObject()
+            ?? throw new InvalidDataException("求解器设置无法序列化为问题包。");
+        settings.Remove(JsonNamingPolicy.CamelCase.ConvertName(nameof(SolverSettingsData.ReporterContactQq)));
+        return settings.ToJsonString(JsonOptions);
     }
 
     private static string CaptureCombatState(
@@ -936,10 +952,7 @@ internal static class CombatBugReportExporter
         string userDataDirectory = OS.GetUserDataDir();
         string? best = null;
         DateTime bestWrite = DateTime.MinValue;
-        foreach (string file in Directory.EnumerateFiles(
-                     userDataDirectory,
-                     "current_run.save",
-                     SearchOption.AllDirectories))
+        foreach (string file in EnumerateFilesSafely(userDataDirectory, "current_run.save"))
         {
             try
             {
@@ -968,13 +981,13 @@ internal static class CombatBugReportExporter
             return;
 
         session.PreCombatRunSave = new CapturedFile(
-            NormalizeEntryPath(Path.GetRelativePath(userDataDirectory, best)),
+            Path.GetFileName(best),
             ReadSharedFile(best, MaximumCapturedSaveBytes));
         string progress = Path.Combine(Path.GetDirectoryName(best)!, "progress.save");
         if (File.Exists(progress))
         {
             session.PreCombatProgressSave = new CapturedFile(
-                NormalizeEntryPath(Path.GetRelativePath(userDataDirectory, progress)),
+                Path.GetFileName(progress),
                 ReadSharedFile(progress, MaximumCapturedSaveBytes));
         }
     }
@@ -1019,7 +1032,9 @@ internal static class CombatBugReportExporter
         string logsDirectory = Path.Combine(OS.GetUserDataDir(), "logs");
         if (!Directory.Exists(logsDirectory))
             return;
-        foreach (string log in Directory.EnumerateFiles(logsDirectory, "*.log", SearchOption.AllDirectories))
+        foreach (string log in EnumerateFilesSafely(logsDirectory, "*.log")
+                     .OrderByDescending(File.GetLastWriteTimeUtc)
+                     .Take(MaximumGeneralLogFiles))
             session.LogStartOffsets[log] = new FileInfo(log).Length;
     }
 
@@ -1040,13 +1055,22 @@ internal static class CombatBugReportExporter
         writer.Write(text);
     }
 
-    private static void AddFile(ZipArchive archive, string path, string entryName)
+    private static void AddFile(
+        ZipArchive archive,
+        string path,
+        string entryName,
+        long maximumBytes = long.MaxValue)
     {
         using FileStream input = new(
             path,
             FileMode.Open,
             System.IO.FileAccess.Read,
             FileShare.ReadWrite | FileShare.Delete);
+        if (input.Length > maximumBytes)
+        {
+            throw new InvalidDataException(
+                $"取证文件超过上限：{Path.GetFileName(path)} ({input.Length} bytes)。");
+        }
         AddStream(archive, entryName, input);
     }
 
@@ -1120,6 +1144,14 @@ internal static class CombatBugReportExporter
             throw new DirectoryNotFoundException("无法定位桌面目录。");
         return Path.Combine(desktop, ExportFolderName);
     }
+
+    private static IEnumerable<string> EnumerateFilesSafely(string root, string pattern)
+        => Directory.EnumerateFiles(root, pattern, new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            AttributesToSkip = FileAttributes.ReparsePoint,
+        });
 
     private static string NormalizeEntryPath(string path)
         => path.Replace(Path.DirectorySeparatorChar, '/');

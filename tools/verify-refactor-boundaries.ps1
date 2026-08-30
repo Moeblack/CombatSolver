@@ -629,6 +629,27 @@ foreach ($rendererPath in $overlayRendererPaths) {
     }
 }
 
+$bugReportUploaderPath = Join-Path $repositoryRoot "src\Runtime\CombatBugReportUploader.cs"
+$solverSettingsPanelPath = Join-Path $repositoryRoot "src\UI\SolverSettingsPanel.cs"
+foreach ($check in @(
+    @{ Path = $bugReportUploaderPath; Text = "IProgress<CombatBugReportUploadProgress>" },
+    @{ Path = $bugReportUploaderPath; Text = "HttpCompletionOption.ResponseHeadersRead" },
+    @{ Path = $bugReportUploaderPath; Text = "CancellationToken requestCancellationToken" },
+    @{ Path = $bugReportUploaderPath; Text = "ReadServerReceipt(body)" },
+    @{ Path = $bugReportUploaderPath; Text = "UseProxy = false" },
+    @{ Path = $solverSettingsPanelPath; Text = "private readonly ProgressBar _uploadProgress;" },
+    @{ Path = $solverSettingsPanelPath; Text = "private volatile bool _uploadInProgress;" },
+    @{ Path = $solverSettingsPanelPath; Text = "Interlocked.Exchange(ref _uploadCompletion, completion)" },
+    @{ Path = $solverSettingsPanelPath; Text = "TryApplyUploadCompletion()" },
+    @{ Path = $solverSettingsPanelPath; Text = "等待服务器确认" })) {
+    if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
+        $violations.Add("$($check.Path): missing upload ownership boundary '$($check.Text)'")
+    }
+}
+if (Select-String -LiteralPath $bugReportUploaderPath -SimpleMatch "using Godot" -Quiet) {
+    $violations.Add("${bugReportUploaderPath}: uploader must not own Godot UI state")
+}
+
 $mirrorRegistryPath = Join-Path $repositoryRoot "src\Engine\Common\Mirrors\MethodMirrorRegistry.cs"
 $mirrorDescriptorPath = Join-Path $repositoryRoot "src\Engine\Common\Mirrors\MethodMirrorRegistryDescriptor.cs"
 $coverageCatalogPath = Join-Path $repositoryRoot "tools\CoverageCatalog\Program.cs"

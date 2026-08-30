@@ -219,6 +219,29 @@ internal sealed partial class UnattendedTestRunner
             if (archive.GetEntry(entry) == null)
                 throw new InvalidDataException($"问题包缺少 {entry}。");
         }
+        if (archive.Entries.Any(entry =>
+                Path.IsPathRooted(entry.FullName)
+                || entry.FullName.Split('/').Contains("..", StringComparer.Ordinal))
+            || archive.Entries.GroupBy(entry => entry.FullName, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            throw new InvalidDataException("问题包存在不安全或重复的条目名。");
+        }
+
+        using Stream settingsStream = archive.GetEntry("combat-solver/settings.json")!.Open();
+        using JsonDocument settingsDocument = JsonDocument.Parse(settingsStream);
+        if (settingsDocument.RootElement.TryGetProperty("reporterContactQq", out _))
+            throw new InvalidDataException("问题包设置仍包含反馈联系QQ。");
+
+        using Stream environmentStream = archive.GetEntry("combat-solver/environment.json")!.Open();
+        using JsonDocument environmentDocument = JsonDocument.Parse(environmentStream);
+        JsonElement environment = environmentDocument.RootElement;
+        if (Path.IsPathRooted(environment.GetProperty("gameExecutable").GetString())
+            || Path.IsPathRooted(environment.GetProperty("userDataDirectory").GetString())
+            || environment.GetProperty("loadedAssemblies").EnumerateArray().Any(assembly =>
+                assembly.TryGetProperty("location", out _)))
+        {
+            throw new InvalidDataException("问题包环境信息仍包含本机绝对路径。");
+        }
 
         string checkpointPrefix = $"combat-solver/forensics/{forensicSlot}/checkpoints/";
         ZipArchiveEntry checkpoint = archive.Entries.FirstOrDefault(entry =>
@@ -951,6 +974,8 @@ internal sealed partial class UnattendedTestRunner
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
         if (check.LiveEndTurnRiskCardId != null)
             AssertLiveEndTurnRiskChoices(combatState, player, check);
+        if (check.LiveEndTurnRiskKnowledgeChoiceCardId != null)
+            AssertLiveEndTurnRiskKnowledgeChoice(combatState, player, enemy, check);
         foreach (UnattendedPowerInjection injectedPowerAfterMove in check.PowersAfterMove)
         {
             await InjectPowerAsync(combatState, player, injectedPowerAfterMove, enemy);
@@ -1602,6 +1627,31 @@ internal sealed partial class UnattendedTestRunner
             Timing = PlanChoiceTiming.PlayerTurnStart,
         };
         _ = LiveEndTurnRiskEvaluator.Evaluate(combatState, [choice, futureTurnChoice]);
+    }
+
+    private static void AssertLiveEndTurnRiskKnowledgeChoice(
+        CombatState combatState,
+        Player player,
+        Creature enemy,
+        UnattendedMonsterMoveCheck check)
+    {
+        SimulatedCombatState combat = new(combatState);
+        combat.ForceMonsterMove(enemy, "CURSE_OF_KNOWLEDGE_MOVE");
+        int counterBefore = combat.GetKnowledgeDemonCurseCounter(enemy);
+        string cardId = check.LiveEndTurnRiskKnowledgeChoiceCardId!;
+        PlanCardChoice choice = new(
+            PlanChoiceEffect.ApplyKnowledgeCurse,
+            PileType.None,
+            [new PlanCardToken(cardId, 0, string.Empty, 0, 0, cardId)],
+            $"KNOWLEDGE_DEMON:{enemy.CombatId ?? uint.MaxValue}:{counterBefore}",
+            Timing: PlanChoiceTiming.EnemyTurn);
+        _ = LiveEndTurnRiskEvaluator.Evaluate(player, combat, [choice]);
+        int counterAfter = combat.GetKnowledgeDemonCurseCounter(enemy);
+        if (counterAfter != counterBefore + 1)
+        {
+            throw new InvalidOperationException(
+                $"结束回合风险复核没有消费知识恶魔诅咒计划：{counterBefore} -> {counterAfter}。");
+        }
     }
 
     private static void AssertSimulatedCardPileAfterPlay(
