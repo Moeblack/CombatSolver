@@ -337,6 +337,7 @@ internal sealed class UnattendedCardPlayCheck
     public string[] ExpectedExcludedChoiceCardIds { get; init; } = [];
     public string? ExpectedCardIdAfterPlay { get; init; }
     public string? ExpectedCardPileAfterPlay { get; init; }
+    public bool AssertForkableAfterPlay { get; init; }
 }
 
 internal sealed class UnattendedPowerInjection

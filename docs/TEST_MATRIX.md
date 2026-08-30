@@ -1,8 +1,19 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.20.0`（2026-08-30）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.20.1`（开发中，当前发布仍为 `0.20.0`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
+
+## 0.20.1（开发中）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `POST0201-SCRAPE-NEGATIVE-COST-FINAL` | 通过 | 刮削+依次抽到普通费用牌与负费用贪婪；预测与原生的手牌、弃牌堆及其余完整状态严格一致。runId `a5117c6888d0438693c0334775c720e1` | 2026-08-30 |
+| `POST0201-WHISTLE-STUN-FOLLOW-UP-FINAL` | 通过 | 吹哨打断史莱姆狂战士的呕吐脓水；眩晕结束后实机与预测都恢复呕吐脓水，不再跳到狂怒痛击。runId `500c0e56d7fb4dd58977040a6dd92610` | 2026-08-30 |
+| `POST0201-BRAND-POST-CHOICE-POWER-FORK-FINAL` | 通过 | 升级烙印完成原生手牌消耗选择并获得力量后，模拟状态立即满足稳定 Fork 边界。runId `7ea11c09cf614e28922104cf10875697` | 2026-08-30 |
+| `POST0201-SLIMED-BERSERKER-WHISTLE-REUSE` | 通过 | 从史莱姆狂战士问题包恢复牌组、遗物与 RNG；严格增量搜索实际打出吹哨，连续复用到第 3 回合，计划外重算 `0`。runId `e6232efae6494f2cb91b14d6790c3c23` | 2026-08-30 |
+| `POST0201-TEST-SUBJECT-SCRAPE-SCAVENGE-REUSE` | 通过 | 从实验体问题包恢复牌组、遗物与 RNG；第 2 回合打出刮削，内存清理随后在 4 张原生手牌候选中成功选中贪婪，严格增量复用到第 3 回合且计划外重算 `0`。runId `ec1c11fa2a444eda836520d1fe18e829` | 2026-08-30 |
+| `POST0201-DECIMILLIPEDE-CURRENT-DEEP-BASELINE` | 部分，不计完整通过 | 当前源码从千足虫问题包根完成搜索，没有复现旧版待结算力量导致的 Fork 异常；结果只有死亡路线，测试因可执行动作下限断言失败，因此不作为完整战斗证据。runId `dbf082665e984821b835e665889cc168` | 2026-08-30 |
 
 ## 0.20.0：在线问题包、跨平台测试与选牌修复
 
@@ -518,7 +529,7 @@
 | `MONSTER-MOVES-BATCH-031` | 通过 | 同一 PID `42532` 连续执行三场、共 `11` 条差分；关闭 `22` 个目录条目，验证下回合能量/抽牌/格挡、禁止抽牌/回能、费用/伤害/格挡修正、保留手牌时序和一次性 Power 生命周期 | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-032` | 通过 | 同一 PID `41596` 连续执行六场；关闭 `22` 个持续 Power 生命周期条目，验证抽牌、能量、辉星、Orb、全场目标、生成牌、仪式延迟，以及愤怒复制与活力消费回归 | 2026-08-20 |
 
-运行命令按平台分列。两组命令覆盖同一批场景和断言：Windows 使用仓库保留的 PowerShell 启动器及 PascalCase 参数；Linux 使用原生 Bash 启动器及 GNU kebab-case 参数。修改场景时必须同步更新两组命令，并保持 `ScenarioId / --scenario-id` 集合一致。当前每端各有 `228` 条命令、`227` 个唯一 ScenarioId（`PERFORMANCE-PRESET-HIGH-172` 作为不同历史门禁重复一次）；未提供本机问题包时，矩阵只跳过 `CHOICES-PARADOX-SCROLLS-0160`、`QUEEN-CHAINS-REUSE-FINAL-085` 和 `CORPSE-SLUGS-USER-RUN-073` 这 `3` 个外部快照场景。
+运行命令按平台分列。两组命令覆盖同一批场景和断言：Windows 使用仓库保留的 PowerShell 启动器及 PascalCase 参数；Linux 使用原生 Bash 启动器及 GNU kebab-case 参数。修改场景时必须同步更新两组命令，并保持 `ScenarioId / --scenario-id` 集合一致。当前每端各有 `235` 条命令、`234` 个唯一 ScenarioId（`PERFORMANCE-PRESET-HIGH-172` 作为不同历史门禁重复一次）；未提供本机问题包时，矩阵只跳过 `CHOICES-PARADOX-SCROLLS-0160`、`QUEEN-CHAINS-REUSE-FINAL-085` 和 `CORPSE-SLUGS-USER-RUN-073` 这 `3` 个外部快照场景。
 
 全量运行优先使用两端等价的 `tools/run-headless-matrix.ps1` / `tools/run-headless-matrix.sh`：
 
@@ -534,6 +545,9 @@ pwsh -NoProfile -File tools\run-headless-matrix.ps1 -ContinueOnFailure
 本机问题包不进入仓库：运行 `CHOICES-PARADOX-SCROLLS-0160` 前必须设置 `$env:CHOICES_PARADOX_RUN_SNAPSHOT_PATH` 和 `$env:CHOICES_PARADOX_PROGRESS_SNAPSHOT_PATH`；运行 `QUEEN-CHAINS-REUSE-FINAL-085` 或 `CORPSE-SLUGS-USER-RUN-073` 前必须设置 `$env:RUN_SNAPSHOT_PATH`。
 
 ```powershell
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-SCRAPE-NEGATIVE-COST-FINAL -CharacterId DEFECT -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\scrape-negative-cost-discard-0201.json -TimeoutSeconds 120 -KeepGameOpen
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-WHISTLE-STUN-FOLLOW-UP-FINAL -CharacterId DEFECT -EncounterId THE_INSATIABLE_BOSS -EnemyCurrentHp 281 -MonsterMoveChecksPath coverage\unattended\whistle-stun-follow-up-0201.json -TimeoutSeconds 120 -KeepGameOpen
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId POST0201-BRAND-POST-CHOICE-POWER-FORK-FINAL -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\brand-post-choice-power-fork-0201.json -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId QOL-CONTROLLER-STOP-172 -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId UPLOAD-DIRECT-STATE-OWNERSHIP-NEXT -CharacterId IRONCLAD -EncounterId FUZZY_WURM_CRAWLER_WEAK -EnemyCurrentHp 1 -VerifyControllerSessionLifecycle -ExpectedFinishedTurn 1 -TimeoutSeconds 120 -ExitOnComplete
@@ -772,6 +786,9 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MOVES-BA
 ### Linux（Bash）
 
 ```bash
+./tools/run-unattended-test.sh --scenario-id POST0201-SCRAPE-NEGATIVE-COST-FINAL --character-id DEFECT --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/scrape-negative-cost-discard-0201.json --timeout-seconds 120 --keep-game-open
+./tools/run-unattended-test.sh --scenario-id POST0201-WHISTLE-STUN-FOLLOW-UP-FINAL --character-id DEFECT --encounter-id THE_INSATIABLE_BOSS --enemy-current-hp 281 --monster-move-checks-path coverage/unattended/whistle-stun-follow-up-0201.json --timeout-seconds 120 --keep-game-open
+./tools/run-unattended-test.sh --scenario-id POST0201-BRAND-POST-CHOICE-POWER-FORK-FINAL --character-id IRONCLAD --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/brand-post-choice-power-fork-0201.json --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id QOL-CONTROLLER-STOP-172 --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id UPLOAD-PROGRESS-CANCEL-CONFIRMATION-NEXT-FINAL --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id UPLOAD-DIRECT-STATE-OWNERSHIP-NEXT --character-id IRONCLAD --encounter-id FUZZY_WURM_CRAWLER_WEAK --enemy-current-hp 1 --verify-controller-session-lifecycle --expected-finished-turn 1 --timeout-seconds 120 --exit-on-complete

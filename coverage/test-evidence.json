@@ -1,4 +1,36 @@
 {
+  "POST0201-SCRAPE-NEGATIVE-COST": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationCardDrawCostAndPileDifferential",
+    "procedure": "清空牌堆后让升级刮削依次抽到普通费用牌与负费用贪婪，分别执行原生和预测出牌并比较完整战斗状态。",
+    "expected": "原版按 CardEnergyCost.GetWithModifiers(All) 判断；贪婪的负费用不是零费用，必须随其他非零费用牌进入弃牌堆。",
+    "observed": "runId a5117c6888d0438693c0334775c720e1 Passed；实包 runId ec1c11fa2a444eda836520d1fe18e829 在第 2 回合打出刮削后，内存清理原生页面成功选中贪婪，第 3 回合复用且计划外重算为 0。",
+    "evidence": "src/Engine/InCombat/Simulation/CombatPredictedCardExtensions.cs；src/Engine/InCombat/Mirrors/Cards/OnPlay/CardDrawCardMirrors.cs；coverage/unattended/scrape-negative-cost-discard-0201.json；上述 runId；验证日期 2026-08-30。"
+  },
+  "POST0201-WHISTLE-STUN-FOLLOW-UP": {
+    "status": "Passed",
+    "level": "HeadlessStrictNativeSimulationMonsterStunFollowUpAndIncrementalReuse",
+    "procedure": "在史莱姆狂战士准备呕吐脓水时打出吹哨，推进眩晕行动并比较下一正式行动；再从玩家问题包恢复牌组、遗物与 RNG，开启严格增量全自动。",
+    "expected": "吹哨建立原版 STUNNED 行动，眩晕后恢复呕吐脓水；跨回合路线无需计划外重算。",
+    "observed": "严格差分 runId 500c0e56d7fb4dd58977040a6dd92610 Passed；实包 runId e6232efae6494f2cb91b14d6790c3c23 实际打出吹哨并复用到第 3 回合，计划外重算 0。",
+    "evidence": "src/Prediction/CardEffectSpecRegistry.cs；coverage/unattended/whistle-stun-follow-up-0201.json；上述 runId；验证日期 2026-08-30。"
+  },
+  "POST0201-BRAND-POST-CHOICE-POWER-FORK": {
+    "status": "Passed",
+    "level": "HeadlessPredictionStableForkBoundaryAfterNativeCardChoice",
+    "procedure": "打出升级烙印，在原生手牌页面消耗打击并获得力量；选牌后立即断言模拟状态可 Fork，再完成原生/预测差分。",
+    "expected": "卡牌选牌后的力量变化在卡牌完成边界内结算，下一搜索动作可以从父状态分叉。",
+    "observed": "runId 7ea11c09cf614e28922104cf10875697 Passed；千足虫旧包根的当前搜索没有再抛出待结算力量导致的 Fork 异常。",
+    "evidence": "src/Testing/UnattendedTestProtocol.cs；src/Testing/UnattendedTestRunner.cs；coverage/unattended/brand-post-choice-power-fork-0201.json；上述 runId；验证日期 2026-08-30。"
+  },
+  "POST0201-TYRANNY-PLAYER-TURN-START-BOUNDARY": {
+    "status": "Passed",
+    "level": "HeadlessFullAutoTurnStartChoiceReuseExistingCoverage",
+    "procedure": "复用环境组装师跨回合回归，在路线打出暴政后让选牌按下一玩家回合开始阶段接管并继续完整自动执行。",
+    "expected": "结束本回合不提前消费暴政；下一回合原生页面出现后由既定计划接管，计划外重算保持 0。",
+    "observed": "既有 runId 766852f4a7574342959cdf9ca7e940b0 Passed，完整自动执行到第 9 回合且零重算；本轮改动未触及该阶段职责，因此按仓库规则复用直接证据。",
+    "evidence": "docs/TEST_MATRIX.md 的 POST018-FABRICATOR-CHOICE-AND-AI-REUSE；验证日期 2026-08-30。"
+  },
   "POST018-DOMINATE-VICIOUS-ORDER": {
     "status": "Passed",
     "level": "HeadlessStrictNativeSimulationNestedPowerListenerAndAutoPlayOrder",

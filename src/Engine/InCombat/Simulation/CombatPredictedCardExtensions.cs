@@ -114,10 +114,20 @@ internal static class CombatPredictedCardExtensions
             return playerCombatState.Energy;
         }
 
+        return Math.Max(0, card.GetEnergyCostValueWithModifiers(simulator));
+    }
+
+    // Mirrors CardEnergyCost.GetWithModifiers(CostModifiers.All), preserving negative costs.
+    public static int GetEnergyCostValueWithModifiers(
+        this PredictedCard card,
+        CombatPredictionSimulator simulator)
+    {
+        var energyCost = card.Preview.EnergyCost;
+
         var cost = energyCost._base;
-        if (cost < 0)
+        if (cost < 0 || energyCost.CostsX)
         {
-            return 0;
+            return cost;
         }
 
         foreach (var modifier in energyCost._localModifiers)

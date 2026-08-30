@@ -363,7 +363,7 @@ internal static class CardEffectSpecRegistry
                 applied = true;
                 break;
             case Whistle:
-                combat.StunNextMove(target
+                combat.ForceStunnedMove(target
                     ?? throw new InvalidOperationException($"{card.Id} requires a target."));
                 applied = true;
                 break;

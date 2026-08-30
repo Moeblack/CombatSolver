@@ -672,6 +672,7 @@ internal sealed partial class UnattendedTestRunner
                     combatState.Enemies,
                     playCheck.UseChoice ? playCheck.ChoiceCardIds : null,
                     playCheck.ExpectedExcludedChoiceCardIds);
+                AssertSimulatedForkableAfterPlay(simulatedCombat, playCheck);
             }
         }
         if (check.TriggerPlayerSideTurnEndBeforeMove)
@@ -730,6 +731,7 @@ internal sealed partial class UnattendedTestRunner
                     playCheck.UseChoice ? playCheck.ChoiceCardIds : null,
                     playCheck.ExpectedExcludedChoiceCardIds);
                 AssertSimulatedCardPileAfterPlay(simulator, player, playCheck);
+                AssertSimulatedForkableAfterPlay(simulatedCombat, playCheck);
             }
         }
         int simulatedPlayerBlockAfterMoveActions =
@@ -754,6 +756,7 @@ internal sealed partial class UnattendedTestRunner
                     ResolvePlayTarget(playCheck.Target, enemy),
                     combatState.Enemies,
                     playCheck.UseChoice ? playCheck.ChoiceCardIds : null);
+                AssertSimulatedForkableAfterPlay(simulatedCombat, playCheck);
             }
         }
         int enemySideTurnEndCount = Math.Max(
@@ -906,6 +909,7 @@ internal sealed partial class UnattendedTestRunner
                     ResolvePlayTarget(playCheck.Target, enemy),
                     combatState.Enemies,
                     playCheck.UseChoice ? playCheck.ChoiceCardIds : null);
+                AssertSimulatedForkableAfterPlay(simulatedCombat, playCheck);
             }
         }
         if (check.KillMonsterAfterMove)
@@ -1671,6 +1675,14 @@ internal sealed partial class UnattendedTestRunner
                 $"模拟中打出 {check.CardId} 后 {check.ExpectedCardIdAfterPlay} 位于 {actualPile}，" +
                 $"预期 {check.ExpectedCardPileAfterPlay}。");
         }
+    }
+
+    private static void AssertSimulatedForkableAfterPlay(
+        SimulatedCombatState combat,
+        UnattendedCardPlayCheck check)
+    {
+        if (check.AssertForkableAfterPlay)
+            combat.AssertForkable();
     }
 
     private static IReadOnlyList<PlanCardChoice> BuildAutoPrePlayChoices(

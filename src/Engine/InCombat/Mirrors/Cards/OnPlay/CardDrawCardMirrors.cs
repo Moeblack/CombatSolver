@@ -134,7 +134,7 @@ internal static class CardDrawCardMirrors
         var cardsToDiscard = context.Simulator.Draw(card.Owner, card.DynamicVars.Cards.IntValue)
             .Where(drawnCard =>
                 drawnCard.Preview.EnergyCost.CostsX ||
-                drawnCard.GetEnergyCostWithModifiers(context.Simulator, context.OwnerState) != 0)
+                drawnCard.GetEnergyCostValueWithModifiers(context.Simulator) != 0)
             .ToList();
         context.Simulator.Discard(cardsToDiscard);
     }
