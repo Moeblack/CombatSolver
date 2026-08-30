@@ -13,11 +13,10 @@
 | `LINUX-HEADLESS-LIFECYCLE` | 通过 | 原生日志为 `N/A (headless) / VRAM 0B`；marker 验证 PID starttime、隔离环境及 DLL/manifest 哈希。无变化复用同一 PID；Release 重建后输出 `UNATTENDED_RESTART reason=mod_changed` 并自动换 PID。失败退出约 `510 ms`，最终进程、marker、临时 RitsuLib 投影均清理 | 2026-08-29 |
 | `HEADLESS-MATRIX-CANONICAL-0180` | 通过 | Linux 以 `--continue-on-failure` 按文档原有生命周期边界运行全量矩阵：`MATRIX_END total=228 attempted=225 passed=225 failed=0 skipped=3 cleanup_exit_code=0 elapsed_ms=1787606`，即 `29:47.606`；`52` 次冷启动、`173` 次安全复用，仅跳过缺少本机外部快照的 `3` 个场景 | 2026-08-30 |
 | `LINUX-MECHA-MEMORY-CALIBRATION-0180` | 通过 | 固定机甲骑士快照在 Linux 原生 headless 的首轮搜索为 `14282.3 ms / 4,390,908,424 B`（累计分配，非峰值内存），第 `7` 回合结束、第 `3` 回合开始复用，runId `531a3a280ab24e89bad2a3536da8ecd6`。Linux 分配门槛按平台差异校准为 `4,500,000,000 B`，余量 `109,091,576 B`（`2.485%`）；Windows 命令的 `4,300,000,000 B` 门槛保持不变 | 2026-08-30 |
-
-## 下一版本（开发中）
-
-| 场景 | 结果 | 验证内容 | 日期 |
-| --- | --- | --- | --- |
+| `PR6-ARMAMENTS-IMPLICIT-INTEGRATED` | 通过 | 手牌仅有武装和未升级打击；原版隐式升级唯一候选后，部署器按请求时冻结的身份核销同一实例，再打出升级后的打击并于首回合结束战斗。原生选择 `visible=0 / selected=1 / search=0`，增量回放一致，计划外重算 `0`。runId `d1bc59759edf4c91a9c89f4bd6e6b2d4` | 2026-08-30 |
+| `PR6-RNG-DETERMINISTIC-A/B` | 通过 | 同一 PID、相同 seed `PR6DETERMINISTIC` 连续两次建立史莱姆战，敌人均为 `LEAF_SLIME_S / TWIG_SLIME_M / TWIG_SLIME_S` 且生命上限为 `12 / 27 / 7`；两次均第 2 回合结束、计划外重算 `0`，第二次明确复用同一测试进程并正常退出。runId `cc320b89536149398707300e4c9258be`、`38c0fde339ae49e0b45524d3ce2c545d` | 2026-08-30 |
+| `PR6-VIGOR/SELF-KILL-INTEGRATED` | 通过 | 骇鳗猛烈摆动携带活力时，完整攻击前/攻击后生命周期与原生严格一致，runId `0eac2a0e2d904b8bb332fb1c76c18d57`；七项怪物行动差分含毒气炸弹自爆并通过死亡结算，runId `edd957f4731445e9a300f9c0cad9646f` | 2026-08-30 |
+| `PR6-EMOTION-CHIP-EXTRA-TURN-INTEGRATED` | 通过 | 琥珀灰触发额外回合；当前回合使用放血受伤后，情感芯片的损血窗口在跳过敌方阶段时正确滚动，额外回合开始的充能球被动与原生完整状态一致，实际伤害 `3`。runId `aaa8223a916b4b24b8c2983596010e31` | 2026-08-30 |
 | `TOASTY-FIRST-TURN-USER-BOUNDARY-0190` | 通过 | 烘焙手套原生手牌页显示后开始搜索；计划就绪时仍为 `Selected=0 / CardsPlayed=0`，模拟玩家启动后才确认选择。严格增量/完整回放一致，开启结束回合变差复核后完整自动执行到第 2 回合，计划外重算 `0`。runId `a2a1fd688e71465d9458c5cbb1c743d4` | 2026-08-30 |
 | `TOASTY-PHANTASMAL-BUNDLE-0190` | 通过 | 使用花园幽灵鳗问题包的战前牌组、遗物与 RNG；首回合计划展示时未选牌、未出牌，玩家启动后完整自动执行到第 5 回合。结束回合复核开启，计划外重算 `0`；严格完整回放从同一份首回合准备选择起步。runId `0451b77331a94c96ae507e2ccdb4603a` | 2026-08-30 |
 
@@ -51,7 +50,6 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
-| `ARMAMENTS-IMPLICIT-UPGRADE-OBSERVATION-534` | 通过 | 手牌仅有武装和未升级打击；原版隐式选中唯一候选并立即升级后，驱动仍按请求时冻结的卡牌 ID、升级等级与完整状态键解析同一实例。完整自动部署首回合击杀、增量/完整回放一致、计划外重算 `0`，runId `b90927c45e254703865fe79b5b769ef0` | 2026-08-30 |
 | `MAKE-IT-SO-FINISHED-HISTORY-018` | 通过 | 独立回合从 0 次技能历史开始，逐张断言如此甚好在前两张技能后留在弃牌堆、第 3 张后回手，实机与模拟一致。runId `5d226c100ea949f1bc498a01a7961106` | 2026-08-29 |
 | `NEUROSURGE-MUTABLE-POWER-018` | 通过 | 精神过载及同批 47 项卡牌施加 Power 后，生命、能量、牌堆、Power 和怪物状态实机差分一致。runId `fa74bbbe3c4245188cde369d7bcf6144` | 2026-08-29 |
 | `LIVE-END-TURN-RISK-CHOICE-REUSE-018` | 通过 | 惊逃在结束回合风险复核中自动打出头槌，复用路线选择将盛怒置顶，选择顺序与消费数严格一致。runId `216d8643891f442689074fa5f6f7954e` | 2026-08-29 |
@@ -61,7 +59,7 @@
 | `KNOWLEDGE-POWER-REAPPLICATION-ORDER-018` | 通过 | 从知识恶魔问题包战前状态完整自动执行；敌方诅咒选择会话正常退出，第 11 回合重新施加既定事项后保持正确 Power 监听顺序，第 12 回合结束战斗，计划外重算 `0`。runId `bdf89c2bf77341ee8da1c7f68b2d2161` | 2026-08-29 |
 | `CURRENT-BUNDLE-DIRECT-COVERAGE-018` | 通过 | 当前源码直接重放地道虫、外骨骼虫、感染棱柱、活体盾与高塔炮手，以及连枷骑士、幽灵骑士与魔法骑士问题包，分别越过原初始化、计划外选牌、实时风险选牌、精神过载动作回放及如此甚好部署找牌错误；runId `edce410703414934a3f3259429b10d26`、`6a32338eb2f24b44aa45cf731c845163`、`417c1b5707924606816351b1aa339c21`、`b2d4cb91395e46ccb944da5a8558192b`、`0d737a4acb9e4a85a9365f296562311c` | 2026-08-29 |
 | `POWER-ROOT-INTERNAL-STATE-018` | 通过 | 鬼祟珊瑚群第 2 回合继承本回合已受到的 `9` 点伤害，搜索与实机的回合伤害上限一致；完整自动战斗在第 5 回合结束，计划外重算 `0`。runId `b126492a542c4c3d85bc47f0bffe0b1c` | 2026-08-29 |
-| `EMOTION-CHIP-HISTORY-ROLL-018` | 通过 | 情感芯片触发充能球后保留上回合失去生命的记录；正常轮次在敌方回合结束滚动，跳过敌方阶段而直接进入额外玩家回合时也会在新玩家回合边界滚动，且只在情感芯片处于活动遗物时维护该历史。完整自动战斗在第 5 回合结束，计划外重算 `0`。runId `e265c0a6887f48ea892c2e5489236721` | 2026-08-29 |
+| `EMOTION-CHIP-HISTORY-ROLL-018` | 通过 | 情感芯片触发充能球后保留上回合失去生命的记录，直到敌方回合结束再滚动；完整自动战斗在第 5 回合结束，计划外重算 `0`。runId `e265c0a6887f48ea892c2e5489236721` | 2026-08-29 |
 | `FAN-OF-KNIVES-SHIV-TARGET-018` | 通过 | 刀扇生效后，小刀按全体攻击生成无目标动作并与实机一致；永世沙漏问题包完整自动执行到第 7 回合，计划外重算 `0`。runId `e825a7e0fe244d5b8be45086c3f3d7ef` | 2026-08-29 |
 | `UPROAR-ECHO-FORM-AUTOPLAY-018` | 通过 | 回响形态重放骚动时，骚动自动打出的集中打击读取已经开始的外层出牌系列，因此只结算一次；敌人生命、集中、牌堆、能量与 RNG 的原生/预测完整状态一致。runId `06550cd755b246c7b044865469541422` | 2026-08-29 |
 | `TEST-SUBJECT-GC-ECHO-FINAL-018` | 通过 | 实验体原问题包在首轮搜索与全自动请求重叠时只执行一次 No-GC 滚动回收，不再循环触发 `before_next_search`；随后连续复用并在第 8 回合结束，计划外重算 `0`。runId `913d3393e919438fbf2d7635ce318b2b` | 2026-08-29 |
