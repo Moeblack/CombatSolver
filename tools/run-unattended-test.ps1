@@ -77,7 +77,7 @@ param(
     [switch]$VerifyIncrementalSearch,
     [switch]$ForceShortSearchOnly,
     [switch]$MeasureSearchPhases,
-    [ValidateSet(-1, 1, 2, 3, 4)]
+    [ValidateSet(-1, 1, 2, 3, 4, 5, 6, 7, 8)]
     [int]$SearchMaxDegreeOfParallelismForTest = -1,
     [switch]$HoldAfterInitialSearch,
     [int]$ShortSearchBudgetOverrideMilliseconds = -1,

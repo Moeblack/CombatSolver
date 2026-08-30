@@ -266,11 +266,21 @@ internal sealed partial class CombatBeamSolver
                         ended.Count, "展开出牌序列");
                 }
 
+                void ReleaseNodeLimitSnapshot(SearchNode node)
+                {
+                    if (!node.Snapshot.HasSimulator)
+                        return;
+                    node.Snapshot.ReleaseSimulator();
+                    _run.NodeLimitSnapshotsReleased++;
+                }
+
+                int activeIndex = 0;
                 if (expansionParallelism == 1)
                 {
-                    foreach (SearchNode node in active)
+                    while (activeIndex < active.Count)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        SearchNode node = active[activeIndex];
                         foreach (SearchNode child in Expand(node))
                         {
                             AcceptExpandedChild(node, child);
@@ -278,13 +288,13 @@ internal sealed partial class CombatBeamSolver
                                 break;
                         }
                         FinishExpandedParent(node);
+                        activeIndex++;
                         if (_run.Expanded >= _profile.MaxExpandedNodes)
                             break;
                     }
                 }
                 else
                 {
-                    int activeIndex = 0;
                     while (activeIndex < active.Count
                            && _run.Expanded < _profile.MaxExpandedNodes)
                     {
@@ -294,7 +304,7 @@ internal sealed partial class CombatBeamSolver
                         {
                             // The legacy iterator intentionally yields only the first child from the
                             // final budget slot. Keep that edge case out of the materialized worker path.
-                            for (; activeIndex < active.Count; activeIndex++)
+                            while (activeIndex < active.Count)
                             {
                                 SearchNode node = active[activeIndex];
                                 foreach (SearchNode child in Expand(node))
@@ -304,6 +314,7 @@ internal sealed partial class CombatBeamSolver
                                         break;
                                 }
                                 FinishExpandedParent(node);
+                                activeIndex++;
                                 if (_run.Expanded >= _profile.MaxExpandedNodes)
                                     break;
                             }
@@ -363,6 +374,8 @@ internal sealed partial class CombatBeamSolver
                         }
                     }
                 }
+                for (; activeIndex < active.Count; activeIndex++)
+                    ReleaseNodeLimitSnapshot(active[activeIndex]);
                 List<SearchNode> prunedPlays = Prune(nextPlays);
                 ReleaseDroppedSnapshots(nextPlays, prunedPlays);
                 active = prunedPlays;
@@ -374,6 +387,18 @@ internal sealed partial class CombatBeamSolver
                 }
                 PublishProgress(_startTurnNumber + searchedTurnLayers, searchedTurnLayers, playDepth,
                     active.Count, ended.Count, "剪枝候选", force: true);
+            }
+
+            if (_run.Expanded >= _profile.MaxExpandedNodes)
+            {
+                foreach (SearchNode node in active)
+                {
+                    if (!node.Snapshot.HasSimulator)
+                        continue;
+                    node.Snapshot.ReleaseSimulator();
+                    _run.NodeLimitSnapshotsReleased++;
+                }
+                active = [];
             }
 
             List<SearchNode> unannotatedEnded = ended;
@@ -603,6 +628,7 @@ internal sealed partial class CombatBeamSolver
             SnapshotMetric = _run.Performance.Snapshot(SearchMetricPhase.Snapshot),
             ThreatProjectionMetric = _run.Performance.Snapshot(SearchMetricPhase.ThreatProjection),
             FingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.Fingerprint),
+            ProjectedShuffleMetric = _run.Performance.Snapshot(SearchMetricPhase.ProjectedShuffle),
             PileFingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.PileFingerprint),
             PileFingerprintMissMetric = _run.Performance.Snapshot(SearchMetricPhase.PileFingerprintMiss),
             CardFingerprintMissMetric = _run.Performance.Snapshot(SearchMetricPhase.CardFingerprintMiss),
@@ -632,6 +658,7 @@ internal sealed partial class CombatBeamSolver
             ParallelExpansionWaves = _run.ParallelExpansionWaves,
             ParallelExpansionWorkItems = _run.ParallelExpansionWorkItems,
             MaxParallelExpansionConcurrency = _run.MaxParallelExpansionConcurrency,
+            NodeLimitSnapshotsReleased = _run.NodeLimitSnapshotsReleased,
             TransitionCacheHits = 0,
             WorkerAllocatedBytes = workerAllocatedBytes,
             Gen0Collections = gen0Collections,

@@ -7,7 +7,7 @@ Usage: tools/run-visible-steam-benchmark.sh [options]
 
 Options:
   --timeout-seconds SECONDS
-  --search-max-degree-of-parallelism 1..4
+  --search-max-degree-of-parallelism 1..8
   --verify-base-lib-card-modifier-boundary
   --verify-baselib-card-modifier-boundary  Deprecated compatibility alias
   --steam-root DIRECTORY
@@ -113,8 +113,8 @@ while (($# > 0)); do
 done
 
 [[ "$timeout_seconds" =~ ^[1-9][0-9]*$ ]] || die "--timeout-seconds must be a positive integer"
-[[ "$search_max_degree_of_parallelism" =~ ^[1-4]$ ]] || \
-    die "--search-max-degree-of-parallelism must be between 1 and 4"
+[[ "$search_max_degree_of_parallelism" =~ ^[1-8]$ ]] || \
+    die "--search-max-degree-of-parallelism must be between 1 and 8"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
 if [[ -n "$steam_root_arg" ]]; then

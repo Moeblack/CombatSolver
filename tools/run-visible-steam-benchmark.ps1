@@ -2,7 +2,7 @@
 
 param(
     [int]$TimeoutSeconds = 360,
-    [ValidateRange(1, 4)]
+    [ValidateRange(1, 8)]
     [int]$SearchMaxDegreeOfParallelism = 2,
     [switch]$VerifyBaseLibCardModifierBoundary
 )

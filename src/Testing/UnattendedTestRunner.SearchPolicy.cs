@@ -70,6 +70,14 @@ internal sealed partial class UnattendedTestRunner
                 $"work_items={parallelResult.ParallelExpansionWorkItems} " +
                 $"max_concurrency={parallelResult.MaxParallelExpansionConcurrency}。");
         }
+        if (serialResult.NodeLimitSnapshotsReleased <= 0
+            || parallelResult.NodeLimitSnapshotsReleased <= 0)
+        {
+            throw new InvalidOperationException(
+                $"节点上限搜索没有释放被预算丢弃的模拟器快照：" +
+                $"dop1={serialResult.NodeLimitSnapshotsReleased} " +
+                $"dop2={parallelResult.NodeLimitSnapshotsReleased}。");
+        }
 
         SolverPotionPolicy changedPotionPolicy = capturedPolicy.PotionPolicy == SolverPotionPolicy.Disabled
             ? SolverPotionPolicy.RequireAtLeastOne

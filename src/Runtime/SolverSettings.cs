@@ -43,6 +43,7 @@ internal sealed record SolverSettingsData
     public bool EnableDetailedDiagnosticLogs { get; init; }
     public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
     public SolverPerformancePreset? PerformancePreset { get; init; }
+    public int? SearchMaxDegreeOfParallelism { get; init; }
     public double? ShortTimeLimitSeconds { get; init; }
     public double? DeepTimeLimitSeconds { get; init; }
     public double? NoGcRegionBudgetGigabytes { get; init; }
@@ -75,6 +76,7 @@ internal sealed record SolverSettingsSnapshot(
     bool StopFullAutoOnWorseRecalculation,
     bool EnableDetailedDiagnosticLogs,
     SolverPotionPolicy PotionPolicy,
+    int SearchMaxDegreeOfParallelism,
     SolverSearchProfile ShortProfile,
     SolverSearchProfile DeepProfile,
     long NoGcRegionBudgetBytes,
@@ -180,6 +182,7 @@ internal static class SolverSettings
             $"detailed_diagnostic_logs={loaded.EnableDetailedDiagnosticLogs} " +
             $"potion_policy={loaded.PotionPolicy} " +
             $"performance_preset={ResolvePerformancePreset(loaded)} " +
+            $"max_dop={Capture().SearchMaxDegreeOfParallelism} " +
             $"short_budget_ms={Capture().ShortProfile.SoftTimeBudgetMilliseconds} " +
             $"deep_budget_ms={Capture().DeepProfile.SoftTimeBudgetMilliseconds} " +
             $"no_gc_budget_bytes={Capture().NoGcRegionBudgetBytes} " +
@@ -204,6 +207,8 @@ internal static class SolverSettings
             data.StopFullAutoOnWorseRecalculation,
             data.EnableDetailedDiagnosticLogs,
             data.PotionPolicy,
+            data.SearchMaxDegreeOfParallelism
+                ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism,
             shortProfile,
             deepProfile,
             noGcBytes,
@@ -335,6 +340,11 @@ internal static class SolverSettings
         ValidateRange(data.ShortTimeLimitSeconds, 0.1d, 600d, nameof(data.ShortTimeLimitSeconds));
         ValidateRange(data.DeepTimeLimitSeconds, 0.1d, 600d, nameof(data.DeepTimeLimitSeconds));
         ValidateRange(data.NoGcRegionBudgetGigabytes, 1d, 16d, nameof(data.NoGcRegionBudgetGigabytes));
+        ValidateRange(
+            data.SearchMaxDegreeOfParallelism,
+            1,
+            SolverWeights.MaximumSearchMaxDegreeOfParallelism,
+            nameof(data.SearchMaxDegreeOfParallelism));
         ValidateRange(data.ShortBeamWidth, 1, 512, nameof(data.ShortBeamWidth));
         ValidateRange(data.DeepBeamWidth, 1, 512, nameof(data.DeepBeamWidth));
         ValidateRange(data.ShortPotionFreeBeamWidth, 1, 256, nameof(data.ShortPotionFreeBeamWidth));

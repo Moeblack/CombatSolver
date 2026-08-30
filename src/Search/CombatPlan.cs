@@ -504,6 +504,7 @@ internal sealed class SolverResult
     public SearchPhaseMetric SnapshotMetric { get; internal set; }
     public SearchPhaseMetric ThreatProjectionMetric { get; internal set; }
     public SearchPhaseMetric FingerprintMetric { get; internal set; }
+    public SearchPhaseMetric ProjectedShuffleMetric { get; internal set; }
     public SearchPhaseMetric PileFingerprintMetric { get; internal set; }
     public SearchPhaseMetric PileFingerprintMissMetric { get; internal set; }
     public SearchPhaseMetric CardFingerprintMissMetric { get; internal set; }
@@ -533,6 +534,7 @@ internal sealed class SolverResult
     public int ParallelExpansionWaves { get; init; }
     public int ParallelExpansionWorkItems { get; init; }
     public int MaxParallelExpansionConcurrency { get; init; }
+    public int NodeLimitSnapshotsReleased { get; init; }
     public required int TransitionCacheHits { get; init; }
     public required long WorkerAllocatedBytes { get; init; }
     public required int Gen0Collections { get; init; }

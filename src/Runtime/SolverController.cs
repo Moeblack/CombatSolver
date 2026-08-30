@@ -158,7 +158,7 @@ internal static class SolverController
     {
         FramePressureSignal.ResetPressure();
         int maxDegreeOfParallelism = UnattendedTestRunner.SearchMaxDegreeOfParallelismOverride
-            ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism;
+            ?? settings.SearchMaxDegreeOfParallelism;
         if (maxDegreeOfParallelism < 1
             || maxDegreeOfParallelism > SolverWeights.MaximumSearchMaxDegreeOfParallelism)
         {

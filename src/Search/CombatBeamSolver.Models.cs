@@ -104,6 +104,7 @@ internal sealed partial class CombatBeamSolver
         public int ParallelExpansionWaves;
         public int ParallelExpansionWorkItems;
         public int MaxParallelExpansionConcurrency;
+        public int NodeLimitSnapshotsReleased;
         public int InitialPersistentBuffValue;
         public int InitialEnemyStrengthSuppression;
         public int InitialEnemyWeakTurns;

@@ -14,6 +14,10 @@
 | `MULTICORE-EARRING-NESTED-CHOICE-DOP2` | 通过 | 工具盒形成首回合多根，低语耳环连续自动打出高密度 `SURVIVOR` 并消费嵌套弃牌选择；精确原版状态检查通过，搜索记录 `4 waves / 8 items / max concurrency 2`。runId `f577be1a8e0a4ebb84aa115d3ab28734` | 2026-08-30 |
 | `MULTICORE-NIBBITS-DOP4` | 通过 | 四条 lane 完成固定双小啃兽搜索，仍为 `573 / 2759`、同一路线与全部剪枝指标；并行遥测 `159 waves / 572 items / max concurrency 4`。runId `54243577aa984e8eb68f2d242a216eb9` | 2026-08-30 |
 | `MULTICORE-INCREMENTAL-FORCED-SERIAL` | 通过 | 请求 DOP4 并开启严格增量回放；首轮完整结果的 `parallel_waves / work_items / max_concurrency` 均为 `0`，逐转移回放一致，第 5 回合结束且计划外重算 `0`。runId `96b7d9fdfbb245d68f4effefcd748b1e` | 2026-08-30 |
+| `MULTICORE-V020-FINAL-POLICY-EQUIVALENCE` | 通过 | 合并 `upstream/main` 的 `v0.20.0` 后，以固定 250 节点先跑 DOP2 再跑 DOP1；动作、选择、评分、展开、转移、全部非时序剪枝、快照、continuation 与回合标注一致。门禁同时断言两档都实际释放节点上限丢弃的 Simulator；runId `c9052d90aa504ae0ba183a5089aa0e07` | 2026-08-30 |
+| `MULTICORE-V020-FULL-AUTO-DOP2-FINAL` | 通过 | 合并态默认 DOP2 完整自动部署双小啃兽，第 5 回合结束、第 3 回合精确复用，零药、零预计战损、计划外重算 `0`；runId `f48b0cebd842466594bd8f30789d589a` | 2026-08-30 |
+| `MULTICORE-MECHA-DOP4/6/8-WARM-NOCACHE` | 通过（headless 迭代基准） | 同一暖进程固定 `4319 / 33087 / 18399` 工作量与第 7 回合/28 战损路线；DOP4/6/8 为 `5451.7 / 4281.3 / 3813.0 ms`，累计分配为 `4,404,184,848 / 4,412,016,024 / 4,415,450,000 B`。runId `db33a20aa0764f068b34a3028ec06beb`、`eab8b0f052634b82be807b3af9ddaec9`、`38e6aed2c8834a4fa0cea8a35e18b6f5`；不替代 Steam 可见性能门槛 | 2026-08-30 |
+| `MULTICORE-V020-MECHA-DOP8-FINAL` | 通过（headless 冷进程） | 当前合并态 DOP8 保持 `4319` 展开、`33087` 转移、`18399` 选牌分支与同一路线；`6366.8 ms / 4,441,356,192 B`，实际最大并发 `8`，结果时工作集 `6,011,162,624 B`，GC `0 ms`、最大帧 `18.0 ms`、无 `>50 ms` 帧。runId `2c38044b3fb44bef85b66032b488271c`；可见 Steam 启动未形成游戏进程，故不写成生产帧率结论 | 2026-08-30 |
 
 ## 0.20.0：在线问题包、跨平台测试与选牌修复
 
