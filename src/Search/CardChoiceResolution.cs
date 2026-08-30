@@ -270,7 +270,6 @@ internal static partial class CardChoiceSupport
             source.Owner.Creature,
             3,
             source.Owner.Creature);
-        power.SetSelectedCard(selected[0].Preview);
         combat.SetNightmareSelection(power, selected[0]);
     }
 

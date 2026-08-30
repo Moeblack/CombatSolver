@@ -26,11 +26,19 @@ internal static class PredictionUtils
     public static TModel CloneModelForSimulation<TModel>(TModel source)
         where TModel : AbstractModel
     {
-        TModel clone = (TModel)InvokeMemberwiseClone(source);
-        clone.IsMutable = true;
-        InvokeDeepCloneFields(clone);
-        InvokeAfterCloned(clone);
-        return clone;
+        bool entered = BaseLibCloneConcurrency.Enter();
+        try
+        {
+            TModel clone = (TModel)InvokeMemberwiseClone(source);
+            clone.IsMutable = true;
+            InvokeDeepCloneFields(clone);
+            InvokeAfterCloned(clone);
+            return clone;
+        }
+        finally
+        {
+            BaseLibCloneConcurrency.Exit(entered);
+        }
     }
 
     public static CardModel CloneCardStateForSimulation(CardModel source)

@@ -551,7 +551,7 @@ internal sealed partial class CombatBeamSolver
         }
         annotationReplay.ReleaseSimulator();
         PlanAction[] annotatedActions = best.Actions
-            .Select((action, actionIndex) => action with
+            .Select((action, actionIndex) => WithDisplayNames(action) with
             {
                 RelicEffects = relicTriggerRecorder.ForAction(actionIndex)
                     .Select(trigger => new PlanRelicEffect(
@@ -636,7 +636,7 @@ internal sealed partial class CombatBeamSolver
             PruneMetric = _run.Performance.Snapshot(SearchMetricPhase.Prune),
             FinalSelectionMetric = _run.Performance.Snapshot(SearchMetricPhase.FinalSelection),
             StartTurnNumber = _startTurnNumber,
-            TurnSetupChoices = best.GetTurnSetupChoices().ToArray(),
+            TurnSetupChoices = best.GetTurnSetupChoices().Select(WithDisplayNames).ToArray(),
             TurnSetupPlayState = best.GetTurnSetupPlayState(),
             BestNode = selectedPlan,
             Snapshot = selectedSnapshot,
@@ -700,5 +700,24 @@ internal sealed partial class CombatBeamSolver
             Continuations = continuations,
         };
     }
+
+    private PlanAction WithDisplayNames(PlanAction action)
+        => action with
+        {
+            Choice = action.Choice == null ? null : WithDisplayNames(action.Choice),
+            NestedChoices = action.NestedChoices?.Select(WithDisplayNames).ToArray(),
+            TurnStartChoices = action.TurnStartChoices?.Select(WithDisplayNames).ToArray(),
+        };
+
+    private PlanCardChoice WithDisplayNames(PlanCardChoice choice)
+        => choice with
+        {
+            Cards = choice.Cards
+                .Select(card => card with
+                {
+                    Title = displayNames.Card(card.CardId, card.UpgradeLevel),
+                })
+                .ToArray(),
+        };
 
 }

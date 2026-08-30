@@ -130,7 +130,9 @@ internal sealed partial class SimulatedCombatState
     {
         MonsterModel monster = creature.Monster
             ?? throw new InvalidOperationException($"生物 {creature.Name} 不是怪物。");
-        IReadOnlyList<string> log = monster.MoveStateMachine?.StateLog.Select(state => state.Id).ToArray() ?? [];
+        List<string> log = monster.MoveStateMachine?.StateLog.Select(state => state.Id).ToList() ?? [];
+        if (log.Count == 0 || !string.Equals(log[^1], current.Id, StringComparison.Ordinal))
+            log.Add(current.Id);
         (_monsterAiStates ??= [])[creature] = new BranchMonsterAiState(
             monster,
             current,

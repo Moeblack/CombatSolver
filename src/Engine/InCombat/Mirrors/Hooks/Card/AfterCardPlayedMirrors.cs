@@ -46,6 +46,27 @@ internal static class AfterCardPlayedMirrors
         LateRegistry.Invoke(listener, context);
     }
 
+    public static void CompleteOrAbort(
+        CombatPredictionSimulator simulator,
+        CardPlay cardPlay,
+        bool completed)
+    {
+        foreach ((AbstractModel model, PaelsLegionPredictionState state) in
+                 simulator.StateStore.ReadEntries<PaelsLegionPredictionState>())
+        {
+            if (state.AffectedCardPlay != cardPlay)
+                continue;
+            state.AffectedCardPlay = null;
+            if (!completed)
+                continue;
+            PaelsLegion relic = model as PaelsLegion
+                ?? throw new InvalidOperationException(
+                    $"佩尔军团预测状态绑定到了 {model.GetType().FullName}。");
+            state.Cooldown = relic.DynamicVars["Turns"].IntValue;
+            state.TriggeredBlockLastTurn = true;
+        }
+    }
+
     private static Registry CreateRegistry()
     {
         var registry = new Registry(AfterCardPlayed);

@@ -552,7 +552,10 @@ internal static class HookMirrors
     }
 
     public static void AbortCardPlayed(CombatPredictionSimulator simulator, CardPlay cardPlay)
-        => BeforeCardPlayedMirrors.CompleteOrAbort(simulator, cardPlay);
+    {
+        BeforeCardPlayedMirrors.CompleteOrAbort(simulator, cardPlay);
+        AfterCardPlayedMirrors.CompleteOrAbort(simulator, cardPlay, completed: false);
+    }
 
     // Mirrors Hook.AfterCardPlayed's ordinary pass followed by a fresh full late pass. Vanilla
     // deliberately iterates the combat state directly so a killing card can finish resolving.
@@ -581,6 +584,7 @@ internal static class HookMirrors
         // A paired listener can be removed by the card being resolved, so it no longer appears in
         // either AfterCardPlayed pass. The pairing belongs to this completed CardPlay transaction.
         BeforeCardPlayedMirrors.CompleteOrAbort(simulator, cardPlay);
+        AfterCardPlayedMirrors.CompleteOrAbort(simulator, cardPlay, completed: true);
     }
 
     // Mirrors Hook.AfterCurrentHpChanged.

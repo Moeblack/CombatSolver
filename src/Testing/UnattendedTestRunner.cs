@@ -885,16 +885,35 @@ internal sealed partial class UnattendedTestRunner
         }
         if (check.TriggerAutoPrePlayAfterPlayerSetup)
         {
-            IReadOnlyList<PlanCardChoice> plannedChoices = BuildAutoPrePlayChoices(
-                simulator,
-                player,
-                check.AutoPrePlayChoiceCardIds);
-            bool pendingChoice = simulatedCombat.TriggerAutoPrePlayEarly(
-                simulator,
-                player,
-                player.PlayerCombatState?.TurnNumber ?? 1,
-                new TurnStartChoiceCursor(plannedChoices),
-                new HashSet<uint>());
+            TurnStartChoiceCursor plannedChoices = check.AutoPrePlayChoiceCardIds.Length == 0
+                ? new TurnStartChoiceCursor(null)
+                : TurnStartChoiceCursor.ForAutomaticPolicy(request =>
+                {
+                    CardChoiceSpec spec = TurnStartChoiceSupport.BuildSpec(simulator, player, request);
+                    return CardChoiceSupport.BuildRequestedChoice(
+                        spec,
+                        check.AutoPrePlayChoiceCardIds) with
+                    {
+                        SourceId = request.SourceId,
+                        ContextId = request.ContextId,
+                        Timing = request.Timing,
+                    };
+                });
+            simulatedCombat.BeginActionChoices(plannedChoices);
+            bool pendingChoice;
+            try
+            {
+                pendingChoice = simulatedCombat.TriggerAutoPrePlayEarly(
+                    simulator,
+                    player,
+                    player.PlayerCombatState?.TurnNumber ?? 1,
+                    plannedChoices,
+                    new HashSet<uint>());
+            }
+            finally
+            {
+                simulatedCombat.EndActionChoices();
+            }
             if (pendingChoice)
                 throw new InvalidOperationException("助能自动出牌仍产生未计划选择。");
         }
@@ -928,12 +947,13 @@ internal sealed partial class UnattendedTestRunner
         }
         if (check.KillEnemyIndexAfterMove is { } simulatedKillIndex)
         {
-            Creature killTarget = ResolveEnemyByIndex(combatState, simulatedKillIndex);
+            Creature killTarget = simulatedCombat.Enemies.ElementAtOrDefault(simulatedKillIndex)
+                ?? throw new InvalidOperationException($"模拟怪物行动测试目标索引 {simulatedKillIndex} 越界。");
             simulator.Kill(killTarget, force: true);
             CorePowerSupport.ApplyEnemyDeathPowers(
                 simulator,
                 simulatedCombat,
-                combatState.Enemies,
+                simulatedCombat.KnownEnemies,
                 new HashSet<uint>());
         }
         if (check.ExpectedSimulatedDynamicResolution is { } expectedDynamic
@@ -1735,31 +1755,6 @@ internal sealed partial class UnattendedTestRunner
     {
         if (check.AssertForkableAfterPlay)
             combat.AssertForkable();
-    }
-
-    private static IReadOnlyList<PlanCardChoice> BuildAutoPrePlayChoices(
-        CombatPredictionSimulator simulator,
-        Player player,
-        IReadOnlyList<string> choiceCardIds)
-    {
-        if (choiceCardIds.Count == 0)
-            return [];
-
-        PredictedCard imbuedCard = simulator.State.GetPlayerCombatState(player).AllCards
-            .FirstOrDefault(card => string.Equals(
-                card.Preview.Enchantment?.Id.Entry,
-                "IMBUED",
-                StringComparison.Ordinal))
-            ?? throw new InvalidOperationException("测试请求了助能选牌，但当前战斗没有助能卡牌。");
-        CardChoiceSpec spec = CardChoiceSupport.GetSpec(simulator, imbuedCard)
-            ?? throw new InvalidOperationException(
-                $"助能卡牌 {imbuedCard.Preview.Id.Entry} 没有可搜索的选牌定义。");
-        PlanCardChoice choice = CardChoiceSupport.BuildRequestedChoice(spec, choiceCardIds) with
-        {
-            SourceId = "IMBUED",
-            ContextId = $"{imbuedCard.Preview.Id.Entry}+{imbuedCard.Preview.CurrentUpgradeLevel}#0",
-        };
-        return [choice];
     }
 
     private static CardModel FindActualHandCard(Player player, string cardId, int occurrence)

@@ -1862,5 +1862,29 @@
     "expected": "玩家新回合开始时同时清零奥斯提的本回合攻击次数和按目标命中次数；第二回合猛晃不读取第一回合历史。",
     "observed": "runId 1d3f201d5c75487f9cf9b70d67635dcf Passed，finishedTurn=2，敌人生命、奥斯提状态、有序牌堆、Power、RNG 与 continuation 全等。",
     "evidence": "coverage/unattended/osty-rattle-turn-counter-0171.json；src/Search/SimulatedCombatState.cs；runId 1d3f201d5c75487f9cf9b70d67635dcf；验证日期 2026-08-29。"
+  },
+  "BATCH-184344-MAYHEM-STRATAGEM-CHOICE": {
+    "status": "Passed",
+    "level": "HeadlessExactSequentialNestedChoiceDifferential",
+    "procedure": "注入花样百出、战略和微光；花样百出自动打出微光，微光抽牌触发洗牌与战略选牌，完成前置选择后再处理微光自己的手牌选择，比较原版与预测的完整状态。",
+    "expected": "自动出牌引发的前置选牌先独占待选槽，解决后恢复同一张牌并发起自身选牌；两条选择不得重叠。",
+    "observed": "runId 0583a87ba9504c54b3b9df92f40398b3 Passed，两层选择按原版顺序完成，牌堆与完整状态严格一致。",
+    "evidence": "coverage/unattended/mayhem-stratagem-choice-sequence.json；runId 0583a87ba9504c54b3b9df92f40398b3；验证日期 2026-08-30。"
+  },
+  "BATCH-184344-ILLUSION-FIRST-MOVE-REVIVE": {
+    "status": "Passed",
+    "level": "HeadlessExactSpawnedMonsterFirstMoveReviveDifferential",
+    "procedure": "由 FOGMOG 召唤利齿之眼，登记新怪物首次正式行动，并在该行动完成前击杀；比较原版与预测的行动历史、复活行动和完整状态。",
+    "expected": "新召唤怪物首次掷出的行动立即写入当前分支历史；行动前死亡时仍能选择幻象复活后的后续行动。",
+    "observed": "runId 2c4c0640cedd45bbac812bab31de22ee Passed，原版与预测均进入 REVIVE_MOVE，完整状态严格一致。",
+    "evidence": "coverage/unattended/illusion-first-move-revive.json；runId 2c4c0640cedd45bbac812bab31de22ee；验证日期 2026-08-30。"
+  },
+  "BATCH-184344-PARALLEL-CLONE-FORK": {
+    "status": "Passed",
+    "level": "HeadlessParallelSearchPolicyEquivalenceAndCardPlayForkBoundary",
+    "procedure": "用缩小甲虫固定搜索根和 250 节点分别运行 DOP1/DOP2，比较动作、选择、评分、快照与回合标注；同时在 CardPlay 完成和中止边界检查 PAELS_LEGION 瞬时状态与 Fork。",
+    "expected": "并行搜索与串行搜索政策等价，BaseLib 克隆不发生共享弱表异常；CardPlay 无论完成或中止都不把临时出牌引用带入后续分支。",
+    "observed": "runId 9678ee908aac427e9fbc5a6d7b17e4cf Passed，DOP1/DOP2 完整政策一致并形成真实并发，两个 CardPlay 边界均稳定 Fork。",
+    "evidence": "src/Engine/Common/BaseLibCloneConcurrency.cs；src/Testing/UnattendedTestRunner.ForkBoundaries.cs；runId 9678ee908aac427e9fbc5a6d7b17e4cf；验证日期 2026-08-30。"
   }
 }

@@ -536,13 +536,6 @@ internal sealed partial class SimulatedCombatState
         int applied = simulated._amount - previousAmount;
         RecordPowerAmountChange(simulated, applied, applier);
         RecordPossessedStatChange(simulated, applied, applier);
-        if (simulated is ShrinkPower shrink
-            && applied != 0
-            && shrink.Applier is { IsMonster: true } shrinkApplier)
-        {
-            ((StringVar)shrink.DynamicVars["ApplierName"]).StringValue =
-                shrinkApplier.Monster!.Title.GetFormattedText();
-        }
         if (simulated is DoomPower && applied > 0 && applier != null)
             (_doomAppliersThisTurn ??= []).Add(applier);
         if (simulated is RitualPower ritual

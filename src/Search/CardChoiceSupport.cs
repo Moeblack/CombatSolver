@@ -138,7 +138,7 @@ internal static partial class CardChoiceSupport
         return new PlanCardChoice(
             spec.Effect,
             spec.SourcePile,
-            ToTokens(selection, spec.Options, spec.SourceCards, static card => card.Title));
+            ToTokens(selection, spec.Options, spec.SourceCards, static card => card.Id.Entry));
     }
 
     public static PlanCardChoice BuildVakuuChoice(CardChoiceSpec spec)
@@ -148,7 +148,7 @@ internal static partial class CardChoiceSupport
         return new PlanCardChoice(
             spec.Effect,
             spec.SourcePile,
-            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Title));
+            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Id.Entry));
     }
 
     public static bool RequiresAutomaticNestedChoice(
@@ -263,7 +263,7 @@ internal static partial class CardChoiceSupport
         return new PlanCardChoice(
             spec.Effect,
             spec.SourcePile,
-            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Title));
+            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Id.Entry));
     }
 
     public static IReadOnlyList<PredictedCard> ResolveStandaloneChoice(

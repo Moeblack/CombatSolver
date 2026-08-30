@@ -49,6 +49,35 @@ internal sealed partial class UnattendedTestRunner
         AssertForkRejected(simulator, "Pen Nib");
         penNib.AttackToDouble = null;
 
+        PaelsLegion paelsLegion = ModelDb.All.OfType<PaelsLegion>().Single();
+        PaelsLegionPredictionState paelsState = simulator.StateStore.Get(
+            (AbstractModel)paelsLegion,
+            () => new PaelsLegionPredictionState(paelsLegion));
+        CardPlay paelsPlay = new()
+        {
+            Card = card,
+            Player = player,
+            Target = null,
+            ResultPile = PileType.Discard,
+            Resources = default,
+            IsAutoPlay = false,
+            PlayIndex = 0,
+            PlayCount = 1,
+        };
+        paelsState.AffectedCardPlay = paelsPlay;
+        AssertForkRejected(simulator, "Pael's Legion");
+        AfterCardPlayedMirrors.CompleteOrAbort(simulator, paelsPlay, completed: true);
+        if (paelsState.AffectedCardPlay != null
+            || paelsState.Cooldown != paelsLegion.DynamicVars["Turns"].IntValue
+            || !paelsState.TriggeredBlockLastTurn)
+        {
+            throw new InvalidOperationException("佩尔军团没有在完整 CardPlay 边界提交格挡触发。");
+        }
+        paelsState.AffectedCardPlay = paelsPlay;
+        AfterCardPlayedMirrors.CompleteOrAbort(simulator, paelsPlay, completed: false);
+        if (paelsState.AffectedCardPlay != null)
+            throw new InvalidOperationException("佩尔军团没有在中止 CardPlay 边界清理瞬时状态。");
+
         Vambrace vambraceRelic = ModelDb.All.OfType<Vambrace>().Single();
         VambracePredictionState vambrace = simulator.StateStore.Get(
             (AbstractModel)vambraceRelic,

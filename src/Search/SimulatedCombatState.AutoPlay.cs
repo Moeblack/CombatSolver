@@ -157,6 +157,8 @@ internal sealed partial class SimulatedCombatState
     {
         if (!CardExecutionSupport.AutoPlay(simulator, this, card, null, processedEnemyDeaths))
             return true;
+        if (HasPendingChoice)
+            return false;
         CardChoiceSpec? spec = CardChoiceSupport.GetSpec(simulator, card);
         PlanCardChoice? emptyChoice = CardChoiceSupport.BuildRequiredEmptyChoice(card.Preview);
         if (spec == null && emptyChoice == null)
