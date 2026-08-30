@@ -79,14 +79,16 @@ CombatRootSnapshot.Capture（主线程根）
 
 ## 5. 验证选择
 
-先建立未改代码的最小基线，再按影响面递增：
+先建立未改代码的最小失败基线，再停在能证明根因的最低层：
 
-1. 目标效果的 actual/simulated 严格差分，比较有序牌堆、逐实例状态、Power、怪物 AI、球与相关 RNG；
-2. 改 Fork、卡牌、Power、AI、死亡、选择或跨回合状态时，运行 `-VerifyIncrementalSearch`（PowerShell）或 `--verify-incremental-search`（Bash）；
-3. 覆盖相邻生命周期，例如回合开始/结束、叠加/移除、死亡/复活或嵌套选择；
-4. 跨回合改动跑完整 headless，固定 `Instant / 0 秒` 并断言零非预期重算；
-5. 改 mirror 支持面、状态字段或 coverage 分类时，运行对应 CoverageCatalog verify；完整发布前再跑全量；
-6. UI、动画或真实卡顿另做可见 Steam 验收。
+1. 默认只跑目标效果的 actual/simulated 严格差分，比较有序牌堆、逐实例状态、Power、怪物 AI、球与相关 RNG；
+2. 新增 Fork 状态时，在同一最小夹具断言 Fork、指纹和重映射；新增跨回合历史或续用字段时，用两回合生命周期或最早 continuation 边界核对 live/predicted；
+3. `-VerifyIncrementalSearch` / `--verify-incremental-search` 只加在实际启动正式搜索并回放候选的 fixture 上，不能给纯一步差分增加无效成本；
+4. 覆盖根因直接相邻的生命周期，例如回合开始/结束、叠加/移除、死亡/复活或嵌套选择；不要自动扩成整场战斗和全部同类模型；
+5. 普通快速迭代的单个 unattended 请求总超时不超过 `120` 秒。搜索使用短预算并在首个目标动作或最早复用回合停止；超时后缩小 fixture 或明确写未验证，不在同一轮延长到 `180/360` 秒；
+6. 完整自动 headless 只在改动搜索/部署编排、较小边界无法覆盖、用户明确要求完整回归/门禁，或要声称整场零重算时运行；固定 `Instant / 0 秒`；
+7. 改 mirror 支持面、状态字段或 coverage 分类时运行对应 CoverageCatalog verify；只有改变目录覆盖面或明确完整门禁时跑全量；
+8. UI、动画或真实卡顿另做可见 Steam 验收。
 
 性能数字不能来自 `-VerifyIncrementalSearch` / `--verify-incremental-search`。通用 helper 改动应覆盖其调用类型族，不只跑最初报告的一个模型。
 
