@@ -130,7 +130,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             basicGrid,
             "搜索并行度",
             CreateSearchParallelismInput(),
-            "关闭时使用纯单线程搜索；2–8 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。默认值为 2；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
+            "关闭时使用纯单线程搜索；2–8 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。默认按可用逻辑处理器自动选择 4、2 或单线程；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
         AddBasicRow(basicGrid, "自动出牌速度", CreateDeploymentFastModeInput());
         AddBasicRow(basicGrid, "牌间额外停顿（秒）", CreateDoubleInput(
             0d,
@@ -296,6 +296,27 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                 return false;
         }
         return true;
+    }
+
+    internal bool ExercisePerformancePresetPersistenceForTesting()
+    {
+        SolverSettingsData original = SolverSettings.Current;
+        try
+        {
+            SolverSettingsData preset = SolverSettings.ApplyPerformancePreset(
+                original,
+                SolverPerformancePreset.High);
+            SolverSettings.ApplyForTesting(preset);
+            Reload();
+            return CommitPending()
+                   && SolverSettings.ResolvePerformancePreset(SolverSettings.Current)
+                   == SolverPerformancePreset.High;
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(original);
+            Reload();
+        }
     }
 
     private void AddIntRow(
@@ -537,6 +558,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             string text = input.Text.Trim();
             if (text.Length == 0)
             {
+                if (getter(SolverSettings.Current) == null)
+                    return KeepUnchanged(input);
                 return Save(input, setter(SolverSettings.Current, null));
             }
             if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value)
@@ -545,6 +568,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                 ShowInvalid(input, $"请输入 {minimum}–{maximum} 的整数");
                 return false;
             }
+            if (getter(SolverSettings.Current) == value)
+                return KeepUnchanged(input);
             return Save(input, setter(SolverSettings.Current, value));
         }
         input.FocusExited += () => Commit();
@@ -569,6 +594,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
             string text = input.Text.Trim();
             if (text.Length == 0)
             {
+                if (getter(SolverSettings.Current) == null)
+                    return KeepUnchanged(input);
                 return Save(input, setter(SolverSettings.Current, null));
             }
             if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
@@ -577,6 +604,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                 ShowInvalid(input, $"请输入 {minimum:0.###}–{maximum:0.###} 的数字");
                 return false;
             }
+            if (getter(SolverSettings.Current) is { } current && current.Equals(value))
+                return KeepUnchanged(input);
             return Save(input, setter(SolverSettings.Current, value));
         }
         input.FocusExited += () => Commit();
@@ -735,6 +764,12 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
         _status.Text = "已保存，下次搜索生效";
+        return true;
+    }
+
+    private static bool KeepUnchanged(LineEdit input)
+    {
+        input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         return true;
     }
 

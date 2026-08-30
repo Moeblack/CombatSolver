@@ -23,6 +23,16 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("在线问题包上传没有配置可视化进度条和单实例按钮初始状态。");
         if (!SolverOverlay.ExerciseUploadCompletionTransitionForTesting())
             throw new InvalidOperationException("上传任务结束前按钮状态提前切回空闲，可能重新打开确认弹窗。");
+        if (!SolverOverlay.ExercisePerformancePresetPersistenceForTesting())
+            throw new InvalidOperationException("性能预设在未修改算力参数时被误判为自定义。");
+        if (SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(1) != 1
+            || SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(2) != 2
+            || SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(3) != 2
+            || SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(4) != 4
+            || SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(32) != 4)
+        {
+            throw new InvalidOperationException("默认搜索并行度没有按逻辑处理器数量解析为 1/2/4。");
+        }
         string parallelFailure = SolverController.FormatSearchFailureForTesting(
             new InvalidOperationException("parallel failure"),
             parallelSearchWasEnabled: true);

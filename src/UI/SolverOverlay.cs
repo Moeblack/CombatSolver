@@ -90,6 +90,8 @@ internal static class SolverOverlay
         => _settingsPanel?.UploadProgressConfiguredForTesting == true;
     internal static bool ExerciseUploadCompletionTransitionForTesting()
         => _settingsPanel?.ExerciseUploadCompletionTransitionForTesting() == true;
+    internal static bool ExercisePerformancePresetPersistenceForTesting()
+        => _settingsPanel?.ExercisePerformancePresetPersistenceForTesting() == true;
 
     public static void Show(Node host, string text)
     {

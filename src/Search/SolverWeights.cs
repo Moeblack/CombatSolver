@@ -74,8 +74,18 @@ internal static class SolverWeights
     public const int SetupValueHorizonTurns = 16;
     public const int IncrementalVerificationMaxTurns = 32;
     public const int UiTurnRows = SetupValueHorizonTurns;
-    public const int DefaultSearchMaxDegreeOfParallelism = 2;
     public const int MaximumSearchMaxDegreeOfParallelism = 8;
+    public static int DefaultSearchMaxDegreeOfParallelism
+        => ResolveDefaultSearchMaxDegreeOfParallelism(Environment.ProcessorCount);
+
+    internal static int ResolveDefaultSearchMaxDegreeOfParallelism(int logicalProcessorCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(logicalProcessorCount, 1);
+        if (logicalProcessorCount >= 4)
+            return 4;
+        return logicalProcessorCount >= 2 ? 2 : 1;
+    }
+
     public const int BackgroundWorkSliceMilliseconds = 4;
     public const int BackgroundYieldCheckInterval = 16;
     public const int ProgressUiIntervalMilliseconds = 200;
