@@ -3,6 +3,7 @@ using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
+using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
@@ -11,6 +12,7 @@ using System.Collections;
 using System.Reflection;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using CombatSolver.Engine.InCombat.Simulation;
 
@@ -30,6 +32,11 @@ internal sealed partial class UnattendedTestRunner
         AssertRitsuCapabilityFastPath(simulator, player, card);
         AssertChoiceRiskScopedToCardPlay(simulator, card);
         AssertChoiceKeyCache(simulator, player, card);
+        AssertChoiceTokenSurvivesStateMutation(combat, player, card);
+        AssertMonsterAiUsesCapturedMachine(combat);
+        AssertCardCompletionSettlesPowerAmountChanges(combat, player);
+        AssertBeforeCardPlayedPowerConsumptionCommits(combat, player);
+        AssertGeneratedCardCreatorDrivesSupermassive(combat, player);
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -126,9 +133,144 @@ internal sealed partial class UnattendedTestRunner
         AssertSparsePowerAfflictionCardTracking(combat, player, card);
         AssertProjectedShuffleEquivalence(simulator, player);
         AssertSpawnHpUsesSimulatedCreatureState(combat);
+        AssertPendingSpawnCanEnterIllusionRevive(combat);
+        AssertDefeatedEnemyRejectsLatePowerApplication(combat, player);
         AssertWhisperingEarringOnlyRunsOnFirstTurn(simulator, simulatedCombat, player);
         AssertPredictionForkContextIdentityIndex();
         AssertForkableListEnumeration();
+    }
+
+    private static void AssertMonsterAiUsesCapturedMachine(CombatState combat)
+    {
+        MonsterModel live = combat.Enemies.FirstOrDefault()?.Monster
+            ?? throw new InvalidOperationException("怪物行动快照测试要求至少有一名敌人。");
+        MonsterModel detached = PredictionUtils.CloneModelForSimulation(live);
+        BranchMonsterAiState state = BranchMonsterAi.Capture(detached);
+        FieldInfo field = typeof(MonsterModel).GetField(
+            "_moveStateMachine",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(MonsterModel).FullName, "_moveStateMachine");
+        field.SetValue(detached, null);
+
+        CombatPredictionSimulator simulator = new(new SimulatedCombatState(combat));
+        _ = BranchMonsterAi.Advance(state, simulator, (SimulatedCombatState)simulator.State.CombatState);
+    }
+
+    private static void AssertChoiceTokenSurvivesStateMutation(
+        CombatState combat,
+        Player player,
+        CardModel liveCard)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        SimPlayerCombatState state = simulator.State.GetPlayerCombatState(player);
+        PredictedCard card = state.FindCard(liveCard)
+            ?? throw new InvalidOperationException("选牌身份测试找不到目标手牌。");
+        CardChoiceSpec spec = new(
+            PlanChoiceEffect.Discard,
+            PileType.Hand,
+            1,
+            1,
+            [card],
+            state.Hand.Cards,
+            ReplacementValue: 0d);
+        PlanCardChoice choice = CardChoiceSupport.BuildRequestedChoice(
+            spec,
+            [card.Preview.Id.Entry]);
+
+        card.MutablePreview.ExhaustOnNextPlay = !card.Preview.ExhaustOnNextPlay;
+        IReadOnlyList<PredictedCard> selected = CardChoiceSupport.ResolveStandaloneChoice(
+            simulator,
+            choice,
+            [card],
+            expectedCount: 1,
+            PileType.Hand);
+        if (!ReferenceEquals(selected.Single(), card))
+            throw new InvalidOperationException("选牌令牌没有在卡牌状态变化后保持实体身份。");
+    }
+
+    private static void AssertCardCompletionSettlesPowerAmountChanges(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        simulatedCombat.Apply<StrengthPower>(
+            player.Creature,
+            1,
+            player.Creature);
+        StrengthPower power = simulatedCombat.GetPower<StrengthPower>(player.Creature)
+            ?? throw new InvalidOperationException("力量影子层数测试没有建立力量。");
+        PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, simulatedCombat);
+        PowerAmountPredictionState shadow = simulator.StateStore.GetPowerAmount(power);
+        shadow.Amount = power.Amount + 1;
+
+        ((ICombatPredictionCardExecutionSink)simulatedCombat).CompleteCardExecution(simulator);
+        if (power.Amount != shadow.Amount)
+            throw new InvalidOperationException("出牌事务结束后没有提交力量影子层数。");
+        _ = simulator.Fork();
+    }
+
+    private static void AssertBeforeCardPlayedPowerConsumptionCommits(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        simulatedCombat.Apply<FreePowerPower>(player.Creature, 2, player.Creature);
+        PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, simulatedCombat);
+        PredictedCard powerCard = PredictedCard.Create(
+            ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.MachineLearning>(),
+            player);
+        simulator.AddGeneratedCardToCombat(
+            powerCard,
+            PileType.Hand,
+            player,
+            resultKind: CardGenerationResultKind.Fixed);
+
+        simulator.ManualPlay(powerCard, target: null, out _);
+        if (simulatedCombat.GetAmount<FreePowerPower>(player.Creature) != 1)
+            throw new InvalidOperationException("免费能力层数没有在卡牌效果开始前提交消耗。");
+        _ = simulator.Fork();
+    }
+
+    private static void AssertGeneratedCardCreatorDrivesSupermassive(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        PredictedCard supermassive = PredictedCard.Create(
+            ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.Supermassive>(),
+            player);
+        decimal baseline = CalculateSupermassive(simulator, supermassive);
+
+        simulator.CreateAndAddGeneratedCardsToCombat<MegaCrit.Sts2.Core.Models.Cards.Debris>(
+            player,
+            PileType.Discard,
+            1,
+            creator: null);
+        if (CalculateSupermassive(simulator, supermassive) != baseline)
+            throw new InvalidOperationException("无创建者的生成牌被超质量体计入。");
+
+        simulator.CreateAndAddGeneratedCardsToCombat<MegaCrit.Sts2.Core.Models.Cards.Debris>(
+            player,
+            PileType.Discard,
+            1,
+            creator: player);
+        decimal expected = baseline + supermassive.Preview.DynamicVars.ExtraDamage.BaseValue;
+        if (CalculateSupermassive(simulator, supermassive) != expected)
+            throw new InvalidOperationException("玩家创建的生成牌没有被超质量体计入。");
+    }
+
+    private static decimal CalculateSupermassive(
+        CombatPredictionSimulator simulator,
+        PredictedCard card)
+    {
+        CalculatedVar calculated = (CalculatedVar)card.Preview.DynamicVars.CalculatedDamage;
+        if (!CalculatedVarSpecRegistry.TryCalculate(calculated, simulator, card, target: null, out decimal value))
+            throw new InvalidOperationException("超质量体计算夹具未命中支持注册表。");
+        return value;
     }
 
     private static void AssertSpawnHpUsesSimulatedCreatureState(CombatState combat)
@@ -177,6 +319,47 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException(
                 $"新怪物生命判重没有采用模拟状态；actual={string.Join(',', spawned.Order())}。");
         }
+    }
+
+    private static void AssertPendingSpawnCanEnterIllusionRevive(CombatState combat)
+    {
+        SimulatedCombatState simulatedCombat = new(combat)
+        {
+            CurrentSide = CombatSide.Enemy,
+        };
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        Creature source = simulatedCombat.Enemies.First();
+        Creature illusion = MonsterSpawnSupport.Spawn<MegaCrit.Sts2.Core.Models.Monsters.Parafright>(
+            simulator,
+            simulatedCombat,
+            source,
+            slot: null,
+            minion: true);
+        if (simulatedCombat.GetPredictedMoveId(illusion) != "SLAM_MOVE")
+            throw new InvalidOperationException("敌方回合生成的幻象没有保留原版初始行动记录。");
+
+        simulatedCombat.BeginIllusionRevive(illusion);
+        simulatedCombat.PrepareMonsterMoveForNextRound(simulator, illusion, performedMove: null);
+        if (simulatedCombat.GetPredictedMoveId(illusion) != "REVIVE_MOVE")
+            throw new InvalidOperationException("幻象复活动作被待处理的初始行动覆盖。");
+    }
+
+    private static void AssertDefeatedEnemyRejectsLatePowerApplication(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        Creature enemy = simulatedCombat.Enemies.First();
+        simulator.State.GetCreature(enemy).CurrentHp = 0;
+        CorePowerSupport.ApplyEnemyDeathPowers(
+            simulator,
+            simulatedCombat,
+            simulatedCombat.KnownEnemies,
+            new HashSet<uint>());
+        simulatedCombat.Apply<VulnerablePower>(enemy, 2, player.Creature);
+        if (simulatedCombat.GetAmount<VulnerablePower>(enemy) != 0)
+            throw new InvalidOperationException("永久死亡的敌人仍然接收了后续 Power。");
     }
 
     private static void AssertWhisperingEarringOnlyRunsOnFirstTurn(

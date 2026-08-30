@@ -389,9 +389,9 @@ internal static partial class CardChoiceSupport
         {
             string stateKey = ChoiceCardKey(card);
             int sourceOccurrence = source.TakeWhile(item => !ReferenceEquals(item, card))
-                .Count(item => ChoiceCardKey(item) == stateKey);
+                .Count(item => HasStableTokenIdentity(item, card));
             int optionOccurrence = options.TakeWhile(item => !ReferenceEquals(item, card))
-                .Count(item => ChoiceCardKey(item) == stateKey);
+                .Count(item => HasStableTokenIdentity(item, card));
             tokens.Add(new PlanCardToken(
                 card.Preview.Id.Entry,
                 card.Preview.CurrentUpgradeLevel,
@@ -472,11 +472,13 @@ internal static partial class CardChoiceSupport
 
     internal static bool MatchesToken(CardModel card, PlanCardToken token)
         => card.Id.Entry == token.CardId
-            && card.CurrentUpgradeLevel == token.UpgradeLevel
-            && (token.StateKey.Length == 0 || ChoiceCardKey(card) == token.StateKey);
+            && card.CurrentUpgradeLevel == token.UpgradeLevel;
 
     internal static bool MatchesToken(PredictedCard card, PlanCardToken token)
         => card.Preview.Id.Entry == token.CardId
-            && card.Preview.CurrentUpgradeLevel == token.UpgradeLevel
-            && (token.StateKey.Length == 0 || ChoiceCardKey(card) == token.StateKey);
+            && card.Preview.CurrentUpgradeLevel == token.UpgradeLevel;
+
+    private static bool HasStableTokenIdentity(PredictedCard left, PredictedCard right)
+        => left.Preview.Id.Entry == right.Preview.Id.Entry
+            && left.Preview.CurrentUpgradeLevel == right.Preview.CurrentUpgradeLevel;
 }

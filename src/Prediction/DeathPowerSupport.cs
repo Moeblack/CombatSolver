@@ -129,6 +129,7 @@ internal static class DeathPowerSupport
         }
         combat.RecoverStolenResources(simulator, dead);
         combat.RemovePowersAfterDeath(dead);
+        combat.CompleteDeathPhase(dead);
     }
 
 }

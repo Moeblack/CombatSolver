@@ -124,6 +124,22 @@ internal sealed partial class SimulatedCombatState
         ForceMonsterMove(creature, "DEAD_MOVE");
     }
 
+    public void CompleteDeathPhase(Creature creature)
+    {
+        if (_deathPhases?.GetValueOrDefault(creature) is not PredictedDeathPhase.Reviving)
+            SetDeathPhase(creature, PredictedDeathPhase.PermanentlyDead);
+    }
+
+    private bool CanReceivePredictedPowers(Creature creature)
+    {
+        PredictedDeathPhase phase = _deathPhases?.GetValueOrDefault(creature)
+            ?? PredictedDeathPhase.None;
+        if (phase == PredictedDeathPhase.PermanentlyDead)
+            return false;
+        return phase != PredictedDeathPhase.Reviving
+            || GetAmount<IllusionPower>(creature) <= 0;
+    }
+
     public void ResolveReviveMove(
         CombatPredictionSimulator simulator,
         Creature creature,

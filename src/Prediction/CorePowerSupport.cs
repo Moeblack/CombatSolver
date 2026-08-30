@@ -38,6 +38,11 @@ internal static class CorePowerSupport
             cardPlay,
             target,
             processedEnemyDeaths);
+        ApplyEnemyDeathPowers(
+            simulator,
+            combat,
+            combat.KnownEnemies,
+            processedEnemyDeaths);
         combat.ResolveMonologues(owner, pendingMonologues);
         combat.SynchronizePanacheState(simulator, owner);
         if (card is Armaments or IronWave or Taunt)

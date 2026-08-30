@@ -1,5 +1,6 @@
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using CombatSolver.Engine.Common;
 
@@ -192,12 +193,14 @@ internal sealed class CombatPredictionHistory(PredictionTrace trace)
 
     public CombatPredictionCardGeneratedEntry CardGenerated(
         PredictedCard card,
+        Player? creator,
         CardGenerationResultKind resultKind)
     {
         _pendingDeferredEntries++;
         return Record(new CombatPredictionCardGeneratedEntry
         {
             Card = CombatPredictionCardSnapshot.Capture(card),
+            Creator = creator,
             ResultKind = resultKind
         });
     }

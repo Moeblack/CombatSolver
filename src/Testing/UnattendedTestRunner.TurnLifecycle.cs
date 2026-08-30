@@ -145,20 +145,20 @@ internal sealed partial class UnattendedTestRunner
         {
             if (combat.PrepareBeforeHandDraw(simulator, player, choices))
                 throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌前结算。");
+            int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
+                combat,
+                player,
+                CombatManager.baseHandDrawCount);
+            int historyEntryStart = simulator.History.Entries.Count;
+            simulator.Draw(player, drawCount, fromHandDraw: true);
+            TriggeredPowerSupport.CompensateHistorySince(simulator, combat, historyEntryStart);
+            if (combat.TriggerPlayerTurnStart(
+                    simulator,
+                    player.Creature,
+                    choices,
+                    sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
+                throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌后结算。");
         }
-        int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
-            combat,
-            player,
-            CombatManager.baseHandDrawCount);
-        int historyEntryStart = simulator.History.Entries.Count;
-        simulator.Draw(player, drawCount, fromHandDraw: true);
-        TriggeredPowerSupport.CompensateHistorySince(simulator, combat, historyEntryStart);
-        if (combat.TriggerPlayerTurnStart(
-                simulator,
-                player.Creature,
-                choices,
-                sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
-            throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌后结算。");
         choices.AssertConsumed();
     }
 

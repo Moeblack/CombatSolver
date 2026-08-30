@@ -218,6 +218,7 @@ internal sealed partial class SimulatedCombatState
     {
         TriggeredPowerSupport.CompensateHistorySince(simulator, this, historyEntryStart);
         simulator.SynchronizePowerAmountPredictionStates();
+        PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, this);
         int ownerBlockAfter = simulator.State.GetCreature(card.Preview.Owner.Creature).Block;
         RecordCardPlayed(card, ownerBlockAfter > ownerBlockBefore);
         RecordCardLifecycle(simulator, card);
@@ -232,6 +233,8 @@ internal sealed partial class SimulatedCombatState
             this,
             KnownEnemies,
             processedEnemyDeaths);
+        simulator.SynchronizePowerAmountPredictionStates();
+        PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, this);
     }
 
     void ICombatPredictionEnemyDeathSink.ResolvePendingEnemyDeaths(

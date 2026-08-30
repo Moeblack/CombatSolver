@@ -49,7 +49,7 @@ internal sealed partial class SimulatedCombatState
         BranchMonsterAiState state = GetMonsterAiState(creature);
         string lastStateId = state.StateLog.LastOrDefault()
             ?? throw new InvalidOperationException($"怪物 {state.Monster.Id.Entry} 没有行动历史。");
-        MonsterState lastState = state.Monster.MoveStateMachine?.States.GetValueOrDefault(lastStateId)
+        MonsterState lastState = state.Machine.States.GetValueOrDefault(lastStateId)
             ?? throw new InvalidOperationException(
                 $"怪物 {state.Monster.Id.Entry} 的行动历史包含未知状态 {lastStateId}。");
         return lastState.GetNextState(creature, rng);
@@ -57,17 +57,20 @@ internal sealed partial class SimulatedCombatState
 
     public void ForceMonsterMove(Creature creature, string moveId)
     {
-        MonsterModel monster = creature.Monster
-            ?? throw new InvalidOperationException($"生物 {creature.Name} 不是怪物。");
-        MoveState move = monster.MoveStateMachine?.States.GetValueOrDefault(moveId) as MoveState
-            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动 {moveId}。");
+        BranchMonsterAiState current = GetMonsterAiState(creature);
+        MoveState move = current.Machine.States.GetValueOrDefault(moveId) as MoveState
+            ?? throw new InvalidOperationException($"怪物 {current.Monster.Id.Entry} 没有行动 {moveId}。");
         ForceMonsterMove(creature, move);
     }
 
     public void ForceMonsterMove(Creature creature, MoveState move)
     {
         BranchMonsterAiState current = GetMonsterAiState(creature);
-        (_monsterAiStates ??= [])[creature] = current with { Current = move };
+        (_monsterAiStates ??= [])[creature] = current with
+        {
+            Current = move,
+            NeedsInitialRoll = false,
+        };
     }
 
     public void ForceStunnedMove(Creature creature, string? nextMoveId = null)
@@ -109,7 +112,7 @@ internal sealed partial class SimulatedCombatState
         BranchMonsterAiState current = GetMonsterAiState(enemy);
         if (current.NeedsInitialRoll)
         {
-            MoveState initial = current.Monster.MoveStateMachine!.RollMove(
+            MoveState initial = current.Machine.RollMove(
                 PlayerCreatures,
                 enemy,
                 simulator.Rng.MonsterAi);
@@ -130,11 +133,14 @@ internal sealed partial class SimulatedCombatState
     {
         MonsterModel monster = creature.Monster
             ?? throw new InvalidOperationException($"生物 {creature.Name} 不是怪物。");
-        List<string> log = monster.MoveStateMachine?.StateLog.Select(state => state.Id).ToList() ?? [];
+        MonsterMoveStateMachine machine = monster.MoveStateMachine
+            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
+        List<string> log = machine.StateLog.Select(state => state.Id).ToList();
         if (log.Count == 0 || !string.Equals(log[^1], current.Id, StringComparison.Ordinal))
             log.Add(current.Id);
         (_monsterAiStates ??= [])[creature] = new BranchMonsterAiState(
             monster,
+            machine,
             current,
             log,
             0,
@@ -145,10 +151,16 @@ internal sealed partial class SimulatedCombatState
     {
         MonsterModel monster = creature.Monster
             ?? throw new InvalidOperationException($"生物 {creature.Name} 不是怪物。");
+        MonsterMoveStateMachine machine = monster.MoveStateMachine
+            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
+        List<string> log = machine.StateLog.Select(state => state.Id).ToList();
+        MoveState initial = machine.StateLog.LastOrDefault() as MoveState
+            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有初始行动记录。");
         (_monsterAiStates ??= [])[creature] = new BranchMonsterAiState(
             monster,
-            new MoveState(),
-            [],
+            machine,
+            initial,
+            log,
             0,
             BranchMonsterStaticSnapshot.Capture(monster),
             NeedsInitialRoll: true);

@@ -111,7 +111,11 @@ internal static class TurnStartPowerSupport
             {
                 SimPlayerCombatState state = simulator.State.GetPlayerCombatState(player);
                 if (state.DrawPile.IsEmpty && !state.DiscardPile.IsEmpty)
+                {
                     simulator.Shuffle(player);
+                    if (combat.HasPendingChoice)
+                        return true;
+                }
                 if (!TurnStartChoiceSupport.Resolve(
                         simulator,
                         combat,

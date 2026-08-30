@@ -150,7 +150,7 @@ internal static class CalculatedVarSpecRegistry
 
     private static int CountGeneratedCards(CombatPredictionSimulator simulator, Player player)
         => CombatManager.Instance.History.Entries.OfType<CardGeneratedEntry>().Count(entry => entry.Creator == player)
-           + simulator.History.OfType<CombatPredictionCardGeneratedEntry>().Count(entry => entry.Card.Owner == player);
+           + simulator.History.OfType<CombatPredictionCardGeneratedEntry>().Count(entry => entry.Creator == player);
 
     private static int CountLightningChannels(CombatPredictionSimulator simulator, Player player)
         => CombatManager.Instance.History.Entries.OfType<OrbChanneledEntry>()

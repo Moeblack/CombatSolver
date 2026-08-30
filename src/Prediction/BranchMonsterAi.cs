@@ -11,6 +11,7 @@ namespace CombatSolver;
 
 internal sealed record BranchMonsterAiState(
     MonsterModel Monster,
+    MonsterMoveStateMachine Machine,
     MoveState Current,
     IReadOnlyList<string> StateLog,
     int KnowledgeDemonCurseCounter,
@@ -106,14 +107,19 @@ internal sealed record BranchMonsterStaticSnapshot(
 internal static class BranchMonsterAi
 {
     public static BranchMonsterAiState Capture(MonsterModel monster)
-        => new(
+    {
+        MonsterMoveStateMachine machine = monster.MoveStateMachine
+            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
+        return new(
             monster,
+            machine,
             monster.NextMove,
-            monster.MoveStateMachine?.StateLog.Select(state => state.Id).ToArray() ?? [],
+            machine.StateLog.Select(state => state.Id).ToArray(),
             monster.GetType().Name == "KnowledgeDemon"
                 ? MonsterValueReader.ReadInt(monster, "_curseOfKnowledgeCounter")
                 : 0,
             BranchMonsterStaticSnapshot.Capture(monster));
+    }
 
     public static ForecastMove CurrentMove(BranchMonsterAiState state, SimulatedCombatState combat)
     {
@@ -143,8 +149,7 @@ internal static class BranchMonsterAi
         SimulatedCombatState combat)
     {
         Rng rng = simulator.Rng.MonsterAi;
-        MonsterMoveStateMachine machine = source.Monster.MoveStateMachine
-            ?? throw new InvalidOperationException($"怪物 {source.Monster.Id.Entry} 没有行动状态机。");
+        MonsterMoveStateMachine machine = source.Machine;
         int knowledgeCounter = source.KnowledgeDemonCurseCounter;
         List<string> log = new(source.StateLog);
 

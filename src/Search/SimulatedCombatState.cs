@@ -523,7 +523,7 @@ internal sealed partial class SimulatedCombatState
 
     public void Apply<T>(Creature target, int amount, Creature? applier = null) where T : PowerModel
     {
-        if (amount == 0)
+        if (amount == 0 || !CanReceivePredictedPowers(target))
             return;
         T incoming = CreatePowerForApplication<T>(target, target, applier);
         amount = ModifyPowerAmountForRelics(incoming, target, amount, applier);

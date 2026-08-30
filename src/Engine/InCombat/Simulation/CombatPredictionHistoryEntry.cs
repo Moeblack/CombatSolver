@@ -122,6 +122,7 @@ internal sealed class CombatPredictionCardsSelectedEntry : CombatPredictionHisto
 internal sealed class CombatPredictionCardGeneratedEntry : CombatPredictionHistoryEntry
 {
     public required CombatPredictionCardSnapshot Card { get; init; }
+    public required Player? Creator { get; init; }
     public required CardGenerationResultKind ResultKind { get; init; }
 }
 

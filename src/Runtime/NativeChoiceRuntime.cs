@@ -441,8 +441,7 @@ internal sealed class NativeChoiceSession : IDisposable
                 ? request.Options
                     .Select((option, index) => (Option: option, Observed: request.ObservedOptions![index]))
                     .Where(option => option.Observed.CardId == token.CardId
-                        && option.Observed.UpgradeLevel == token.UpgradeLevel
-                        && (token.StateKey.Length == 0 || option.Observed.StateKey == token.StateKey))
+                        && option.Observed.UpgradeLevel == token.UpgradeLevel)
                     .Skip(token.OptionOccurrence)
                     .Select(static option => option.Option)
                     .FirstOrDefault()

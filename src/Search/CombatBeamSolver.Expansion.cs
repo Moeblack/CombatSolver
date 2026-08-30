@@ -836,53 +836,53 @@ internal sealed partial class CombatBeamSolver
                        decrementPlating: _startTurnNumber != 1);
                    sideTurnStartTriggeredEarly = true;
                }))
-        {
-            if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, choices))
-                return SearchBoundaryReason.PendingChoice;
-        }
-
-        int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
-            simulatedCombat,
-            _player,
-            CombatManager.baseHandDrawCount);
-        if (_startTurnNumber == 1)
-        {
-            SimCardPile drawPile = playerState.DrawPile;
-            PredictedCard[] bottomCards = drawPile.Cards
-                .Where(card => card.Preview.Enchantment?.ShouldStartAtBottomOfDrawPile ?? false)
-                .ToArray();
-            foreach (PredictedCard card in bottomCards)
             {
-                drawPile.Remove(card);
-                drawPile.Add(card);
-            }
-            PredictedCard[] innateCards = drawPile.Cards
-                .Where(card => card.Preview.Keywords.Contains(CardKeyword.Innate))
-                .Except(bottomCards)
-                .ToArray();
-            foreach (PredictedCard card in innateCards)
-            {
-                drawPile.Remove(card);
-                drawPile.Insert(0, card);
-            }
-            drawCount = Math.Max(drawCount, innateCards.Length);
-            drawCount = Math.Min(drawCount, simulatedCombat.GetMaxHandSize(_player));
-        }
+                if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, choices))
+                    return SearchBoundaryReason.PendingChoice;
 
-        int historyEntryStart = simulator.History.Entries.Count;
-        simulator.Draw(_player, drawCount, fromHandDraw: true);
-        if (simulatedCombat.HasPendingChoice)
-            return SearchBoundaryReason.PendingChoice;
-        TriggeredPowerSupport.CompensateHistorySince(
-            simulator,
-            simulatedCombat,
-            historyEntryStart);
-        if (simulatedCombat.TriggerPlayerTurnStart(
-                simulator,
-                _player.Creature,
-                choices,
-                sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
-            return SearchBoundaryReason.PendingChoice;
+                int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
+                    simulatedCombat,
+                    _player,
+                    CombatManager.baseHandDrawCount);
+                if (_startTurnNumber == 1)
+                {
+                    SimCardPile drawPile = playerState.DrawPile;
+                    PredictedCard[] bottomCards = drawPile.Cards
+                        .Where(card => card.Preview.Enchantment?.ShouldStartAtBottomOfDrawPile ?? false)
+                        .ToArray();
+                    foreach (PredictedCard card in bottomCards)
+                    {
+                        drawPile.Remove(card);
+                        drawPile.Add(card);
+                    }
+                    PredictedCard[] innateCards = drawPile.Cards
+                        .Where(card => card.Preview.Keywords.Contains(CardKeyword.Innate))
+                        .Except(bottomCards)
+                        .ToArray();
+                    foreach (PredictedCard card in innateCards)
+                    {
+                        drawPile.Remove(card);
+                        drawPile.Insert(0, card);
+                    }
+                    drawCount = Math.Max(drawCount, innateCards.Length);
+                    drawCount = Math.Min(drawCount, simulatedCombat.GetMaxHandSize(_player));
+                }
+
+                int historyEntryStart = simulator.History.Entries.Count;
+                simulator.Draw(_player, drawCount, fromHandDraw: true);
+                if (simulatedCombat.HasPendingChoice)
+                    return SearchBoundaryReason.PendingChoice;
+                TriggeredPowerSupport.CompensateHistorySince(
+                    simulator,
+                    simulatedCombat,
+                    historyEntryStart);
+                if (simulatedCombat.TriggerPlayerTurnStart(
+                        simulator,
+                        _player.Creature,
+                        choices,
+                        sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
+                    return SearchBoundaryReason.PendingChoice;
+            }
         CorePowerSupport.ApplyEnemyDeathPowers(
             simulator,
             simulatedCombat,
@@ -1529,32 +1529,32 @@ internal sealed partial class CombatBeamSolver
             {
                 if (simulatedCombat.PrepareBeforeHandDraw(simulator, _player, roundChoices))
                     return SearchBoundaryReason.PendingChoice;
+                shufflesCrossed += simulator.ShuffleEventCount - beforeHandDrawShuffleEvents;
+                int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
+                    simulatedCombat,
+                    _player,
+                    CombatManager.baseHandDrawCount);
+                int effectiveDraw = Math.Min(
+                    drawCount,
+                    simulatedCombat.GetMaxHandSize(_player) - playerState.Hand.Cards.Count);
+                bool willShuffle = effectiveDraw > playerState.DrawPile.Cards.Count
+                    && !playerState.DiscardPile.IsEmpty;
+                int historyEntryStart = simulator.History.Entries.Count;
+                using (_run.Performance.Measure(SearchMetricPhase.RoundDraw))
+                    simulator.Draw(_player, drawCount, fromHandDraw: true);
+                if (willShuffle)
+                    shufflesCrossed++;
+                if (simulatedCombat.HasPendingChoice)
+                    return SearchBoundaryReason.PendingChoice;
+                TriggeredPowerSupport.CompensateHistorySince(simulator, simulatedCombat, historyEntryStart);
+                if (simulatedCombat.TriggerPlayerTurnStart(
+                        simulator,
+                        _player.Creature,
+                        roundChoices,
+                        takingExtraTurn,
+                        sideTurnStartTriggeredEarly))
+                    return SearchBoundaryReason.PendingChoice;
             }
-            shufflesCrossed += simulator.ShuffleEventCount - beforeHandDrawShuffleEvents;
-            int drawCount = PersistentPowerSupport.ConsumeModifiedHandDraw(
-                simulatedCombat,
-                _player,
-                CombatManager.baseHandDrawCount);
-            int effectiveDraw = Math.Min(
-                drawCount,
-                simulatedCombat.GetMaxHandSize(_player) - playerState.Hand.Cards.Count);
-            bool willShuffle = effectiveDraw > playerState.DrawPile.Cards.Count
-                && !playerState.DiscardPile.IsEmpty;
-            int historyEntryStart = simulator.History.Entries.Count;
-            using (_run.Performance.Measure(SearchMetricPhase.RoundDraw))
-                simulator.Draw(_player, drawCount, fromHandDraw: true);
-            if (willShuffle)
-                shufflesCrossed++;
-            if (simulatedCombat.HasPendingChoice)
-                return SearchBoundaryReason.PendingChoice;
-            TriggeredPowerSupport.CompensateHistorySince(simulator, simulatedCombat, historyEntryStart);
-            if (simulatedCombat.TriggerPlayerTurnStart(
-                    simulator,
-                    _player.Creature,
-                    roundChoices,
-                    takingExtraTurn,
-                    sideTurnStartTriggeredEarly))
-                return SearchBoundaryReason.PendingChoice;
             CorePowerSupport.ApplyEnemyDeathPowers(
                 simulator, simulatedCombat, simulatedCombat.KnownEnemies, processedEnemyDeaths);
             if (simulatedCombat.HasPendingChoice)

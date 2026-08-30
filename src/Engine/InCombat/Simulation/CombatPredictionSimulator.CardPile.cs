@@ -224,7 +224,7 @@ internal sealed partial class CombatPredictionSimulator
 
         foreach (var card in cards)
         {
-            var entry = History.CardGenerated(card, resultKind);
+            var entry = History.CardGenerated(card, creator, resultKind);
             results.Add(AddToPile(card, newPileType, position));
 
             HookMirrors.AfterCardGeneratedForCombat(this, card, creator);
