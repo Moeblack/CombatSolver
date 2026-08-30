@@ -30,6 +30,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     private long _uploadTotalBytes;
     private int _lastRenderedUploadPercentage = -1;
     private string? _uploadSubmissionId;
+    private UploadCompletion? _uploadCompletion;
 
     public event Action? ResetPositionRequested;
 
@@ -240,7 +241,11 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
 
     public override void _Process(double delta)
     {
-        if (!_uploadInProgress || _uploadCancelRequested)
+        if (!_uploadInProgress)
+            return;
+        if (TryApplyUploadCompletion())
+            return;
+        if (_uploadCancelRequested)
             return;
         long total = Interlocked.Read(ref _uploadTotalBytes);
         long sent = Interlocked.Read(ref _uploadBytesSent);
@@ -799,6 +804,7 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         _uploadInProgress = true;
         _uploadCancelRequested = false;
         _uploadCancellation = new CancellationTokenSource();
+        Interlocked.Exchange(ref _uploadCompletion, null);
         Interlocked.Exchange(ref _uploadBytesSent, 0);
         Interlocked.Exchange(ref _uploadTotalBytes, 0);
         _lastRenderedUploadPercentage = -1;
@@ -822,7 +828,6 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         CancellationToken cancellationToken)
     {
         string? path = null;
-        bool uploadConfirmed = false;
         try
         {
             string descriptionWithClassification = SolverController.BuildBugReportDescription(description);
@@ -849,93 +854,130 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
                 submissionId,
                 progress,
                 cancellationToken);
-            uploadConfirmed = true;
             Entry.Logger.Info(
                 $"[CombatSolver/Test] BUG_REPORT_UPLOAD_CONFIRMED submission_id={submissionId} report_id={receipt.ReportId} status={(int)receipt.StatusCode} zip_bytes={receipt.SizeBytes}");
             string? cleanupWarning = DeleteUploadedArchive(path);
-            PostUi(() =>
-            {
-                _uploadProgress.Value = 100;
-                _uploadProgress.Visible = true;
-                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Success);
-                _status.Text = cleanupWarning == null
+            PublishUploadCompletion(new UploadCompletion(
+                UploadCompletionKind.Succeeded,
+                cleanupWarning == null
                     ? $"已上传 {FormatByteCount(receipt.SizeBytes)}，反馈编号：{receipt.ReportId}"
-                    : $"已上传 {FormatByteCount(receipt.SizeBytes)}，反馈编号：{receipt.ReportId}；{cleanupWarning}";
-            });
+                    : $"已上传 {FormatByteCount(receipt.SizeBytes)}，反馈编号：{receipt.ReportId}；{cleanupWarning}",
+                receipt.SizeBytes));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             Entry.Logger.Info($"[CombatSolver/Test] BUG_REPORT_UPLOAD_CANCELED submission_id={submissionId}");
-            PostUi(() =>
-            {
-                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Warning);
-                _status.Text = path == null
+            PublishUploadCompletion(new UploadCompletion(
+                UploadCompletionKind.Canceled,
+                path == null
                     ? "上传已取消"
-                    : "上传已取消；未收到服务器确认，问题包已保留";
-            });
+                    : "上传已取消；未收到服务器确认，问题包已保留",
+                0));
         }
         catch (TaskCanceledException ex)
         {
             Entry.Logger.Error(
                 $"[CombatSolver/Test] BUG_REPORT_UPLOAD_UNCONFIRMED submission_id={submissionId} exception={ex}");
-            PostUi(() =>
-            {
-                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
-                _status.Text = "上传结果未确认；问题包已保留，请勿立即重复提交";
-            });
+            PublishUploadCompletion(new UploadCompletion(
+                UploadCompletionKind.Failed,
+                "上传结果未确认；问题包已保留，请勿立即重复提交",
+                0));
         }
         catch (Exception ex)
         {
             Entry.Logger.Error(
                 $"[CombatSolver/Test] BUG_REPORT_UPLOAD_FAILED submission_id={submissionId} exception={ex}");
-            PostUi(() =>
-            {
-                _status.AddThemeColorOverride("font_color", SolverUiTokens.Palette.Danger);
-                _status.Text = path == null
+            PublishUploadCompletion(new UploadCompletion(
+                UploadCompletionKind.Failed,
+                path == null
                     ? $"打包失败：{DescribeUiFailure(ex)}"
-                    : $"上传未完成：{DescribeUiFailure(ex)}（问题包已保留）";
-            });
-        }
-        finally
-        {
-            CancellationTokenSource? completedCancellation = _uploadCancellation;
-            PostUi(() => CompleteUploadOperation(uploadConfirmed, completedCancellation));
+                    : $"上传未完成：{DescribeUiFailure(ex)}（问题包已保留）",
+                0));
         }
     }
 
-    private void CompleteUploadOperation(
-        bool uploadConfirmed,
-        CancellationTokenSource? completedCancellation)
+    private void PublishUploadCompletion(UploadCompletion completion)
+        => Interlocked.Exchange(ref _uploadCompletion, completion);
+
+    private bool TryApplyUploadCompletion()
     {
-        if (!ReferenceEquals(_uploadCancellation, completedCancellation))
-            return;
+        UploadCompletion? completion = Interlocked.Exchange(ref _uploadCompletion, null);
+        if (completion == null)
+            return false;
+        string submissionId = _uploadSubmissionId ?? "unknown";
         _uploadInProgress = false;
         _uploadCancelRequested = false;
+        CancellationTokenSource? completedCancellation = _uploadCancellation;
         _uploadCancellation = null;
         _uploadSubmissionId = null;
         completedCancellation?.Dispose();
         SetProcess(false);
-        _uploadProgress.Visible = uploadConfirmed;
+        _uploadProgress.Value = 0;
+        _uploadProgress.Visible = false;
+        _status.AddThemeColorOverride(
+            "font_color",
+            completion.Kind switch
+            {
+                UploadCompletionKind.Succeeded => SolverUiTokens.Palette.Success,
+                UploadCompletionKind.Canceled => SolverUiTokens.Palette.Warning,
+                _ => SolverUiTokens.Palette.Danger,
+            });
+        _status.Text = completion.Message;
         RefreshBugReportControls();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] BUG_REPORT_UPLOAD_UI_COMPLETED submission_id={submissionId} kind={completion.Kind} confirmed_bytes={completion.ConfirmedBytes}");
+        return true;
     }
 
     internal bool ExerciseUploadCompletionTransitionForTesting()
     {
         if (_uploadInProgress || _exportInProgress || HasOpenUploadDialog())
             return false;
-        CancellationTokenSource cancellation = new();
+
+        CancellationTokenSource successCancellation = new();
         _uploadInProgress = true;
         _uploadCancelRequested = false;
-        _uploadCancellation = cancellation;
-        _uploadSubmissionId = "test";
+        _uploadCancellation = successCancellation;
+        _uploadSubmissionId = "test_success";
+        SetProcess(true);
         RefreshBugReportControls();
-        bool remainsCancelableUntilUiCompletion = _uploadInProgress
-                                                  && _uploadBugReport.Text == "取消上传";
-        CompleteUploadOperation(uploadConfirmed: false, cancellation);
-        return remainsCancelableUntilUiCompletion
-               && !_uploadInProgress
-               && _uploadCancellation == null
-               && _uploadBugReport.Text == "上传问题包";
+        PublishUploadCompletion(new UploadCompletion(
+            UploadCompletionKind.Succeeded,
+            "测试上传成功",
+            1024));
+        bool successRemainsActiveUntilConsumed = _uploadInProgress
+                                                 && _uploadBugReport.Text == "取消上传";
+        bool successApplied = TryApplyUploadCompletion();
+        bool successReturnedToIdle = successApplied
+                                     && !_uploadInProgress
+                                     && _uploadCancellation == null
+                                     && !_uploadProgress.Visible
+                                     && _uploadBugReport.Text == "上传问题包";
+
+        CancellationTokenSource canceledCancellation = new();
+        _uploadInProgress = true;
+        _uploadCancelRequested = true;
+        _uploadCancellation = canceledCancellation;
+        _uploadSubmissionId = "test_canceled";
+        SetProcess(true);
+        RefreshBugReportControls();
+        PublishUploadCompletion(new UploadCompletion(
+            UploadCompletionKind.Canceled,
+            "测试上传已取消",
+            0));
+        bool cancellationRemainsActiveUntilConsumed = _uploadInProgress
+                                                      && _uploadBugReport.Disabled
+                                                      && _uploadBugReport.Text == "正在取消…";
+        bool cancellationApplied = TryApplyUploadCompletion();
+        bool cancellationReturnedToIdle = cancellationApplied
+                                          && !_uploadInProgress
+                                          && _uploadCancellation == null
+                                          && !_uploadProgress.Visible
+                                          && _uploadBugReport.Text == "上传问题包";
+        return successRemainsActiveUntilConsumed
+               && successReturnedToIdle
+               && cancellationRemainsActiveUntilConsumed
+               && cancellationReturnedToIdle;
     }
 
     private void OnUploadDialogClosed(BugReportUploadDialog dialog)
@@ -1022,6 +1064,18 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
     {
         public void Report(T value) => report(value);
     }
+
+    private enum UploadCompletionKind
+    {
+        Succeeded,
+        Canceled,
+        Failed,
+    }
+
+    private sealed record UploadCompletion(
+        UploadCompletionKind Kind,
+        string Message,
+        long ConfirmedBytes);
 
     private void ResetDefaults()
     {

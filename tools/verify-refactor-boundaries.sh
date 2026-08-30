@@ -498,7 +498,8 @@ $bug_report_uploader_path	ReadServerReceipt(body)
 $bug_report_uploader_path	UseProxy = false
 $solver_settings_panel_path	private readonly ProgressBar _uploadProgress;
 $solver_settings_panel_path	private volatile bool _uploadInProgress;
-$solver_settings_panel_path	CompleteUploadOperation(uploadConfirmed, completedCancellation)
+$solver_settings_panel_path	Interlocked.Exchange(ref _uploadCompletion, completion)
+$solver_settings_panel_path	TryApplyUploadCompletion()
 $solver_settings_panel_path	等待服务器确认
 EOF
 forbid_fixed "$bug_report_uploader_path" 'using Godot' 'uploader must not own Godot UI state:'

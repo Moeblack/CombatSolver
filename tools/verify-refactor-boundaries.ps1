@@ -635,7 +635,8 @@ foreach ($check in @(
     @{ Path = $bugReportUploaderPath; Text = "UseProxy = false" },
     @{ Path = $solverSettingsPanelPath; Text = "private readonly ProgressBar _uploadProgress;" },
     @{ Path = $solverSettingsPanelPath; Text = "private volatile bool _uploadInProgress;" },
-    @{ Path = $solverSettingsPanelPath; Text = "CompleteUploadOperation(uploadConfirmed, completedCancellation)" },
+    @{ Path = $solverSettingsPanelPath; Text = "Interlocked.Exchange(ref _uploadCompletion, completion)" },
+    @{ Path = $solverSettingsPanelPath; Text = "TryApplyUploadCompletion()" },
     @{ Path = $solverSettingsPanelPath; Text = "等待服务器确认" })) {
     if (-not (Select-String -LiteralPath $check.Path -SimpleMatch $check.Text -Quiet)) {
         $violations.Add("$($check.Path): missing upload ownership boundary '$($check.Text)'")
