@@ -1175,8 +1175,30 @@ internal sealed partial class CombatBeamSolver
             List<PlanAction> fullActions = new(parent.ActionCount + 1);
             fullActions.AddRange(parent.Actions);
             fullActions.Add(action);
-            SimulationSnapshot replayed = Replay(fullActions);
-            AssertIncrementalEquivalent(action, fullActions, incremental, replayed);
+            SimulationSnapshot? fullReplayRoot = _includeTurnSetup
+                ? ReplayTurnSetup(parent.GetTurnSetupChoices())
+                : null;
+            SimulationSnapshot replayed;
+            try
+            {
+                replayed = Replay(
+                    fullActions,
+                    fullReplayRoot,
+                    _startTurnNumber,
+                    priorActionCount: 0);
+            }
+            finally
+            {
+                fullReplayRoot?.ReleaseSimulator();
+            }
+            try
+            {
+                AssertIncrementalEquivalent(action, fullActions, incremental, replayed);
+            }
+            finally
+            {
+                replayed.ReleaseSimulator();
+            }
             return incremental;
         });
     }

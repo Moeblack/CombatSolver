@@ -125,6 +125,7 @@ internal sealed class UnattendedTestRequest
     public int? ExpectedInitialSetupChoiceCountAtLeast { get; init; }
     public string? ExpectedInitialSetupChoiceSourceId { get; init; }
     public string? ExpectedInitialSetupChoiceTextStartsWith { get; init; }
+    public bool VerifyInitialSetupWaitsForUserStart { get; init; }
     public bool StopAfterInitialSetupAssertion { get; init; }
     public bool StopAfterInitialSolverResultAssertion { get; init; }
     public bool ExpectedFullAutoPausedAtDeathTurn { get; init; }

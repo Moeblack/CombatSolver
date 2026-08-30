@@ -23,6 +23,7 @@ using MegaCrit.Sts2.Core.Models.Orbs;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Combat;
 using MegaCrit.Sts2.Core.Nodes.CommonUi;
 using MegaCrit.Sts2.Core.Nodes.Rooms;
 using MegaCrit.Sts2.Core.Rooms;
@@ -338,6 +339,7 @@ internal sealed partial class UnattendedTestRunner
     private async Task<CombatState> WaitForPlayableCombatAsync()
     {
         bool turnSetupPlanAccepted = false;
+        bool initialSetupPauseVerified = false;
         while (true)
         {
             EnsureWithinDeadline();
@@ -347,6 +349,34 @@ internal sealed partial class UnattendedTestRunner
                 && state != null
                 && PlayerTurnSetupCoordinator.HasPendingPlannedChoice(state))
             {
+                if (_request.VerifyInitialSetupWaitsForUserStart && !initialSetupPauseVerified)
+                {
+                    int turn = player?.PlayerCombatState?.TurnNumber
+                        ?? throw new InvalidOperationException("首回合选牌暂停断言找不到玩家回合。");
+                    NativeChoiceTrace[] traces = NativeChoiceRuntime.TraceSnapshotForTesting
+                        .Where(trace => trace.Owner == $"turn_setup:{turn}")
+                        .ToArray();
+                    bool pageReady = traces.Any(trace => trace.Stage == "Visible")
+                        && traces.Any(trace => trace.Stage == "SearchStarted")
+                        && traces.Any(trace => trace.Stage == "PlanReady");
+                    if (!pageReady)
+                        throw new InvalidOperationException("首回合选牌计划就绪时缺少页面、搜索或计划事件。");
+                    if (traces.Any(trace => trace.Stage == "Selected"))
+                        throw new InvalidOperationException("首回合计划展示后、用户启动前，求解器已经替玩家完成选牌。");
+                    if (player?.PlayerCombatState?.Phase != PlayerTurnPhase.Start
+                        || NPlayerHand.Instance?.IsInCardSelection != true)
+                    {
+                        throw new InvalidOperationException("首回合计划展示后没有停在原生选牌页面。");
+                    }
+                    if (CombatManager.Instance.History.CardPlaysFinished.Any())
+                        throw new InvalidOperationException("首回合选牌等待用户启动前已经打出了卡牌。");
+                    initialSetupPauseVerified = true;
+                    _completedChecks.Add(
+                        $"InitialSetupWaitsForUserStart:Turn={turn}:Selected=0:CardsPlayed=0");
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] TURN_SETUP_AWAITING_USER_START turn={turn} " +
+                        "native_choice_pending=true selected=false cards_played=0");
+                }
                 turnSetupPlanAccepted = PlayerTurnSetupCoordinator.TryContinuePlannedChoice(
                     _host,
                     state,
