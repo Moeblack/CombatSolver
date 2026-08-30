@@ -42,6 +42,7 @@ internal static class SolverController
     private static SolverCombatSession _combat = new();
     private static SolverSearchSession? _search;
     private static SolverDeploymentSession? _deployment;
+    private static CombatBugReportClassificationSnapshot? _lastBugReportClassification;
     private static int _nextSearchGeneration;
     private static bool _solverDisabled;
     private static bool _stopFullAutoOnCombatEnd;
@@ -62,6 +63,12 @@ internal static class SolverController
     public static SolverTheftPolicy? TheftPolicy => _combat.TheftPolicy;
     internal static SolverResult? CurrentResultForBugReport => _combat.LatestResult ?? _combat.ContinuationSource;
     internal static string ReplanAuditForBugReport => DescribeReplanAudit();
+    internal static string BuildBugReportDescription(string playerDescription)
+        => CombatBugReportDescription.AppendAutomaticClassification(
+            playerDescription,
+            CombatManager.Instance.IsInProgress || _lastBugReportClassification == null
+                ? CaptureBugReportClassification()
+                : _lastBugReportClassification);
     internal static int UnexpectedReplanCount
         => _combat.ReplanCounts.GetValueOrDefault(ReplanCause.StateMismatch)
            + _combat.ReplanCounts.GetValueOrDefault(ReplanCause.DeploymentDrift);
@@ -113,6 +120,16 @@ internal static class SolverController
             currentTurnNumber: 1,
             currentProjectedBattleHpLost);
     }
+
+    internal static void RecordTurnSetupFailure(Exception exception)
+        => _combat.BugReportIssues.RecordFailure(
+            CombatBugReportIssueKind.TurnSetupFailure,
+            exception);
+
+    internal static void RecordTurnSetupStateMismatch(string difference)
+        => _combat.BugReportIssues.Record(
+            CombatBugReportIssueKind.TurnSetupStateMismatch,
+            difference);
 
     public static void ApplyPersistentSettings(SolverSettingsSnapshot settings)
     {
@@ -619,6 +636,7 @@ internal static class SolverController
         }
         catch (Exception ex)
         {
+            _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.SearchSetupFailure, ex);
             CancelSearch();
             _combat.State = null;
             _combat.LatestResult = null;
@@ -731,7 +749,9 @@ internal static class SolverController
                     state,
                     deployAfterSetup: false))
             {
-                throw new InvalidOperationException("回合开始选牌页在全自动接管时失去活动状态。");
+                InvalidOperationException failure = new("回合开始选牌页在全自动接管时失去活动状态。");
+                RecordTurnSetupFailure(failure);
+                throw failure;
             }
             return;
         }
@@ -911,6 +931,7 @@ internal static class SolverController
             || SolverOverlay.IsVisible;
         if (_combat.SearchesStarted > 0 || _combat.ContinuationsReused > 0)
             Entry.Logger.Info($"[CombatSolver/Test] REPLAN_SUMMARY reason={reason} {DescribeReplanCounts()}");
+        _lastBugReportClassification = CaptureBugReportClassification();
         CancelSearch();
         CancelDeployment();
         _combat = new SolverCombatSession();
@@ -1067,6 +1088,7 @@ internal static class SolverController
             _combat.PendingCompleteProjectionBaseline = null;
             _combat.PendingManualProjectionBaseline = null;
             Exception ex = task.Exception?.GetBaseException() ?? new InvalidOperationException("后台搜索失败但没有异常对象。");
+            _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.SearchFailure, ex);
             LastSearchFailureForTesting = ex;
             if (ex is PotionPolicyUnsatisfiedException)
             {
@@ -1085,6 +1107,9 @@ internal static class SolverController
             || !CanSolve(searchedState, out _)
             || LiveCombatStamp.Capture(searchedState) != searchedStamp)
         {
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.SearchResultStale,
+                $"第 {LocalContext.GetMe(searchedState)?.PlayerCombatState?.TurnNumber ?? 0} 回合");
             _combat.PendingCompleteProjectionBaseline = null;
             _combat.PendingManualProjectionBaseline = null;
             _combat.LatestResult = null;
@@ -1111,6 +1136,10 @@ internal static class SolverController
                 $"previous_projected_battle_hp_lost={recalculationBaseline.ProjectedBattleHpLost} " +
                 $"current_projected_battle_hp_lost={result.ProjectedBattleHpLost} " +
                 $"increase={result.ProjectedBattleHpLossIncrease} {recalculationBaseline.StateDifference}");
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.RecalculationHpLossIncreased,
+                $"预计战损 {recalculationBaseline.ProjectedBattleHpLost} → {result.ProjectedBattleHpLost}，" +
+                $"增加 {result.ProjectedBattleHpLossIncrease} HP");
         }
         if (manualBaseline != null)
         {
@@ -1157,6 +1186,9 @@ internal static class SolverController
             && !result.WasReused
             && result.ProjectedBattleHpLossIncrease > 0)
         {
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.FullAutoStoppedAfterWorseRecalculation,
+                $"第 {result.StartTurnNumber} 回合，预计战损 {result.PreviousProjectedBattleHpLost} → {result.ProjectedBattleHpLost}");
             _combat.FullAutoEnabled = false;
             LastFullAutoStoppedForWorseRecalculationForTesting = true;
             SolverOverlay.RefreshControls();
@@ -1179,6 +1211,9 @@ internal static class SolverController
         }
         if (_stopFullAutoOnDeathTurn && result.DeathTurn == result.StartTurnNumber)
         {
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.FullAutoStoppedAtDeathTurn,
+                $"第 {result.StartTurnNumber} 回合");
             _combat.FullAutoEnabled = false;
             SolverOverlay.RefreshControls();
             SolverOverlay.ShowFullAutoStoppedAtDeathTurn(result.StartTurnNumber);
@@ -1423,6 +1458,11 @@ internal static class SolverController
                     if ((_stopFullAutoOnDeathTurn && liveRisk.PlayerDead)
                         || (_stopFullAutoOnWorseRecalculation && worsened))
                     {
+                        _combat.BugReportIssues.Record(
+                            liveRisk.PlayerDead
+                                ? CombatBugReportIssueKind.FullAutoStoppedAtLiveRiskDeath
+                                : CombatBugReportIssueKind.FullAutoStoppedAtLiveRiskWorsening,
+                            $"第 {turn} 回合，路线预计 {plannedHpLoss} HP，实机复核 {liveRisk.HpLost} HP");
                         _combat.FullAutoEnabled = false;
                         LastFullAutoStoppedAtLiveRiskForTesting = true;
                         _combat.ContinuationSource = null;
@@ -1501,6 +1541,7 @@ internal static class SolverController
         }
         catch (Exception ex)
         {
+            _combat.BugReportIssues.RecordFailure(CombatBugReportIssueKind.DeploymentFailure, ex);
             SolverOverlay.Show(host, FormatDeploymentFailure(ex));
             Entry.Logger.Error($"[CombatSolver/Test] DEPLOY_FAILURE turn={turn} exception={ex}");
         }
@@ -1590,10 +1631,18 @@ internal static class SolverController
         {
             direction = "IMPROVED";
             _combat.ManualRouteImprovementDetected = true;
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.BetterWorldline,
+                $"预计战损 {comparison.PreviousProjectedBattleHpLost} → {comparison.CurrentProjectedBattleHpLost}，" +
+                $"下降 {-comparison.Difference} HP");
         }
         else if (comparison.Difference > 0)
         {
             direction = "WORSENED";
+            _combat.BugReportIssues.Record(
+                CombatBugReportIssueKind.ManualHpLossIncreased,
+                $"预计战损 {comparison.PreviousProjectedBattleHpLost} → {comparison.CurrentProjectedBattleHpLost}，" +
+                $"增加 {comparison.Difference} HP");
         }
         else
         {
@@ -1621,6 +1670,15 @@ internal static class SolverController
         _deployment?.Cancellation.Cancel();
         _deployment = null;
     }
+
+    private static CombatBugReportClassificationSnapshot CaptureBugReportClassification()
+        => new(
+            _combat.ReplanCounts.GetValueOrDefault(ReplanCause.StateMismatch),
+            _combat.ReplanCounts.GetValueOrDefault(ReplanCause.DeploymentDrift),
+            _combat.ReplanCounts.GetValueOrDefault(ReplanCause.ContinuationMissing),
+            _combat.ReplanCounts.GetValueOrDefault(ReplanCause.PlanExhausted),
+            _combat.ReplanCounts.GetValueOrDefault(ReplanCause.ManualDivergence),
+            _combat.BugReportIssues.Snapshot());
 
     private static void CompleteDeployment(SolverDeploymentSession deployment)
     {

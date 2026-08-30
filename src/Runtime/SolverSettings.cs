@@ -65,6 +65,7 @@ internal sealed record SolverSettingsData
     public double? DeploymentInterActionDelaySeconds { get; init; }
     public float? OverlayPositionX { get; init; }
     public float? OverlayPositionY { get; init; }
+    public string? ReporterContactQq { get; init; }
 }
 
 internal sealed record SolverSettingsSnapshot(
@@ -364,6 +365,8 @@ internal static class SolverSettings
             throw new InvalidDataException("OverlayPositionX and OverlayPositionY must both be set or both be null.");
         ValidateRange(data.OverlayPositionX, -100_000f, 100_000f, nameof(data.OverlayPositionX));
         ValidateRange(data.OverlayPositionY, -100_000f, 100_000f, nameof(data.OverlayPositionY));
+        if (data.ReporterContactQq is { Length: > 64 })
+            throw new InvalidDataException($"{nameof(data.ReporterContactQq)} must be at most 64 characters.");
     }
 
     private static void ValidateRange(double? value, double minimum, double maximum, string name)

@@ -356,8 +356,9 @@ internal static class PlayerTurnSetupCoordinator
             await originalSetup;
             return;
         }
-        catch
+        catch (Exception ex)
         {
+            SolverController.RecordTurnSetupFailure(ex);
             DisposeActive();
             throw;
         }
@@ -447,6 +448,7 @@ internal static class PlayerTurnSetupCoordinator
                 ?? throw new InvalidOperationException("回合准备选牌搜索缺少 Play 阶段状态戳。");
             if (expected != actual)
             {
+                SolverController.RecordTurnSetupStateMismatch(expected.DescribeFirstDifference(actual));
                 Entry.Logger.Warn(
                     $"[CombatSolver/Test] TURN_SETUP_STATE_MISMATCH turn={player.PlayerCombatState!.TurnNumber} " +
                     expected.DescribeFirstDifference(actual));
@@ -466,6 +468,11 @@ internal static class PlayerTurnSetupCoordinator
                 throw new InvalidOperationException("回合准备搜索结果在精确状态匹配后仍无法激活。");
             if (deployInitialResult && !SolverController.FullAutoEnabled)
                 SolverController.StartDeploymentAfterTurnSetup(host, active.Combat, active.Result);
+        }
+        catch (Exception ex)
+        {
+            SolverController.RecordTurnSetupFailure(ex);
+            throw;
         }
         finally
         {

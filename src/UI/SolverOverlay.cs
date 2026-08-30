@@ -963,7 +963,7 @@ internal static class SolverOverlay
         Color tone;
         if (SolverController.ManualRouteImprovementDetected)
         {
-            text = "你打出了比求解器更好的世界线，建议在设置中导出完整包并上传到群里，这可以更好地推动算法进步！";
+            text = "你打出了比求解器更好的世界线，建议在设置中上传问题包，这可以更好地推动算法进步！";
             tone = Success;
         }
         else if (SolverController.UnexpectedReplanCount > 0)

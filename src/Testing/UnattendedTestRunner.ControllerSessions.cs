@@ -42,6 +42,15 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("手操降低预计战损后没有记录比较结果并显示绿色反馈提示。");
         }
+        string liveDescription = SolverController.BuildBugReportDescription("玩家现场描述");
+        if (!liveDescription.Contains("玩家现场描述", StringComparison.Ordinal)
+            || !liveDescription.Contains("找到更优世界线", StringComparison.Ordinal)
+            || !liveDescription.Contains("预计战损 7 → 3", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("在线问题描述没有读取本场手操改线信号。");
+        }
+
+        AssertBugReportAutomaticClassification();
 
         SolverController.RequestSearch(host, combat, SearchReason.Manual);
         if (!SolverController.IsSearching || SolverController.AutomaticSearchPaused)
@@ -55,6 +64,59 @@ internal sealed partial class UnattendedTestRunner
             || SolverController.LastSearchFailureForTesting != null)
         {
             throw new InvalidOperationException("已取消搜索的回调重新写入了控制器状态。");
+        }
+    }
+
+    private static void AssertBugReportAutomaticClassification()
+    {
+        CombatBugReportIssueLedger issues = new();
+        foreach (CombatBugReportIssueKind kind in Enum.GetValues<CombatBugReportIssueKind>())
+            issues.Record(kind, "分类测试");
+        CombatBugReportClassificationSnapshot snapshot = new(
+            StateMismatchReplans: 1,
+            DeploymentDriftReplans: 2,
+            ContinuationMissingReplans: 3,
+            PlanExhaustedReplans: 4,
+            ManualDivergenceReplans: 5,
+            issues.Snapshot());
+        string description = CombatBugReportDescription.AppendAutomaticClassification(
+            "玩家填写的问题描述",
+            snapshot);
+        string[] expectedClassifications =
+        [
+            "玩家填写的问题描述",
+            "【CombatSolver 自动分类】",
+            "计划外重算：3 次（状态不一致 1，执行漂移 2）",
+            "续接路线缺失后重算：3 次",
+            "本回合路线耗尽后重算：4 次",
+            "手操偏离原路线后重算：5 次",
+            "找到更优世界线",
+            "手操后预计战损上升",
+            "重算后预计战损上升",
+            "搜索初始化失败",
+            "第三方 Mod 不兼容",
+            "计算失败",
+            "搜索动作回放失败",
+            "搜索内存或容量错误",
+            "药水策略未满足",
+            "计算期间状态变化，过期结果已丢弃",
+            "自动执行中止",
+            "回合准备选牌失败",
+            "回合准备计划与实机状态不一致",
+            "未计划的选牌",
+            "选牌页面执行失败",
+            "遗物标注回放与选中状态不一致",
+            "等待游戏状态超时",
+            "存在尚未支持的战斗语义",
+            "全自动因重算后战损上升而暂停",
+            "全自动因预计本回合死亡而暂停",
+            "全自动因结束回合实机复核将死亡而暂停",
+            "全自动因结束回合实机复核战损上升而暂停",
+        ];
+        foreach (string expected in expectedClassifications)
+        {
+            if (!description.Contains(expected, StringComparison.Ordinal))
+                throw new InvalidOperationException($"在线问题描述缺少自动分类：{expected}。");
         }
     }
 }
