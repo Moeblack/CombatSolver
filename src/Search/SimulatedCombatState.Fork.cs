@@ -114,7 +114,7 @@ internal sealed partial class SimulatedCombatState
         if (fork._registeredCombatCards is not null)
         {
             foreach (PredictedCard card in fork._registeredCombatCards)
-                card.SetMutationObserver(fork.InvalidateBaseHookListeners);
+                card.SetMutationObserver(fork.InvalidateBaseHookListenersObserver);
         }
         fork._generatedCombatCards = ForkCardList(_generatedCombatCards, context);
 
@@ -161,22 +161,6 @@ internal sealed partial class SimulatedCombatState
 
         if (_effectivePowers is not null)
             fork._effectivePowers = RemapCachedPowers(_effectivePowers, context);
-    }
-
-    private static AbstractModel[] RemapCachedModels(
-        AbstractModel[] source,
-        PredictionForkContext context)
-    {
-        AbstractModel[]? remapped = null;
-        for (int index = 0; index < source.Length; index++)
-        {
-            AbstractModel mapped = context.RemapOrSelf(source[index]);
-            if (ReferenceEquals(mapped, source[index]))
-                continue;
-            remapped ??= source.ToArray();
-            remapped[index] = mapped;
-        }
-        return remapped ?? source;
     }
 
     private static IReadOnlyList<AbstractModel> RemapCachedModels(

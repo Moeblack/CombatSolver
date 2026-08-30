@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Models;
@@ -8,10 +9,19 @@ namespace CombatSolver;
 
 internal static class RitsuEmptyCapabilityFastPath
 {
+    private readonly record struct DefaultCapabilitySourceCacheEntry(
+        int Generation,
+        bool HasSource);
+
     private const string CardCapabilityHostTypeName =
         "STS2RitsuLib.Models.Capabilities.CardModelCapabilityHost";
+    private const string CapabilityDefaultsTypeName =
+        "STS2RitsuLib.Models.Capabilities.ModelCapabilityDefaults";
     private static readonly Func<AbstractModel, bool> HasDefaultCapabilitySource =
         CreateHasDefaultCapabilitySource();
+    private static readonly ConcurrentDictionary<Type, DefaultCapabilitySourceCacheEntry>
+        DefaultCapabilitySources = [];
+    private static int _defaultCapabilitySourceGeneration;
 
     internal static ModPatchTarget CardHostTarget(string methodName, params Type[] parameters)
     {
@@ -26,14 +36,54 @@ internal static class RitsuEmptyCapabilityFastPath
             return false;
         if (ModelCapabilities.TryGet(model, out ModelCapabilitySet? capabilities))
             return capabilities.Count == 0;
-        return !HasDefaultCapabilitySource(model);
+        Type modelType = model.GetType();
+        while (true)
+        {
+            int generation = Volatile.Read(ref _defaultCapabilitySourceGeneration);
+            if (DefaultCapabilitySources.TryGetValue(modelType, out var cached)
+                && cached.Generation == generation)
+            {
+                return !cached.HasSource;
+            }
+
+            bool hasDefaultCapabilitySource = HasDefaultCapabilitySource(model);
+            if (generation != Volatile.Read(ref _defaultCapabilitySourceGeneration))
+                continue;
+            DefaultCapabilitySources[modelType] = new(generation, hasDefaultCapabilitySource);
+            if (generation == Volatile.Read(ref _defaultCapabilitySourceGeneration))
+                return !hasDefaultCapabilitySource;
+        }
     }
+
+    internal static ModPatchTarget DefaultCapabilityRegistrationTarget() => new(
+        CapabilityDefaultsType(),
+        "Modify",
+        [
+            typeof(string),
+            typeof(string),
+            typeof(Type),
+            typeof(Action<AbstractModel, ModelCapabilityList>),
+            typeof(int),
+        ]);
+
+    internal static void InvalidateDefaultCapabilitySources()
+    {
+        Interlocked.Increment(ref _defaultCapabilitySourceGeneration);
+        DefaultCapabilitySources.Clear();
+    }
+
+    internal static int DefaultCapabilitySourceGenerationForTesting
+        => Volatile.Read(ref _defaultCapabilitySourceGeneration);
+
+    internal static bool HasCachedDefaultCapabilitySourceGenerationForTesting(
+        Type modelType,
+        int generation)
+        => DefaultCapabilitySources.TryGetValue(modelType, out var cached)
+            && cached.Generation == generation;
 
     private static Func<AbstractModel, bool> CreateHasDefaultCapabilitySource()
     {
-        Type defaults = typeof(ModelCapabilities).Assembly.GetType(
-            "STS2RitsuLib.Models.Capabilities.ModelCapabilityDefaults")
-            ?? throw new TypeLoadException("STS2RitsuLib.Models.Capabilities.ModelCapabilityDefaults");
+        Type defaults = CapabilityDefaultsType();
         MethodInfo method = defaults.GetMethod(
             "HasDefaultCapabilitySource",
             BindingFlags.Static | BindingFlags.NonPublic,
@@ -43,6 +93,24 @@ internal static class RitsuEmptyCapabilityFastPath
             ?? throw new MissingMethodException(defaults.FullName, "HasDefaultCapabilitySource(AbstractModel)");
         return method.CreateDelegate<Func<AbstractModel, bool>>();
     }
+
+    private static Type CapabilityDefaultsType()
+        => typeof(ModelCapabilities).Assembly.GetType(CapabilityDefaultsTypeName)
+            ?? throw new TypeLoadException(CapabilityDefaultsTypeName);
+}
+
+internal sealed class RitsuDefaultCapabilityRegistrationPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_ritsu_default_capability_cache_invalidation";
+    public static string Description => "Ritsu 默认能力注册变化时清理求解类型缓存";
+
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        RitsuEmptyCapabilityFastPath.DefaultCapabilityRegistrationTarget(),
+    ];
+
+    public static void Postfix()
+        => RitsuEmptyCapabilityFastPath.InvalidateDefaultCapabilitySources();
 }
 
 internal sealed class RitsuEmptyCardTypeFastPathPatch : IPatchMethod

@@ -86,6 +86,13 @@ internal sealed class SimPlayerCombatState
         };
     }
 
+    internal bool ContainsPile(SimCardPile pile)
+        => ReferenceEquals(_hand, pile)
+            || ReferenceEquals(_drawPile, pile)
+            || ReferenceEquals(_discardPile, pile)
+            || ReferenceEquals(_exhaustPile, pile)
+            || ReferenceEquals(_playPile, pile);
+
     // Mirrors PlayerCombatState.GainEnergy.
     public void GainEnergy(decimal amount)
     {

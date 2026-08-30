@@ -1,4 +1,5 @@
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
 using CombatSolver.Engine.Common;
@@ -175,10 +176,18 @@ internal sealed partial class CombatPredictionSimulator
             return true;
         }
 
-        return !State.Enemies.Any(enemy => State.GetCreature(enemy).IsAlive
-                && (State.CombatState is ICombatPredictionCreatureSemantics semantics
-                    ? semantics.IsPrimaryEnemy(enemy)
-                    : enemy.IsPrimaryEnemy)) &&
-               !Hook.ShouldStopCombatFromEnding(State.CombatState);
+        IReadOnlyList<Creature> enemies = State.Enemies;
+        ICombatPredictionCreatureSemantics? semantics =
+            State.CombatState as ICombatPredictionCreatureSemantics;
+        for (int index = 0; index < enemies.Count; index++)
+        {
+            Creature enemy = enemies[index];
+            if (State.GetCreature(enemy).IsAlive
+                && (semantics?.IsPrimaryEnemy(enemy) ?? enemy.IsPrimaryEnemy))
+            {
+                return false;
+            }
+        }
+        return !Hook.ShouldStopCombatFromEnding(State.CombatState);
     }
 }

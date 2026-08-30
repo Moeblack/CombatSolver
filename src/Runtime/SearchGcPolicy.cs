@@ -25,7 +25,41 @@ internal static class SearchGcPolicy
     private static long _noGcRegionBudgetBytes;
     private static long _noGcRegionLohBudgetBytes;
     private static long _largestSearchAllocatedBytes;
-    internal static int RolloverCountForTesting { get; private set; }
+    private static int _rolloverCountForTesting;
+    private static int _budgetChangeRebuildCountForTesting;
+    private static int _budgetChangeWaitCountForTesting;
+    internal static int RolloverCountForTesting
+    {
+        get
+        {
+            lock (Gate)
+                return _rolloverCountForTesting;
+        }
+    }
+    internal static int BudgetChangeRebuildCountForTesting
+    {
+        get
+        {
+            lock (Gate)
+                return _budgetChangeRebuildCountForTesting;
+        }
+    }
+    internal static int BudgetChangeWaitCountForTesting
+    {
+        get
+        {
+            lock (Gate)
+                return _budgetChangeWaitCountForTesting;
+        }
+    }
+    internal static long CurrentNoGcRegionBudgetBytesForTesting
+    {
+        get
+        {
+            lock (Gate)
+                return _noGcRegionBudgetBytes;
+        }
+    }
 
     private enum NoGcRegionStartOutcome
     {
@@ -34,8 +68,15 @@ internal static class SearchGcPolicy
         RegionSizeUnsupported,
     }
 
-    internal static void ResetRolloverCountForTesting()
-        => RolloverCountForTesting = 0;
+    internal static void ResetCountersForTesting()
+    {
+        lock (Gate)
+        {
+            _rolloverCountForTesting = 0;
+            _budgetChangeRebuildCountForTesting = 0;
+            _budgetChangeWaitCountForTesting = 0;
+        }
+    }
 
     public static IDisposable EnterLowLatencySearch(
         long noGcRegionBudgetBytes,
@@ -48,9 +89,11 @@ internal static class SearchGcPolicy
         long noGcRegionLohBudgetBytes = Math.Max(
             256L * 1024 * 1024,
             noGcRegionBudgetBytes / 6);
+        bool budgetChangeLogged = false;
         while (true)
         {
             Task? reclaimTask = null;
+            bool waitForActiveSearchExit = false;
             lock (Gate)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -61,40 +104,63 @@ internal static class SearchGcPolicy
                 else
                 {
                     long allocatedBytesAtEntry = GC.GetTotalAllocatedBytes(precise: false);
-                    if (_activeSearches == 0)
+                    bool requestedBudgetDiffers = (_noGcRegionActive || _activeSearches > 0)
+                        && (_noGcRegionBudgetBytes != noGcRegionBudgetBytes
+                            || _noGcRegionLohBudgetBytes != noGcRegionLohBudgetBytes);
+                    if (_activeSearches > 0 && requestedBudgetDiffers)
+                    {
+                        // A process-wide No-GC region cannot be resized while another search uses it.
+                        // Wait without registering a reclaim request: doing so could deadlock if the
+                        // active search reaches its own in-search memory checkpoint before exiting.
+                        waitForActiveSearchExit = true;
+                    }
+                    else if (_activeSearches == 0)
                     {
                         if (_noGcRegionActive)
                         {
                             if (GCSettings.LatencyMode == GCLatencyMode.NoGCRegion)
                             {
-                                long allocated = Math.Max(
-                                    0,
-                                    allocatedBytesAtEntry - _noGcRegionAllocatedBytesAtStart);
-                                long remaining = Math.Max(0, _noGcRegionBudgetBytes - allocated);
-                                long required = checked(
-                                    _largestSearchAllocatedBytes + _largestSearchAllocatedBytes / 4);
-                                if (_largestSearchAllocatedBytes > 0 && remaining < required)
+                                if (requestedBudgetDiffers)
                                 {
-                                    RolloverCountForTesting++;
+                                    _budgetChangeRebuildCountForTesting++;
                                     _reclaimRequired = true;
                                     Entry.Logger.Info(
-                                        $"[CombatSolver/Test] GC_NO_GC_REGION_ROLLOVER " +
-                                        $"allocated={allocated} remaining={remaining} required={required} " +
+                                        $"[CombatSolver/Test] GC_NO_GC_REGION_BUDGET_CHANGED " +
+                                        $"previous={_noGcRegionBudgetBytes} requested={noGcRegionBudgetBytes} " +
                                         "reclaim=background_non_compacting");
-                                    reclaimTask = RequestReclaimLocked("no_gc_region_rollover");
+                                    reclaimTask = RequestReclaimLocked("no_gc_region_budget_changed");
                                 }
                                 else
                                 {
-                                    ConfigureSearchMemoryLimit(
-                                        memoryPressureSignal,
-                                        allocatedBytesAtEntry,
-                                        remaining,
-                                        _noGcRegionBudgetBytes,
-                                        _noGcRegionLohBudgetBytes);
-                                    _activeSearches++;
-                                    Entry.Logger.Info(
-                                        "[CombatSolver/Test] GC_LATENCY policy=combat_scoped_no_gc_region_reuse");
-                                    return new SearchScope(allocatedBytesAtEntry, memoryPressureSignal);
+                                    long allocated = Math.Max(
+                                        0,
+                                        allocatedBytesAtEntry - _noGcRegionAllocatedBytesAtStart);
+                                    long remaining = Math.Max(0, _noGcRegionBudgetBytes - allocated);
+                                    long required = checked(
+                                        _largestSearchAllocatedBytes + _largestSearchAllocatedBytes / 4);
+                                    if (_largestSearchAllocatedBytes > 0 && remaining < required)
+                                    {
+                                        _rolloverCountForTesting++;
+                                        _reclaimRequired = true;
+                                        Entry.Logger.Info(
+                                            $"[CombatSolver/Test] GC_NO_GC_REGION_ROLLOVER " +
+                                            $"allocated={allocated} remaining={remaining} required={required} " +
+                                            "reclaim=background_non_compacting");
+                                        reclaimTask = RequestReclaimLocked("no_gc_region_rollover");
+                                    }
+                                    else
+                                    {
+                                        ConfigureSearchMemoryLimit(
+                                            memoryPressureSignal,
+                                            allocatedBytesAtEntry,
+                                            remaining,
+                                            _noGcRegionBudgetBytes,
+                                            _noGcRegionLohBudgetBytes);
+                                        _activeSearches++;
+                                        Entry.Logger.Info(
+                                            "[CombatSolver/Test] GC_LATENCY policy=combat_scoped_no_gc_region_reuse");
+                                        return new SearchScope(allocatedBytesAtEntry, memoryPressureSignal);
+                                    }
                                 }
                             }
                             else
@@ -168,6 +234,22 @@ internal static class SearchGcPolicy
                         return new SearchScope(allocatedBytesAtEntry, memoryPressureSignal);
                     }
                 }
+            }
+
+            if (waitForActiveSearchExit)
+            {
+                if (!budgetChangeLogged)
+                {
+                    lock (Gate)
+                        _budgetChangeWaitCountForTesting++;
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] GC_NO_GC_REGION_BUDGET_WAIT " +
+                        $"requested={noGcRegionBudgetBytes} reason=active_search");
+                    budgetChangeLogged = true;
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                Thread.Sleep(ConcurrentSearchExitPollMilliseconds);
+                continue;
             }
 
             (reclaimTask ?? throw new InvalidOperationException("GC 回收状态缺少完成任务。"))

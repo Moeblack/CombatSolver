@@ -131,25 +131,31 @@ internal sealed partial class SimulatedCombatState
 
     private void NormalizePowerAfflictions(CombatPredictionSimulator simulator)
     {
-        _liveCardsAtSnapshot ??= new ForkableSet<CardModel>(Players
-            .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
-            .Select(card => card.Original));
-        _powerAfflictionKnownCards ??= [];
-        PowerModel[] powers = EffectivePowers().Where(power => power.Amount > 0).ToArray();
+        ForkableSet<CardModel> liveCardsAtSnapshot = _liveCardsAtSnapshot
+            ??= new ForkableSet<CardModel>(Players
+                .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
+                .Select(card => card.Original));
+        IReadOnlyList<PowerModel> powers = EffectivePowers();
+        int vitalSparkAmount = 0;
+        for (int index = 0; index < powers.Count; index++)
+        {
+            if (powers[index] is VitalSparkPower { Amount: > 0 } vitalSpark)
+                vitalSparkAmount = checked(vitalSparkAmount + vitalSpark.Amount);
+        }
+        bool hasVitalSpark = vitalSparkAmount > 0;
         foreach (Player player in Players)
         {
             Creature owner = player.Creature;
             // Vital Spark is owned by Infested Prism but its vanilla hooks afflict every player
             // Skill, not creatures on the Power owner's side.
-            bool hasVitalSpark = powers.Any(power => power is VitalSparkPower);
-            int vitalSparkAmount = powers
-                .OfType<VitalSparkPower>()
-                .Sum(power => power.Amount);
             foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).AllCards)
             {
-                bool enteredCombat = !_powerAfflictionKnownCards.Contains(card)
-                    && !_liveCardsAtSnapshot.Contains(card.Original);
-                _powerAfflictionKnownCards.Add(card);
+                // Root cards are already represented by _liveCardsAtSnapshot, so recording every
+                // one here only makes each search fork clone a deck-sized HashSet. Track generated
+                // cards sparsely; they still need identity-based first-entry detection across forks.
+                bool enteredCombat = false;
+                if (!liveCardsAtSnapshot.Contains(card.Original))
+                    enteredCombat = (_powerAfflictionKnownCards ??= []).Add(card);
                 if (card.Preview.Affliction is Tainted)
                 {
                     if (!hasVitalSpark)
@@ -161,8 +167,11 @@ internal sealed partial class SimulatedCombatState
                 if (card.Preview.Affliction != null || !enteredCombat)
                     continue;
 
-                foreach (PowerModel power in powers)
+                for (int index = 0; index < powers.Count; index++)
                 {
+                    PowerModel power = powers[index];
+                    if (power.Amount <= 0)
+                        continue;
                     if (power is GalvanicPower && card.Preview.Type == CardType.Power)
                     {
                         if (power.Owner.Side != owner.Side)

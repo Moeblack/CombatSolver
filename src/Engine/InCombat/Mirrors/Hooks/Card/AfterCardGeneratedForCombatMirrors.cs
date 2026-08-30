@@ -45,8 +45,9 @@ internal static class AfterCardGeneratedForCombatMirrors
 
     private static void HandleAeonglass(Aeonglass monster, AfterCardGeneratedForCombatMirrorContext context)
     {
-        if (context.MutablePreviewCard is not Wither wither)
+        if (context.PreviewCard is not Wither)
             return;
+        var wither = (Wither)context.MutablePreviewCard;
         if (context.CombatState is not ICombatPredictionMonsterStateSink monsterState)
             throw new InvalidOperationException("永世沙漏生成凋零缺少预测怪物状态。");
         int upgradeCount = monsterState.GetAeonglassWitherUpgradeCount(monster.Creature);

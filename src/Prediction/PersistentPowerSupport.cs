@@ -285,8 +285,9 @@ internal static class PersistentPowerSupport
         }
         foreach (PredictedCard card in state.AllCards)
         {
-            if (card.MutablePreview is SovereignBlade blade && !blade.IsDupe)
-                blade.AddDamage(amount);
+            if (card.Preview is not SovereignBlade preview || preview.IsDupe)
+                continue;
+            ((SovereignBlade)card.MutablePreview).AddDamage(amount);
         }
     }
 }

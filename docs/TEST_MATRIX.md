@@ -1,10 +1,23 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.21.7`（当前定版；创意工坊稳定版 `0.21.5`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.21.7`（当前定版与创意工坊稳定版；`0.22.0` 开发中）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
+
+## 0.22.0（开发中）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `PR10-LARGE-DECK-FIXED576-A/B` | 通过（PR 固定工作量 A/B） | 基线与优化 artifact 都保持 `576` 展开、`3463` 转移、`1124` 选牌分支和同一 3 回合、预计战损 `2` 路线；`5116.3 ms / 1,039,502,640 B` 对 `3985.0 ms / 528,876,328 B`，累计分配降低 `49.12%`，单次 headless 墙钟缩短 `22.11%`。不替代可见 Steam 结论。 | 2026-08-30 |
+| `PR10-FULL-DEEP-16GB` | 通过（PR 当前 artifact） | 精确进入 `16,000,000,000 B` No-GC 区域，保持 `7018/52644/23196` 工作量、评分、10 回合胜利、预计战损 `56`、卖血 `11` 与两瓶药路线；`53605.8 ms / 11,655,259,632 B`。 | 2026-08-30 |
+| `PR10-NOGC-RNG-BUDGET-CONTRACT` | 通过（PR 当前 artifact） | 实际进入 `1 GB` 区域，令并发 `2 GB` 请求等待，释放旧 scope 后精确重建 `2 GB`；同时验证完整 RNG 身份及 DOP1/DOP2 结果全字段一致。runId `5677b8ccffc842d68f2199da964ed610`。 | 2026-08-30 |
+| `PR10-SANITIZED-STRESS-FIXTURES` | 通过（PR 当前 artifact） | Silent `396` 张合成牌堆和 Necrobinder 最小战前投影均使用公开合成 seed，断言极高档原 Beam、节点、分支和精确 `16 GB` No-GC；runId `a2aef73ea38345a7b48418f7ff498ffc`、`07427794ff05455886fc7faf2318966e`。 | 2026-08-30 |
+| `PR10-POTION-CHOICE-ALLOCATION` | 通过（PR 严格语义门禁） | 生成牌药水只克隆实际选中牌；17 项药水完整原版/预测差分 `17/17`，赌徒特酿专项通过。runId `341bf965156644c4a8fa6e3cd2399682`、`c5f1b95001f542d3b0d536295f914bdc`。 | 2026-08-30 |
+| `PR10-CACHE-FORK-BOUNDARIES` | 通过（PR 当前 artifact） | 覆盖 Ritsu capability 缓存失效、选牌键跨 Fork、池化身份哈希、listener observer、所属牌堆、投影洗牌、稀疏 Power affliction 和 `CardPlay` 选择风险隔离。runId `bd24e4eeda0247f99eaac9fa90281e3b`。 | 2026-08-30 |
+| `PR10-MERGED-POLICY-FORK-0220` | 通过（本地主线合并态） | 高血量、多候选固定根实际完成 No-GC `1 GB → 2 GB` 切换、DOP1/DOP2 全字段等价、节点上限快照释放、Fork 边界及完整自动战斗；第 6 回合结束，runId `26654574147d4925be016d7295fbee2a`。首次 `1 HP` 烟雾输入因没有形成并行工作量而被门禁拒绝，不计功能失败。 | 2026-08-30 |
+| `PR10-VISIBLE-STEAM` | 未验证 | PR 没有可比较的当前 artifact 可见 Steam 性能结果；本轮不把 headless 单次墙钟写成生产帧率结论。 | 2026-08-30 |
 
 ## 0.21.7
 
@@ -604,7 +617,7 @@
 | `MONSTER-MOVES-BATCH-031` | 通过 | 同一 PID `42532` 连续执行三场、共 `11` 条差分；关闭 `22` 个目录条目，验证下回合能量/抽牌/格挡、禁止抽牌/回能、费用/伤害/格挡修正、保留手牌时序和一次性 Power 生命周期 | 2026-08-20 |
 | `MONSTER-MOVES-BATCH-032` | 通过 | 同一 PID `41596` 连续执行六场；关闭 `22` 个持续 Power 生命周期条目，验证抽牌、能量、辉星、Orb、全场目标、生成牌、仪式延迟，以及愤怒复制与活力消费回归 | 2026-08-20 |
 
-运行命令按平台分列。两组命令覆盖同一批场景和断言：Windows 使用仓库保留的 PowerShell 启动器及 PascalCase 参数；Linux 使用原生 Bash 启动器及 GNU kebab-case 参数。修改场景时必须同步更新两组命令，并保持 `ScenarioId / --scenario-id` 集合一致。当前每端各有 `238` 条命令、`237` 个唯一 ScenarioId（`PERFORMANCE-PRESET-HIGH-172` 作为不同历史门禁重复一次）；未提供本机问题包时，矩阵只跳过 `CHOICES-PARADOX-SCROLLS-0160`、`QUEEN-CHAINS-REUSE-FINAL-085` 和 `CORPSE-SLUGS-USER-RUN-073` 这 `3` 个外部快照场景。
+运行命令按平台分列。两组命令覆盖同一批场景和断言：Windows 使用仓库保留的 PowerShell 启动器及 PascalCase 参数；Linux 使用原生 Bash 启动器及 GNU kebab-case 参数。修改场景时必须同步更新两组命令，并保持 `ScenarioId / --scenario-id` 集合一致。当前每端各有 `240` 条命令、`239` 个唯一 ScenarioId（`PERFORMANCE-PRESET-HIGH-172` 作为不同历史门禁重复一次）；未提供本机问题包时，矩阵只跳过 `CHOICES-PARADOX-SCROLLS-0160`、`QUEEN-CHAINS-REUSE-FINAL-085` 和 `CORPSE-SLUGS-USER-RUN-073` 这 `3` 个外部快照场景。
 
 全量运行优先使用两端等价的 `tools/run-headless-matrix.ps1` / `tools/run-headless-matrix.sh`：
 
@@ -620,6 +633,8 @@ pwsh -NoProfile -File tools\run-headless-matrix.ps1 -ContinueOnFailure
 本机问题包不进入仓库：运行 `CHOICES-PARADOX-SCROLLS-0160` 前必须设置 `$env:CHOICES_PARADOX_RUN_SNAPSHOT_PATH` 和 `$env:CHOICES_PARADOX_PROGRESS_SNAPSHOT_PATH`；运行 `QUEEN-CHAINS-REUSE-FINAL-085` 或 `CORPSE-SLUGS-USER-RUN-073` 前必须设置 `$env:RUN_SNAPSHOT_PATH`。
 
 ```powershell
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId SEARCH-PERF-SILENT-LARGE-DECK-5S -CharacterId SILENT -Seed SEARCH_PERF_SILENT_LARGE_DECK -EncounterId AEONGLASS_BOSS -Ascension 5 -ActIndexForTest 2 -EnemyCurrentHp 512 -InitialEnemyMoveIdsJson '["EBB_MOVE"]' -InitialPlayerHp 65 -InitialPlayerMaxHp 65 -InitialPlayerEnergy 3 -ClearPlayerPiles -CardsPath coverage\unattended\search-performance-silent-large-deck-cards.json -PerformancePresetForTest VeryHigh -PotionPolicyForTest Smart -SearchMaxDegreeOfParallelismForTest 8 -ForceShortSearchOnly -ShortSearchBudgetOverrideMilliseconds 5000 -MeasureSearchPhases -ExpectedInitialSearchPhase Short -ExpectedInitialDeepSearchTriggered 0 -ExpectedInitialExecutableActionCountAtLeast 1 -StopAfterInitialSolverResultAssertion -TimeoutSeconds 120 -KeepGameOpen
+pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId SEARCH-PERF-NECROBINDER-POTION-QUICK -CharacterId NECROBINDER -Seed SEARCH_PERF_NECROBINDER_POTION -RunSnapshotPath coverage\unattended\search-performance-necrobinder-potion-heavy-run-snapshot.json -EncounterId AEONGLASS_BOSS -Ascension 10 -ActIndexForTest 2 -EnemyCurrentHp 526 -InitialPlayerHp 41 -CardsJson '[]' -SearchMaxDegreeOfParallelismForTest 8 -PerformancePresetForTest VeryHigh -PotionPolicyForTest RequireAtLeastOne -ForceShortSearchOnly -ShortSearchBudgetOverrideMilliseconds 5000 -MeasureSearchPhases -ExpectedInitialSearchPhase Short -ExpectedInitialDeepSearchTriggered 0 -ExpectedInitialExecutableActionCountAtLeast 1 -StopAfterInitialSolverResultAssertion -TimeoutSeconds 120 -ExitOnComplete
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BATCH-164623-TRANSFORM-ENTERED-COMBAT-CONTINUATION -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\batch-164623-transform-entered-combat.json -VerifyIncrementalSearch -KeepGameOpen -TimeoutSeconds 180
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BATCH-164623-TURN-SCOPED-CARD-HISTORY-CONTINUATION-FINAL -CharacterId IRONCLAD -EncounterId LivingFogNormal -EnemyCurrentHp 999 -MonsterMoveChecksPath coverage\unattended\batch-164623-turn-scoped-card-history.json -VerifyIncrementalSearch -KeepGameOpen -TimeoutSeconds 180
 pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId BATCH-164623-ORB-DEATH-POWER-ORDER-CONTINUATION -CharacterId DEFECT -EncounterId AXEBOTS_NORMAL -InitialEnemyCurrentHpsJson '[5,50]' -MonsterMoveChecksPath coverage\unattended\batch-164623-orb-death-power-order.json -VerifyIncrementalSearch -ExitOnComplete -TimeoutSeconds 180
@@ -865,6 +880,8 @@ pwsh -NoProfile -File tools\run-unattended-test.ps1 -ScenarioId MONSTER-MOVES-BA
 ### Linux（Bash）
 
 ```bash
+./tools/run-unattended-test.sh --scenario-id SEARCH-PERF-SILENT-LARGE-DECK-5S --character-id SILENT --seed SEARCH_PERF_SILENT_LARGE_DECK --encounter-id AEONGLASS_BOSS --ascension 5 --act-index-for-test 2 --enemy-current-hp 512 --initial-enemy-move-ids-json '["EBB_MOVE"]' --initial-player-hp 65 --initial-player-max-hp 65 --initial-player-energy 3 --clear-player-piles --cards-path coverage/unattended/search-performance-silent-large-deck-cards.json --performance-preset-for-test VeryHigh --potion-policy-for-test Smart --search-max-degree-of-parallelism-for-test 8 --force-short-search-only --short-search-budget-override-milliseconds 5000 --measure-search-phases --expected-initial-search-phase Short --expected-initial-deep-search-triggered 0 --expected-initial-executable-action-count-at-least 1 --stop-after-initial-solver-result-assertion --timeout-seconds 120 --keep-game-open
+./tools/run-unattended-test.sh --scenario-id SEARCH-PERF-NECROBINDER-POTION-QUICK --character-id NECROBINDER --seed SEARCH_PERF_NECROBINDER_POTION --run-snapshot-path coverage/unattended/search-performance-necrobinder-potion-heavy-run-snapshot.json --encounter-id AEONGLASS_BOSS --ascension 10 --act-index-for-test 2 --enemy-current-hp 526 --initial-player-hp 41 --cards-json '[]' --search-max-degree-of-parallelism-for-test 8 --performance-preset-for-test VeryHigh --potion-policy-for-test RequireAtLeastOne --force-short-search-only --short-search-budget-override-milliseconds 5000 --measure-search-phases --expected-initial-search-phase Short --expected-initial-deep-search-triggered 0 --expected-initial-executable-action-count-at-least 1 --stop-after-initial-solver-result-assertion --timeout-seconds 120 --exit-on-complete
 ./tools/run-unattended-test.sh --scenario-id BATCH-164623-TRANSFORM-ENTERED-COMBAT-CONTINUATION --character-id IRONCLAD --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/batch-164623-transform-entered-combat.json --verify-incremental-search --keep-game-open --timeout-seconds 180
 ./tools/run-unattended-test.sh --scenario-id BATCH-164623-TURN-SCOPED-CARD-HISTORY-CONTINUATION-FINAL --character-id IRONCLAD --encounter-id LivingFogNormal --enemy-current-hp 999 --monster-move-checks-path coverage/unattended/batch-164623-turn-scoped-card-history.json --verify-incremental-search --keep-game-open --timeout-seconds 180
 ./tools/run-unattended-test.sh --scenario-id BATCH-164623-ORB-DEATH-POWER-ORDER-CONTINUATION --character-id DEFECT --encounter-id AXEBOTS_NORMAL --initial-enemy-current-hps-json '[5,50]' --monster-move-checks-path coverage/unattended/batch-164623-orb-death-power-order.json --verify-incremental-search --exit-on-complete --timeout-seconds 180

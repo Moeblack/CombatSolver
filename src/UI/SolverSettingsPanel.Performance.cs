@@ -51,7 +51,7 @@ internal sealed partial class SolverSettingsPanel
                 (data, value) => AsCustomPerformance(data with { NoGcRegionBudgetGigabytes = value }),
                 1d,
                 16d),
-            "搜索期间为延迟垃圾回收预留的内存预算。提高后可减少长搜索中的回收与卡顿，但需要更多可用内存；超过机器余量可能触发系统换页。");
+            "这是单个搜索 No-GC 区域的实际请求预算，不是进程总内存上限。设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
         content.AddChild(budgetGrid);
 
         _advancedParametersToggle = SolverUiTokens.CreateButton(

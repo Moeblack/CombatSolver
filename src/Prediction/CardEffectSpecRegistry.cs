@@ -277,8 +277,8 @@ internal static class CardEffectSpecRegistry
                 decimal increase = claw.DynamicVars["Increase"].BaseValue;
                 foreach (PredictedCard candidate in simulator.State.GetPlayerCombatState(card.Owner).AllCards)
                 {
-                    if (candidate.MutablePreview is Claw mutableClaw)
-                        mutableClaw.BuffFromClawPlay(increase);
+                    if (candidate.Preview is Claw)
+                        ((Claw)candidate.MutablePreview).BuffFromClawPlay(increase);
                 }
                 applied = true;
                 break;

@@ -81,21 +81,22 @@ internal static class PotionChoiceSupport
         PlanCardChoice choice)
     {
         SimPlayerCombatState owner = simulator.State.GetPlayerCombatState(potion.Owner);
-        List<PredictedCard> selected;
+        List<PredictedCard> selected = new(choice.Cards.Count);
         if (choice.Effect == PlanChoiceEffect.GenerateToHand)
         {
             CombatPredictionCardGenerationOptionsEntry generated = simulator.History
                 .OfType<CombatPredictionCardGenerationOptionsEntry>()
                 .LastOrDefault()
                 ?? throw new InvalidOperationException($"药水 {potion.Id.Entry} 缺少生成候选。");
-            List<PredictedCard> options = generated.Options.Select(option => option.Clone()).ToList();
-            selected = choice.Cards.Select(token => Find(options, token)).ToList();
+            foreach (PlanCardToken token in choice.Cards)
+                selected.Add(Find(generated.Options, token).Clone());
         }
         else
         {
             SimCardPile pile = owner.GetCardPile(choice.SourcePile)
                 ?? throw new InvalidOperationException($"找不到药水模拟牌堆 {choice.SourcePile}。");
-            selected = choice.Cards.Select(token => Find(pile.Cards, token)).ToList();
+            foreach (PlanCardToken token in choice.Cards)
+                selected.Add(Find(pile.Cards, token));
         }
 
         switch (choice.Effect)
@@ -163,9 +164,19 @@ internal static class PotionChoiceSupport
         => potion is AttackPotion or SkillPotion or PowerPotion or ColorlessPotion;
 
     private static PredictedCard Find(IReadOnlyList<PredictedCard> cards, PlanCardToken token)
-        => cards.Where(card => CardChoiceSupport.MatchesToken(card.Preview, token))
-            .Skip(token.SourceOccurrence)
-            .FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                $"药水选牌回放时找不到 {token.CardId}+{token.UpgradeLevel}#{token.SourceOccurrence}。");
+    {
+        int matchingOccurrence = 0;
+        for (int index = 0; index < cards.Count; index++)
+        {
+            PredictedCard card = cards[index];
+            if (!CardChoiceSupport.MatchesToken(card, token))
+                continue;
+            if (matchingOccurrence == token.SourceOccurrence)
+                return card;
+            matchingOccurrence++;
+        }
+
+        throw new InvalidOperationException(
+            $"药水选牌回放时找不到 {token.CardId}+{token.UpgradeLevel}#{token.SourceOccurrence}。");
+    }
 }

@@ -235,7 +235,7 @@ internal static class HookMirrors
             AfterCardDrawnMirrors.InvokeEarly(listener, context);
         }
 
-        IReadOnlyList<AbstractModel> listeners = IterateCombatHookListeners(simulator);
+        HookListenerEnumerable listeners = IterateCombatHookListeners(simulator);
         foreach (var listener in listeners)
         {
             AfterCardDrawnMirrors.Invoke(listener, context);
@@ -1083,21 +1083,63 @@ internal static class HookMirrors
     /// <summary>
     /// Mirrors <see cref="Hook.IterateCombatHookListeners"/>.
     /// </summary>
-    private static IReadOnlyList<AbstractModel> IterateCombatHookListeners(CombatPredictionSimulator simulator)
+    private static HookListenerEnumerable IterateCombatHookListeners(
+        CombatPredictionSimulator simulator)
     {
-        return simulator.IsOverOrEnding
+        IReadOnlyList<AbstractModel> listeners = simulator.IsOverOrEnding
             ? Array.Empty<AbstractModel>()
             : simulator.State.IterateHookListeners();
+        return new HookListenerEnumerable(listeners);
+    }
+
+    // IReadOnlyList<T>.GetEnumerator returns an interface enumerator and boxes List/array
+    // enumerators. Hook dispatch is frequent enough for those tiny objects to become a visible
+    // search allocation source, so iterate the immutable listener snapshot by index instead.
+    private readonly struct HookListenerEnumerable(
+        IReadOnlyList<AbstractModel> listeners)
+    {
+        public IReadOnlyList<AbstractModel> Listeners { get; } = listeners;
+
+        public Enumerator GetEnumerator()
+            => new(Listeners);
+
+        public bool Contains(AbstractModel candidate)
+        {
+            for (int index = 0; index < Listeners.Count; index++)
+            {
+                if (EqualityComparer<AbstractModel>.Default.Equals(Listeners[index], candidate))
+                    return true;
+            }
+            return false;
+        }
+
+        internal struct Enumerator(IReadOnlyList<AbstractModel> listeners)
+        {
+            private int _index = -1;
+
+            public AbstractModel Current => listeners[_index];
+
+            public bool MoveNext()
+            {
+                int next = _index + 1;
+                if (next >= listeners.Count)
+                    return false;
+                _index = next;
+                return true;
+            }
+        }
     }
 
     /// <summary>
     /// Mirrors <see cref="MegaCrit.Sts2.Core.Runs.IRunState.IterateHookListeners"/> with the simulator's combat state.
     /// </summary>
-    private static IEnumerable<AbstractModel> IterateRunHookListeners(CombatPredictionSimulator simulator)
+    private static HookListenerEnumerable IterateRunHookListeners(
+        CombatPredictionSimulator simulator)
     {
         var combatState = simulator.State.CombatState;
         if (combatState is ICombatPredictionHookListenerSource source)
-            return source.RunHookListeners;
-        return combatState.RunState.IterateHookListeners(combatState);
+            return new HookListenerEnumerable(source.RunHookListeners);
+        return new HookListenerEnumerable(
+            combatState.RunState.IterateHookListeners(combatState).ToArray());
     }
 }
