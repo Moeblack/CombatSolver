@@ -58,6 +58,10 @@ internal sealed partial class UnattendedTestRunner
             ?? throw new MissingFieldException(BaseLibCardModifierTypeName, "<Amount>k__BackingField");
 
         Type fixtureType = CreateBaseLibCardModifierFixtureType(modifierBaseType);
+        FieldInfo storeSaveDataCallbackField = fixtureType.GetField(
+            "StoreSaveDataCallback",
+            BindingFlags.Public | BindingFlags.Static)
+            ?? throw new MissingFieldException(fixtureType.FullName, "StoreSaveDataCallback");
         AbstractModel liveModifier = (AbstractModel)RuntimeHelpers.GetUninitializedObject(fixtureType);
         ownerProperty.SetValue(liveModifier, owner);
         amountField.SetValue(liveModifier, 7);
@@ -426,9 +430,45 @@ internal sealed partial class UnattendedTestRunner
                         "BaseLib CardModifier 移除后选牌键或 continuation 没有恢复。");
                 }
             }
+
+            AbstractModel addedDuringSave = CreateBaseLibCardModifierFixture(
+                fixtureType,
+                owner,
+                amount: 19,
+                ownerProperty,
+                amountField);
+            string choiceKeyBeforeReentrantMutation = CardChoiceSupport.ChoiceCardKey(owner);
+            int storeSaveDataCallbacks = 0;
+            storeSaveDataCallbackField.SetValue(null, (Action)(() =>
+            {
+                Interlocked.Increment(ref storeSaveDataCallbacks);
+                storeSaveDataCallbackField.SetValue(null, null);
+                liveModifiers.Add(addedDuringSave);
+            }));
+            try
+            {
+                string reentrantChoiceKey = CardChoiceSupport.ChoiceCardKey(owner);
+                if (storeSaveDataCallbacks != 1
+                    || liveModifiers.Count != 2
+                    || !string.Equals(
+                        reentrantChoiceKey,
+                        choiceKeyBeforeReentrantMutation,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        "BaseLib StoreSaveData 重入修改侧表时没有保持回调前的稳定快照。");
+                }
+            }
+            finally
+            {
+                storeSaveDataCallbackField.SetValue(null, null);
+                liveModifiers.Remove(addedDuringSave);
+                ownerProperty.SetValue(addedDuringSave, null);
+            }
         }
         finally
         {
+            storeSaveDataCallbackField.SetValue(null, null);
             liveModifiers.Remove(liveModifier);
             ownerProperty.SetValue(liveModifier, null);
         }
@@ -481,6 +521,38 @@ internal sealed partial class UnattendedTestRunner
                 "CombatSolver.UnattendedBaseLibCardModifier",
                 TypeAttributes.Public | TypeAttributes.Sealed,
                 baseType);
+        FieldBuilder storeSaveDataCallback = type.DefineField(
+            "StoreSaveDataCallback",
+            typeof(Action),
+            FieldAttributes.Public | FieldAttributes.Static);
+        Type modifierSaveType = baseType.GetNestedType("ModifierSave", BindingFlags.Public)
+            ?? throw new MissingMemberException(baseType.FullName, "ModifierSave");
+        MethodInfo storeSaveData = baseType.GetMethod(
+            "StoreSaveData",
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types: [modifierSaveType],
+            modifiers: null)
+            ?? throw new MissingMethodException(baseType.FullName, "StoreSaveData(ModifierSave)");
+        MethodBuilder storeSaveDataOverride = type.DefineMethod(
+            storeSaveData.Name,
+            MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig,
+            typeof(void),
+            [modifierSaveType]);
+        ILGenerator storeSaveDataIl = storeSaveDataOverride.GetILGenerator();
+        Label noCallback = storeSaveDataIl.DefineLabel();
+        storeSaveDataIl.Emit(OpCodes.Ldsfld, storeSaveDataCallback);
+        storeSaveDataIl.Emit(OpCodes.Dup);
+        storeSaveDataIl.Emit(OpCodes.Brfalse_S, noCallback);
+        storeSaveDataIl.Emit(
+            OpCodes.Callvirt,
+            typeof(Action).GetMethod(nameof(Action.Invoke))
+                ?? throw new MissingMethodException(typeof(Action).FullName, nameof(Action.Invoke)));
+        storeSaveDataIl.Emit(OpCodes.Ret);
+        storeSaveDataIl.MarkLabel(noCallback);
+        storeSaveDataIl.Emit(OpCodes.Pop);
+        storeSaveDataIl.Emit(OpCodes.Ret);
+        type.DefineMethodOverride(storeSaveDataOverride, storeSaveData);
         type.DefineDefaultConstructor(MethodAttributes.Public);
         return type.CreateType();
     }

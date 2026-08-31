@@ -96,6 +96,12 @@ internal sealed class CombatRootSnapshot
 
         PowerDynamicVarWarmup.EnsureMaterialized(state);
 
+        // Listener enumeration and third-party owner discovery are part of root capture.
+        // Take the baseline first so any semantic mutation in those callbacks is rejected by
+        // the existing after-capture stamp without paying for another full serialization.
+        ContinuationStamp continuationBefore = ContinuationStamp.CaptureLive(state);
+        LiveCombatStamp liveBefore = LiveCombatStamp.FromContinuation(continuationBefore);
+
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("找不到本地玩家。");
         PlayerCombatState playerState = player.PlayerCombatState
@@ -108,8 +114,6 @@ internal sealed class CombatRootSnapshot
                     .Where(candidate => candidate.PlayerCombatState != null)
                     .SelectMany(candidate => candidate.PlayerCombatState!.AllCards));
         }
-        ContinuationStamp continuationBefore = ContinuationStamp.CaptureLive(state);
-        LiveCombatStamp liveBefore = LiveCombatStamp.FromContinuation(continuationBefore);
         IntentForecast forecast = IntentForecaster.Build(state, SolverWeights.SetupValueHorizonTurns);
 
         SimulatedCombatState simulatedCombat = new(state, liveCombatHookListeners);

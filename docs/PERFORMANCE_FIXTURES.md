@@ -73,7 +73,7 @@
 
 基线和最终必须保持 `expanded / transitions / forks / replays`、路线、评分、终止边界与搜索策略一致；`--clear-run-deck` 必须保留，否则会把角色默认起始牌混入 `2302` 张目标牌组。当前严格 A/B 为 `5186.2 ms / 912,561,760 B` 对 `3471.0 ms / 267,554,848 B`，两侧均选择 `ENTROPY`，评分均为 `-3752001`，终止边界均为 `TimeLimit`，工作量均为 `1/3/3/2`。搜索时的生产根捕获为 `3971.045 → 2235.620 ms`；独立根测试阶段为 `4570.556 → 2215.689 ms`。
 
-BaseLib 使用独立保守路径，不把外部 `CardModifier` 侧表当成不变数据。最终门禁 runId `7ef16ab8cf5b4760a8a27e04ac694e75` 从两张初始未修饰卡开始，验证 modifier 动态增删以及 `Amount`/`Priority`、fingerprint、choice-key、continuation 和 listener 精确跟随分支状态；Owner、父子分支和侧表容器不共享。首次 live stamp 经根 modifier 注册后仍保持稳定；空 modifier 生成牌使用稳定状态键并能被部署查回，首次遇到未登记的非空 modifier 时则保守发现并独立克隆。实现另将 `StoreSaveData` 的 `IntProperties`/`AdditionalProperties` 保序编码进三类状态键，该部分为静态审计证据。从带 `DeckVersion` 且已标记移除的源卡创建玩法生成 clone 时，modifier 独立克隆并重绑 Owner，而生成卡的 `DeckVersion=null` 且 `HasBeenRemovedFromState=false`。没有 BaseLib modifier 的根仍使用 listener/fingerprint 快速路径。
+BaseLib 使用独立保守路径，不把外部 `CardModifier` 侧表当成不变数据。最终门禁 `BASELIB-CARD-MODIFIER-LISTENER-CACHE-FINAL6`（runId `06c5235a6d0941f69447180517bce7ab`）从两张初始未修饰卡开始，验证 modifier 动态增删以及 `Amount`/`Priority`、fingerprint、choice-key、continuation 和 listener 精确跟随分支状态；Owner、父子分支和侧表容器不共享。首次 live stamp 经根 modifier 注册后仍保持稳定；空 modifier 生成牌使用稳定状态键并能被部署查回，首次遇到未登记的非空 modifier 时则保守发现并独立克隆。动态 fixture 覆写 `StoreSaveData`，在第三方回调内向 live 侧表新增 modifier，断言本次完整状态键与回调前完全相等、后续 live 列表保留新增元素；`IntProperties`/`AdditionalProperties` 继续保序进入三类状态键。从带 `DeckVersion` 且已标记移除的源卡创建玩法生成 clone 时，modifier 独立克隆并重绑 Owner，而生成卡的 `DeckVersion=null` 且 `HasBeenRemovedFromState=false`。没有 BaseLib modifier 的根仍使用 listener/fingerprint 快速路径。
 
 ## 随机牌与复杂首回合矩阵
 
@@ -137,11 +137,11 @@ run_complex_random_perf --scenario-id SEARCH-PERF-COMPLEX-RANDOM-AEONGLASS-DOP1-
 当前策略：
 
 - 战斗期搜索、根快照和取证捕获分开统计分配压力。低于 `256 MiB` 的战斗结束只退出 No-GC 区域并恢复 latency mode，不强制 Gen2。
-- 超过阈值、No-GC 耗尽或区域滚动才请求一次后台、非压缩 Gen2。一个新 LOH 弱引用 sentinel 与 `GCKind.Background/FullBlocking` 完成索引共同证明回收确实发生在引用释放之后，而不是误把已在进行的旧 background GC 当作完成。
-- Reset 在建立引用释放/回收门前先登记 early No-GC exit：它等待当前搜索退出，只结束区域并恢复 latency mode，不强制 Gen2。Reset 取消搜索和部署后，后台等待当前与先前已换下的 worker、主线程 callback、部署 operation、已延迟根请求、回合开始 visual-setup/回合准备后部署任务、回合准备/自动预出牌原版任务以及战斗取证 FIFO 释放引用。同时到来的回收请求只 join 同一任务；新战斗的普通搜索和回合准备在门完成后才经主线程 dispatcher 捕获根，worker 在此后才建立新 No-GC 区域，避免新的大根先消耗旧区域。每次 Reset 推进 lifecycle epoch，旧回合准备完成不能把结果、错误或状态偏差写进新会话。游戏主线程不同步等待回收；前置释放任务取消或失败也不会污染后续门。
-- 取证 FIFO 完成后清空临时 combat capture/state text/profile 图；内存中检查点上限与导出上限统一为 `6`，开始新战斗时不再同时保留上一场检查点。
+- 超过阈值、No-GC 耗尽或区域滚动才请求后台、非压缩 Gen2。一个新 LOH 弱引用 sentinel 与 `GCKind.Background/FullBlocking` 完成索引共同证明回收确实发生在引用释放之后；reference-release/coverage epoch 进一步区分上一战斗引用是在标记前还是标记后解绑，后者会补做一次而不是误判为已覆盖。
+- Reset 在建立引用释放/回收门前先登记 early No-GC exit：它等待当前搜索退出，只结束区域并恢复 latency mode，不强制 Gen2。Reset 取消搜索和部署后，后台等待当前与先前已换下的 worker、主线程 callback、部署 operation、已延迟根请求、回合开始 visual-setup/回合准备后部署任务、回合准备/自动预出牌原版任务以及战斗取证 FIFO 释放引用。Godot 部署计时器的外层等待接受 lifecycle token，取消后立即释放战斗/结果引用；信号尾任务只持有 host/timer。新战斗的普通搜索和回合准备在门完成后才捕获根，旧 Setup 完成也必须再次核对 epoch。
+- 取证 FIFO 完成后清空临时 combat capture/state text/profile 图；内存中检查点上限与导出上限统一为 `6`，开始新战斗时不再同时保留上一场检查点。稳态 metadata/replay 使用一次 UTF-8 字节序列化，问题包直接写这些字节；2305 张牌、6 检查点由旧表示约 `192.2 MiB` 估算降至约 `101 MiB`。
 
-早期组件细节门禁 runId `6fdc219535da49c5b6db7179528bf775` 记录低分配 `forced_gen2=false / gen2_delta=0 / 0.0 ms`。最终 policy gate `GC-LIFECYCLE-POLICY-MECHA-010` 以 runId `8441e817afdf402d95567eb4d7d11607` 通过：低分配 active scope 的 early exit 等待旧搜索、阻止新 entrant 和 root-capture barrier 且不强制 Gen2，fault/cancel 的释放任务不会破坏 FIFO。No-GC 区域外的根压力与区域内重分配都构造 `295,200,624 B` 连通对象图；两条路径均只完成一次非压缩 Gen2 且弱引用图死亡，区域内并发请求为 `reclaim=1 / join=1 / Gen2=1`。控制器门禁 `GC-CONTROLLER-RELEASE-MECHA-011` 以 runId `57ec7ee8c2634d95ae0c358a336ae7cf` 验证 A→B→Reset 会等待两个搜索 worker、实际主线程 callback、visual-setup 延迟任务与两个已换下的合成部署 operation；搜索和部署各自均为 `scheduled=2 / completed=2 / CTS disposed=2`，旧任务/旧回合准备 epoch 不写新会话，最终断言后的 `SolverResult` 测试引用会在复用 GC 前清空。正常 `Setup → AutoPrePlay → 熵选牌 → 第 2 回合复用` 由 runId `6f09011103084daaaca36084264eacdb` 通过。root-capture 门的直接 policy 断言已覆盖，但新增的主线程 dispatcher 与原版回合准备取消竞态尚无独立生产竞态夹具。这些是合成 headless 政策门，完整 Mod 组合下的战斗结束帧间隔仍需可见 Steam 会话验收。
+最终 policy 时序门禁 `GC-LIFECYCLE-POLICY-MECHA-013` 以 runId `9b4f577a08c84800b219cbcb0bc83310` 通过：低分配退出不强制 Gen2；区域外/区域内高压图均被释放；在 exhaustion obligation 已登记后，引用先于标记边界释放时只完成一次 Gen2，晚于边界释放时精确补一次，再推进一个正式 release epoch 也没有存活弱引用或第三次回收。生产的 exhaustion 检测/登记入口另经静态调用路径审计。控制器门禁 `GC-CONTROLLER-RELEASE-MECHA-013` 以 runId `ef96c383720b47dbbdcb62075bcb665d` 验证会话/CTS/Setup epoch；真实 3 秒部署计时器 helper 取消后的引用屏障在 1 秒内完成，正式 token 接线经静态审计。问题包 UTF-8 current/recent 双导出 runId 为 `43e3cc399a6b45e8968da5f7af05556d`；它证明输出兼容，检查点的 `byte[]` 常驻结构和单次序列化由源码审计及驻留估算支持。这些仍是合成 headless 政策门，完整 Mod 组合下的战斗结束帧间隔需可见 Steam 会话验收。
 
 ## 算法与实现调研结论
 

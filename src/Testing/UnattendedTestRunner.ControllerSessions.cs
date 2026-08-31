@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Nodes;
@@ -141,6 +142,15 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("搜索失败提示没有按本次请求的并行状态提供恢复建议。");
         }
 
+        // The UI checks above cross several frames. A one-HP fixture can finish its first search
+        // during those awaits, so establish a fresh active session immediately before exercising
+        // the synchronous stop transition.
+        if (!SolverController.IsSearching)
+        {
+            SolverController.RequestSearch(host, combat, SearchReason.Manual);
+            if (!SolverController.IsSearching)
+                throw new InvalidOperationException("停止断言前无法重新建立活动搜索会话。");
+        }
         int stopNotificationRequestsBefore = SearchCompletionNotifier.RequestCountForTesting;
         int stopNativeNotificationsBefore = SearchCompletionNotifier.NativeNotificationCountForTesting;
         SolverController.StopSearchByUser(host);
@@ -290,6 +300,54 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException(
                 $"搜索 A/B 的 Reset 引用释放不完整：scheduled={releasesScheduled} " +
                 $"completed={releasesCompleted} cts_disposed={cancellationsDisposed}。");
+        }
+
+        SolverSettingsData settingsBeforeDelayCancellation = SolverSettings.Current;
+        try
+        {
+            const double fullDelaySeconds = 3d;
+            SolverSettings.ApplyForTesting(settingsBeforeDelayCancellation with
+            {
+                DeploymentInterActionDelaySeconds = fullDelaySeconds,
+            });
+            Task delayOperation = SolverController.StartCombatDeferredOperation(
+                token => SolverController.WaitForTurnStartDeploymentDelayAsync(
+                    host,
+                    turn: -1,
+                    token: token));
+            if (delayOperation.IsCompleted)
+            {
+                throw new InvalidOperationException(
+                    "3 秒回合开始延迟没有进入真实 SceneTreeTimer 等待。");
+            }
+
+            long cancellationStartedAt = Stopwatch.GetTimestamp();
+            SolverController.Reset("unattended_deployment_delay_cancel");
+            Task delayReferenceRelease = SolverController.LastCombatReferenceReleaseForTesting;
+            try
+            {
+                await delayReferenceRelease.WaitAsync(TimeSpan.FromSeconds(1));
+            }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException(
+                    "取消回合开始/动作间隔计时器后，战斗引用屏障仍等待完整 3 秒延迟。",
+                    ex);
+            }
+            double cancellationElapsedMilliseconds =
+                Stopwatch.GetElapsedTime(cancellationStartedAt).TotalMilliseconds;
+            if (!delayOperation.IsCompletedSuccessfully
+                || cancellationElapsedMilliseconds >= 1_000d)
+            {
+                throw new InvalidOperationException(
+                    $"取消部署延迟后引用释放不够快：" +
+                    $"operation_completed={delayOperation.IsCompletedSuccessfully} " +
+                    $"elapsed_ms={cancellationElapsedMilliseconds:F1}。");
+            }
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(settingsBeforeDelayCancellation);
         }
 
         var deploymentLifecycle =

@@ -365,6 +365,141 @@ internal sealed partial class UnattendedTestRunner
                 $"joins={SearchGcPolicy.BackgroundReclaimJoinCountForTesting} " +
                 $"managed_live_released={managedLiveReleased}。");
         }
+        await AssertExhaustionReclaimReferenceCoverageAsync(cancellationToken);
+    }
+
+    private static async Task AssertExhaustionReclaimReferenceCoverageAsync(
+        CancellationToken cancellationToken)
+    {
+        await AssertExhaustionReclaimReferenceCoverageTimingAsync(
+            pauseAfterCoverageCapture: false,
+            expectedGeneration2Collections: 1,
+            cancellationToken);
+        await AssertExhaustionReclaimReferenceCoverageTimingAsync(
+            pauseAfterCoverageCapture: true,
+            expectedGeneration2Collections: 2,
+            cancellationToken);
+    }
+
+    private static async Task AssertExhaustionReclaimReferenceCoverageTimingAsync(
+        bool pauseAfterCoverageCapture,
+        int expectedGeneration2Collections,
+        CancellationToken cancellationToken)
+    {
+        SearchGcPolicy.ResetCountersForTesting();
+        TaskCompletionSource referencesReleased = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        (WeakReference graph, Task release) = CreateHeldGraphForGcPolicyTest(
+            referencesReleased.Task);
+        Task earlyReclaim = Task.CompletedTask;
+        Task cleanup = Task.CompletedTask;
+        try
+        {
+            long releaseEpochBefore = SearchGcPolicy.ReferenceReleaseEpochForTesting;
+            (Task Reclaim, Task CoverageBoundaryReached) reclaimRequest =
+                SearchGcPolicy.RequestNoGcExhaustionReclaimForTesting(
+                    pauseAfterCoverageCapture);
+            earlyReclaim = reclaimRequest.Reclaim;
+            Task coverageBoundaryReached = reclaimRequest.CoverageBoundaryReached;
+            Task firstCompleted = await Task.WhenAny(
+                    coverageBoundaryReached,
+                    earlyReclaim)
+                .WaitAsync(cancellationToken);
+            if (ReferenceEquals(firstCompleted, earlyReclaim))
+            {
+                await earlyReclaim;
+                throw new InvalidOperationException(
+                    "exhaustion 回收没有停在预期的 Gen2 覆盖边界。");
+            }
+            await coverageBoundaryReached;
+            if (!graph.IsAlive)
+            {
+                throw new InvalidOperationException(
+                    "exhaustion 测试图在引用释放前已不可达。");
+            }
+
+            int referenceCallbackCount = 0;
+            string timing = pauseAfterCoverageCapture
+                ? "after_coverage_capture"
+                : "before_coverage_capture";
+            cleanup = SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+                $"unattended_exhaustion_reference_coverage_{timing}",
+                forceCollection: true,
+                includeCombatLifecyclePressure: false,
+                release,
+                () => Interlocked.Increment(ref referenceCallbackCount));
+            if (cleanup.IsCompleted)
+                throw new InvalidOperationException("exhaustion 引用释放门没有等待测试图解绑。");
+            referencesReleased.SetResult();
+            while (SearchGcPolicy.ReferenceReleaseEpochForTesting == releaseEpochBefore)
+                await Task.Delay(10, cancellationToken);
+            if (SearchGcPolicy.ReferenceReleaseEpochForTesting
+                != checked(releaseEpochBefore + 1))
+            {
+                throw new InvalidOperationException(
+                    "exhaustion 覆盖边界测试观察到了意外的并发引用释放。");
+            }
+            SearchGcPolicy.ResumeGeneration2CoverageForTesting();
+            await Task.WhenAll(earlyReclaim, cleanup).WaitAsync(cancellationToken);
+            await SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+                    $"unattended_exhaustion_reference_coverage_{timing}_settled",
+                    forceCollection: false,
+                    includeCombatLifecyclePressure: false,
+                    Task.CompletedTask,
+                    static () => { })
+                .WaitAsync(cancellationToken);
+            int expectedJoinCount = pauseAfterCoverageCapture ? 0 : 1;
+            if (referenceCallbackCount != 1
+                || SearchGcPolicy.ReferenceReleaseEpochForTesting
+                    != checked(releaseEpochBefore + 2)
+                || SearchGcPolicy.BackgroundReclaimStartedCountForTesting
+                    != expectedGeneration2Collections
+                || SearchGcPolicy.BackgroundGen2CompletedCountForTesting
+                    != expectedGeneration2Collections
+                || SearchGcPolicy.BackgroundReclaimJoinCountForTesting != expectedJoinCount
+                || graph.IsAlive)
+            {
+                throw new InvalidOperationException(
+                    $"exhaustion 引用释放覆盖时序不正确：timing={timing} " +
+                    $"callback={referenceCallbackCount} " +
+                    $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                    $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting} " +
+                    $"joins={SearchGcPolicy.BackgroundReclaimJoinCountForTesting} " +
+                    $"graph_alive={graph.IsAlive}。");
+            }
+        }
+        finally
+        {
+            referencesReleased.TrySetResult();
+            SearchGcPolicy.ResumeGeneration2CoverageForTesting();
+            await Task.WhenAll(earlyReclaim, cleanup)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (WeakReference Reference, Task Release) CreateHeldGraphForGcPolicyTest(
+        Task releaseGate)
+    {
+        byte[][] graph = new byte[128][];
+        for (int index = 0; index < graph.Length; index++)
+        {
+            graph[index] = new byte[32 * 1024];
+            graph[index][0] = unchecked((byte)index);
+        }
+        StrongBox<object?> holder = new(graph);
+        WeakReference reference = new(graph);
+        Task release = ReleaseHeldGraphForGcPolicyTestAsync(holder, releaseGate);
+        GC.KeepAlive(graph);
+        return (reference, release);
+    }
+
+    private static async Task ReleaseHeldGraphForGcPolicyTestAsync(
+        StrongBox<object?> holder,
+        Task releaseGate)
+    {
+        await releaseGate;
+        holder.Value = null;
     }
 
     private static async Task AssertReferenceReleaseBarrierAsync(

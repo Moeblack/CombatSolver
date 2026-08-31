@@ -487,8 +487,10 @@ internal static class SolverController
         int lifecycleGeneration,
         int turn,
         bool deployWhenReady = false,
-        bool waitForDeploymentDelay = false)
+        bool waitForDeploymentDelay = false,
+        CancellationToken token = default)
     {
+        token.ThrowIfCancellationRequested();
         long deadline = System.Environment.TickCount64 + 30_000;
         while (CombatManager.Instance.IsInProgress
                && !CombatManager.Instance.IsOverOrEnding
@@ -500,6 +502,7 @@ internal static class SolverController
             if (System.Environment.TickCount64 >= deadline)
                 throw new TimeoutException("回合准备页面完成后 30 秒内没有进入可复用状态。");
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            token.ThrowIfCancellationRequested();
         }
 
         if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
@@ -514,7 +517,7 @@ internal static class SolverController
         }
 
         if (waitForDeploymentDelay)
-            await WaitForTurnStartDeploymentDelayAsync(host, turn);
+            await WaitForTurnStartDeploymentDelayAsync(host, turn, token);
 
         if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
             || _solverDisabled
@@ -1835,13 +1838,10 @@ internal static class SolverController
                 if (actionIndex + 1 < actions.Count
                     && deploymentSettings.DeploymentInterActionDelaySeconds > 0d)
                 {
-                    SceneTreeTimer delay = host.GetTree().CreateTimer(
+                    await WaitForDeploymentDelayAsync(
+                        host,
                         deploymentSettings.DeploymentInterActionDelaySeconds,
-                        processAlways: false,
-                        processInPhysics: false,
-                        ignoreTimeScale: false);
-                    await host.ToSignal(delay, SceneTreeTimer.SignalName.Timeout);
-                    token.ThrowIfCancellationRequested();
+                        token);
                 }
             }
 
@@ -2050,17 +2050,27 @@ internal static class SolverController
         long startedAt = System.Environment.TickCount64;
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_START_DEPLOY_DELAY turn={turn} seconds={seconds:0.###}");
+        await WaitForDeploymentDelayAsync(host, seconds, token);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_START_DEPLOY_DELAY_COMPLETE turn={turn} " +
+            $"elapsed_ms={System.Environment.TickCount64 - startedAt}");
+    }
+
+    private static async Task WaitForDeploymentDelayAsync(
+        NGame host,
+        double seconds,
+        CancellationToken token)
+    {
         SceneTreeTimer delay = host.GetTree().CreateTimer(
             seconds,
             processAlways: false,
             processInPhysics: false,
             ignoreTimeScale: false);
-        await host.ToSignal(delay, SceneTreeTimer.SignalName.Timeout);
-        token.ThrowIfCancellationRequested();
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] TURN_START_DEPLOY_DELAY_COMPLETE turn={turn} " +
-            $"elapsed_ms={System.Environment.TickCount64 - startedAt}");
+        await AwaitSceneTreeTimerAsync(host, delay).WaitAsync(token);
     }
+
+    private static async Task AwaitSceneTreeTimerAsync(NGame host, SceneTreeTimer delay)
+        => await host.ToSignal(delay, SceneTreeTimer.SignalName.Timeout);
 
     private static void DeferSearchUntilRootCaptureBarrier(
         NGame host,

@@ -24,6 +24,14 @@ internal static class SearchGcPolicy
     private static TaskCompletionSource? _reclaimCompletion;
     private static Task _reclaimTask = Task.CompletedTask;
     private static Task _referenceReleaseBarrier = Task.CompletedTask;
+    private static long _referenceReleaseEpoch;
+    private static long _requiredReferenceReleaseCollectionEpoch;
+    private static bool _activeReclaimCollectsGeneration2;
+    private static bool _activeGeneration2CollectionStarted;
+    private static long _activeGeneration2CoverageEpoch;
+    private static int _generation2CoveragePauseStageForTesting;
+    private static TaskCompletionSource? _generation2CoverageReachedForTesting;
+    private static TaskCompletionSource? _generation2CoverageResumeForTesting;
     private static bool _regionExitOnlyRequested;
     private static string _regionExitOnlyReason = "unspecified";
     private static TaskCompletionSource? _regionExitOnlyCompletion;
@@ -120,6 +128,14 @@ internal static class SearchGcPolicy
         {
             lock (Gate)
                 return _lastBackgroundReclaimManagedLiveAfterForTesting;
+        }
+    }
+    internal static long ReferenceReleaseEpochForTesting
+    {
+        get
+        {
+            lock (Gate)
+                return _referenceReleaseEpoch;
         }
     }
 
@@ -290,6 +306,7 @@ internal static class SearchGcPolicy
                             {
                                 _noGcRegionActive = false;
                                 _reclaimRequired = true;
+                                RequireCollectionAfterNextReferenceReleaseLocked();
                                 RestoreLatencyModeLocked();
                                 Entry.Logger.Warn(
                                     "[CombatSolver/Test] GC_LATENCY no_gc_region_exhausted=true " +
@@ -500,7 +517,7 @@ internal static class SearchGcPolicy
             await predecessor.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             await referenceRelease.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             onReferencesReleased();
-            await ReclaimIfPendingAsync(
+            await ReclaimAfterReferenceReleaseBoundaryAsync(
                     reason,
                     forceCollection,
                     includeCombatLifecyclePressure)
@@ -520,40 +537,136 @@ internal static class SearchGcPolicy
         bool includeCombatLifecyclePressure = true)
     {
         lock (Gate)
+            return ReclaimIfPendingLocked(
+                reason,
+                forceCollection,
+                includeCombatLifecyclePressure,
+                requiredCoverageEpoch: null);
+    }
+
+    private static Task ReclaimAfterReferenceReleaseBoundaryAsync(
+        string reason,
+        bool forceCollection,
+        bool includeCombatLifecyclePressure)
+    {
+        lock (Gate)
         {
-            bool lifecycleCollectionRequired = includeCombatLifecyclePressure
-                && _combatLifecycleAllocatedBytes >= BackgroundReclaimThresholdBytes;
-            if (includeCombatLifecyclePressure)
-                _combatLifecycleAllocatedBytes = 0;
-            bool requestCollection = forceCollection || lifecycleCollectionRequired;
-            if (_reclaimActive)
+            long releaseEpoch = checked(++_referenceReleaseEpoch);
+            long? requiredCoverageEpoch = null;
+            if (_requiredReferenceReleaseCollectionEpoch != 0
+                && releaseEpoch >= _requiredReferenceReleaseCollectionEpoch)
             {
-                if (_activeSearches > 0 || requestCollection)
-                {
-                    _regionExitRequired = true;
-                    _reclaimRequired |= requestCollection;
-                    _reclaimReason = reason;
-                }
-                else
-                {
-                    // A background combat-end collection already covers the released graph.
-                    // Joining it must not enqueue an identical second Gen2 collection.
-                    _backgroundReclaimJoinCountForTesting++;
-                }
-                return WaitForReclaimChainAsync(_reclaimTask);
+                // Keep the newest released graph covered when an exhaustion reclaim began
+                // before worker/callback/forensic references reached quiescence.
+                _requiredReferenceReleaseCollectionEpoch = releaseEpoch;
+                requiredCoverageEpoch = releaseEpoch;
             }
-            if (_reclaimRequested)
+            return ReclaimIfPendingLocked(
+                reason,
+                forceCollection,
+                includeCombatLifecyclePressure,
+                requiredCoverageEpoch);
+        }
+    }
+
+    private static Task ReclaimIfPendingLocked(
+        string reason,
+        bool forceCollection,
+        bool includeCombatLifecyclePressure,
+        long? requiredCoverageEpoch)
+    {
+        bool lifecycleCollectionRequired = includeCombatLifecyclePressure
+            && _combatLifecycleAllocatedBytes >= BackgroundReclaimThresholdBytes;
+        if (includeCombatLifecyclePressure)
+            _combatLifecycleAllocatedBytes = 0;
+        bool activeCollectionWillCoverRelease = requiredCoverageEpoch.HasValue
+            && _reclaimActive
+            && _activeReclaimCollectsGeneration2
+            && (!_activeGeneration2CollectionStarted
+                || _activeGeneration2CoverageEpoch >= requiredCoverageEpoch.Value);
+        bool coverageCollectionRequired = requiredCoverageEpoch.HasValue
+            && !activeCollectionWillCoverRelease;
+        bool requestCollection = coverageCollectionRequired
+            || ((forceCollection || lifecycleCollectionRequired)
+                && !activeCollectionWillCoverRelease);
+        if (_reclaimActive)
+        {
+            if (_activeSearches > 0 || requestCollection)
             {
+                _regionExitRequired = true;
                 _reclaimRequired |= requestCollection;
-                return WaitForReclaimChainAsync(_reclaimTask);
+                _reclaimReason = reason;
             }
-            if (_activeSearches == 0
-                && !_noGcRegionActive
-                && !_reclaimRequired
-                && !requestCollection)
-                return Task.CompletedTask;
+            else
+            {
+                // A collection whose mark starts after this release covers the graph. Joining
+                // it must not enqueue an identical second Gen2 collection.
+                _backgroundReclaimJoinCountForTesting++;
+            }
+            return WaitForReclaimChainAsync(_reclaimTask);
+        }
+        if (_reclaimRequested)
+        {
             _reclaimRequired |= requestCollection;
-            return WaitForReclaimChainAsync(RequestReclaimLocked(reason));
+            return WaitForReclaimChainAsync(_reclaimTask);
+        }
+        if (_activeSearches == 0
+            && !_noGcRegionActive
+            && !_reclaimRequired
+            && !requestCollection)
+            return Task.CompletedTask;
+        _reclaimRequired |= requestCollection;
+        return WaitForReclaimChainAsync(RequestReclaimLocked(reason));
+    }
+
+    internal static (Task Reclaim, Task CoverageBoundaryReached)
+        RequestNoGcExhaustionReclaimForTesting(bool pauseAfterCoverageCapture)
+    {
+        if (!UnattendedTestRunner.IsActive)
+        {
+            throw new InvalidOperationException(
+                "No-GC exhaustion 回收入口只能在无人测试中使用。");
+        }
+        lock (Gate)
+        {
+            if (_activeSearches != 0 || _reclaimActive || _reclaimRequested)
+                throw new InvalidOperationException("No-GC exhaustion 测试要求 GC policy 已静止。");
+            if (_generation2CoveragePauseStageForTesting != 0)
+                throw new InvalidOperationException("No-GC exhaustion 覆盖边界测试已经在运行。");
+            _generation2CoveragePauseStageForTesting = pauseAfterCoverageCapture ? 2 : 1;
+            _generation2CoverageReachedForTesting = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            _generation2CoverageResumeForTesting = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            RequireCollectionAfterNextReferenceReleaseLocked();
+            _reclaimRequired = true;
+            Task reclaim = RequestReclaimLocked("unattended_no_gc_region_exhaustion");
+            return (reclaim, _generation2CoverageReachedForTesting.Task);
+        }
+    }
+
+    internal static void ResumeGeneration2CoverageForTesting()
+    {
+        TaskCompletionSource? resume;
+        lock (Gate)
+            resume = _generation2CoverageResumeForTesting;
+        resume?.TrySetResult();
+    }
+
+    private static Task PauseGeneration2CoverageForTestingAsync(
+        bool afterCoverageCapture)
+    {
+        lock (Gate)
+        {
+            int expectedStage = afterCoverageCapture ? 2 : 1;
+            if (_generation2CoveragePauseStageForTesting != expectedStage)
+                return Task.CompletedTask;
+            TaskCompletionSource reached = _generation2CoverageReachedForTesting
+                ?? throw new InvalidOperationException("Gen2 覆盖边界测试缺少到达信号。");
+            TaskCompletionSource resume = _generation2CoverageResumeForTesting
+                ?? throw new InvalidOperationException("Gen2 覆盖边界测试缺少恢复信号。");
+            reached.TrySetResult();
+            return resume.Task;
         }
     }
 
@@ -589,6 +702,14 @@ internal static class SearchGcPolicy
         return _reclaimTask;
     }
 
+    private static void RequireCollectionAfterNextReferenceReleaseLocked()
+    {
+        long requiredEpoch = checked(_referenceReleaseEpoch + 1);
+        _requiredReferenceReleaseCollectionEpoch = Math.Max(
+            _requiredReferenceReleaseCollectionEpoch,
+            requiredEpoch);
+    }
+
     private static void StartReclaimLocked()
     {
         if (!_reclaimRequested || _activeSearches != 0)
@@ -606,6 +727,9 @@ internal static class SearchGcPolicy
         _reclaimActive = true;
         _regionExitRequired = false;
         _reclaimRequired = false;
+        _activeReclaimCollectsGeneration2 = collectGeneration2;
+        _activeGeneration2CollectionStarted = false;
+        _activeGeneration2CoverageEpoch = 0;
         _noGcRegionActive = false;
         _latencyModeOwned = false;
         _noGcRegionAllocatedBytesAtStart = 0;
@@ -638,9 +762,28 @@ internal static class SearchGcPolicy
                 if (collectGeneration2)
                 {
                     await Task.Delay(ReclaimReferenceReleaseDelayMilliseconds);
+                    await PauseGeneration2CoverageForTestingAsync(
+                        afterCoverageCapture: false);
+                    long collectionCoverageEpoch;
+                    lock (Gate)
+                    {
+                        _activeGeneration2CollectionStarted = true;
+                        collectionCoverageEpoch = _referenceReleaseEpoch;
+                        _activeGeneration2CoverageEpoch = collectionCoverageEpoch;
+                    }
+                    await PauseGeneration2CoverageForTestingAsync(
+                        afterCoverageCapture: true);
                     completedCollection = await CollectGeneration2InBackgroundAsync();
                     lock (Gate)
+                    {
                         _backgroundGen2CompletedCountForTesting++;
+                        if (_requiredReferenceReleaseCollectionEpoch != 0
+                            && collectionCoverageEpoch
+                            >= _requiredReferenceReleaseCollectionEpoch)
+                        {
+                            _requiredReferenceReleaseCollectionEpoch = 0;
+                        }
+                    }
                 }
                 stopwatch.Stop();
                 GCMemoryInfo memory = GC.GetGCMemoryInfo();
@@ -693,6 +836,20 @@ internal static class SearchGcPolicy
                 {
                     _reclaimActive = false;
                     _reclaimCompletion = null;
+                    _activeReclaimCollectsGeneration2 = false;
+                    _activeGeneration2CollectionStarted = false;
+                    _activeGeneration2CoverageEpoch = 0;
+                    _generation2CoveragePauseStageForTesting = 0;
+                    _generation2CoverageReachedForTesting = null;
+                    _generation2CoverageResumeForTesting = null;
+                    if (failure != null
+                        && collectGeneration2
+                        && _requiredReferenceReleaseCollectionEpoch != 0)
+                    {
+                        // Preserve the post-release obligation for the next safe policy entry;
+                        // do not spin a retry loop after a failed background collection.
+                        _reclaimRequired = true;
+                    }
                     if (failure == null && (_regionExitRequired || _reclaimRequired))
                         RequestReclaimLocked(_reclaimReason);
                 }
@@ -786,6 +943,7 @@ internal static class SearchGcPolicy
                 if (exhausted)
                 {
                     _reclaimRequired = true;
+                    RequireCollectionAfterNextReferenceReleaseLocked();
                     Entry.Logger.Warn(
                         "[CombatSolver/Test] GC_LATENCY no_gc_region_exhausted_before_early_exit=true " +
                         "reclaim=deferred_until_reference_release");
@@ -800,6 +958,7 @@ internal static class SearchGcPolicy
             {
                 _noGcRegionActive = false;
                 _reclaimRequired = true;
+                RequireCollectionAfterNextReferenceReleaseLocked();
                 RestoreLatencyModeLocked();
                 Entry.Logger.Warn(
                     "[CombatSolver/Test] GC_LATENCY no_gc_region_exhausted_before_search_exit=true " +

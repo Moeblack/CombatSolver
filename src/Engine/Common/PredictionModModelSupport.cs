@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -12,6 +13,43 @@ internal readonly record struct BaseLibCardModifierFingerprintState(
     int Priority,
     KeyValuePair<string, int>[] IntProperties,
     KeyValuePair<string, string>[] AdditionalProperties);
+
+internal readonly struct CardAttachedModelCollection
+{
+    private readonly AbstractModel[]? _models;
+
+    public CardAttachedModelCollection(IList models, Type expectedType)
+    {
+        ArgumentNullException.ThrowIfNull(models);
+        ArgumentNullException.ThrowIfNull(expectedType);
+        if (models.Count == 0)
+        {
+            _models = null;
+            return;
+        }
+
+        // StoreSaveData is third-party code and may re-enter BaseLib. Preserve the old
+        // snapshot-before-callback semantics while keeping the common empty-list path
+        // allocation-free.
+        AbstractModel[] snapshot = new AbstractModel[models.Count];
+        for (int index = 0; index < snapshot.Length; index++)
+        {
+            object? value = models[index];
+            if (value is not AbstractModel model
+                || !expectedType.IsInstanceOfType(model))
+            {
+                throw new InvalidOperationException(
+                    "BaseLib returned an invalid card modifier listener.");
+            }
+            snapshot[index] = model;
+        }
+        _models = snapshot;
+    }
+
+    public int Count => _models?.Length ?? 0;
+
+    public AbstractModel this[int index] => _models![index];
+}
 
 internal static class PredictionModModelSupport
 {
@@ -65,13 +103,12 @@ internal static class PredictionModModelSupport
         IList clonedModifiers = adapter.DirectModifiers(clone);
         if (clonedModifiers.Count != 0)
             throw new InvalidOperationException("BaseLib populated card modifiers before prediction clone migration.");
-        foreach (object sourceModifier in sourceModifiers)
+        CardAttachedModelCollection sourceSnapshot = new(
+            sourceModifiers,
+            adapter.ModifierType);
+        for (int index = 0; index < sourceSnapshot.Count; index++)
         {
-            if (sourceModifier is not AbstractModel sourceModel
-                || !adapter.ModifierType.IsInstanceOfType(sourceModel))
-            {
-                throw new InvalidOperationException("BaseLib returned an invalid source card modifier.");
-            }
+            AbstractModel sourceModel = sourceSnapshot[index];
             AbstractModel clonedModel = PredictionUtils.CloneModelForSimulation(sourceModel);
             adapter.SetOwner(clonedModel, clone);
             clonedModifiers.Add(clonedModel);
@@ -82,20 +119,23 @@ internal static class PredictionModModelSupport
 
     public static void AppendCardAttachedListeners(CardModel card, List<AbstractModel> listeners)
     {
+        CardAttachedModelCollection attached = GetCardAttachedListeners(card);
+        for (int index = 0; index < attached.Count; index++)
+            listeners.Add(attached[index]);
+    }
+
+    public static CardAttachedModelCollection GetCardAttachedListeners(CardModel card)
+    {
         BaseLibCardModifierAdapter? adapter = BaseLibCardModifiers.Value;
         if (!_hasRegisteredBaseLibModifierCards
             || adapter == null
             || !BaseLibModifierCards.TryGetValue(card, out _))
-            return;
-        foreach (object modifier in adapter.DirectModifiers(card))
         {
-            if (modifier is not AbstractModel model
-                || !adapter.ModifierType.IsInstanceOfType(model))
-            {
-                throw new InvalidOperationException("BaseLib returned an invalid card modifier listener.");
-            }
-            listeners.Add(model);
+            return default;
         }
+        return new CardAttachedModelCollection(
+            adapter.DirectModifiers(card),
+            adapter.ModifierType);
     }
 
     public static BaseLibCardModifierFingerprintState CaptureBaseLibCardModifierFingerprintState(
@@ -126,16 +166,13 @@ internal static class PredictionModModelSupport
         // cannot make an otherwise unchanged live stamp drift.
         if (modifiers.Count == 0)
             return false;
+        CardAttachedModelCollection snapshot = new(modifiers, adapter.ModifierType);
         if (!registered)
             RegisterBaseLibCardModifierOwner(card);
-        text.Append(modifiers.Count).Append('{');
-        foreach (object value in modifiers)
+        text.Append(snapshot.Count).Append('{');
+        for (int index = 0; index < snapshot.Count; index++)
         {
-            if (value is not AbstractModel modifier
-                || !adapter.ModifierType.IsInstanceOfType(modifier))
-            {
-                throw new InvalidOperationException("BaseLib returned an invalid card modifier state.");
-            }
+            AbstractModel modifier = snapshot[index];
             Type type = modifier.GetType();
             AppendToken(text, type.Assembly.GetName().Name ?? string.Empty);
             AppendToken(text, type.FullName ?? type.Name);
@@ -240,11 +277,23 @@ internal static class PredictionModModelSupport
         MethodInfo getAdditionalProperties,
         MethodInfo afterClonedOnCard)
     {
+        private readonly Func<CardModel, IList> _directModifiers =
+            CompileDirectModifiers(directModifiers);
+
         public Type ModifierType => modifierType;
 
         public IList DirectModifiers(CardModel card)
-            => directModifiers.Invoke(null, [card]) as IList
+            => _directModifiers(card)
                 ?? throw new InvalidOperationException("BaseLib DirectModifiers did not return a list.");
+
+        private static Func<CardModel, IList> CompileDirectModifiers(MethodInfo method)
+        {
+            ParameterExpression card = Expression.Parameter(typeof(CardModel), "card");
+            UnaryExpression result = Expression.Convert(
+                Expression.Call(method, card),
+                typeof(IList));
+            return Expression.Lambda<Func<CardModel, IList>>(result, card).Compile();
+        }
 
         public CardModel? GetOwner(AbstractModel modifier)
             => getOwner.Invoke(modifier, null) as CardModel;

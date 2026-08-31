@@ -904,12 +904,13 @@ internal sealed partial class CombatBeamSolver
         ref StateFingerprintBuilder key,
         CardModel card)
     {
-        List<AbstractModel> modifiers = [];
-        PredictionModModelSupport.AppendCardAttachedListeners(card, modifiers);
+        CardAttachedModelCollection modifiers =
+            PredictionModModelSupport.GetCardAttachedListeners(card);
         key.Add('M');
         key.Add(modifiers.Count);
-        foreach (AbstractModel modifier in modifiers)
+        for (int index = 0; index < modifiers.Count; index++)
         {
+            AbstractModel modifier = modifiers[index];
             Type type = modifier.GetType();
             key.Add(type.Assembly.GetName().Name);
             key.Add(type.FullName);

@@ -567,6 +567,8 @@ internal static class PlayerTurnSetupCoordinator
             else
                 await PrepareReplayChoiceSurfaceAsync(active, host, originalSetup, "setup");
             await active.Choices.AwaitPhaseAsync(originalSetup);
+            if (!IsCurrentActivePlan(active))
+                return;
             keepActiveForAutoPrePlay = true;
         }
         catch (OperationCanceledException) when (
@@ -685,7 +687,8 @@ internal static class PlayerTurnSetupCoordinator
                     player.PlayerCombatState.TurnNumber,
                     deployWhenReady: deployAfterSetup,
                     waitForDeploymentDelay: solverDriven
-                        && (deployAfterSetup || SolverController.FullAutoEnabled));
+                        && (deployAfterSetup || SolverController.FullAutoEnabled),
+                    token: active.Token);
                 return;
             }
 
@@ -699,7 +702,8 @@ internal static class PlayerTurnSetupCoordinator
                     active.Combat,
                     active.LifecycleGeneration,
                     player.PlayerCombatState.TurnNumber,
-                    waitForDeploymentDelay: SolverController.FullAutoEnabled);
+                    waitForDeploymentDelay: SolverController.FullAutoEnabled,
+                    token: active.Token);
                 return;
             }
 
@@ -722,7 +726,8 @@ internal static class PlayerTurnSetupCoordinator
                     host,
                     active.Combat,
                     active.LifecycleGeneration,
-                    player.PlayerCombatState.TurnNumber);
+                    player.PlayerCombatState.TurnNumber,
+                    token: active.Token);
                 return;
             }
             Entry.Logger.Info(

@@ -1349,7 +1349,7 @@ internal sealed partial class SimulatedCombatState
 
     public IReadOnlyList<PowerModel> EffectivePowers()
     {
-        if (CanReuseHookListenerCache && _effectivePowers is not null)
+        if (_effectivePowers is not null)
             return _effectivePowers;
         IReadOnlyList<AbstractModel> listeners = GetEffectiveHookListeners();
         int expectedPowerCount = _rootPowerAmounts.Count

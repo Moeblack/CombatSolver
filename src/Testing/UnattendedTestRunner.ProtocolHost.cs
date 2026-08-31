@@ -213,9 +213,12 @@ internal sealed partial class UnattendedTestRunner
                         1,
                         deadline - System.Environment.TickCount64));
                     consecutiveIdleFrames = 0;
-                    await SearchGcPolicy.ReclaimIfPendingAsync(
+                    await SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
                             "unattended_reuse",
-                            forceCollection: true)
+                            forceCollection: true,
+                            includeCombatLifecyclePressure: false,
+                            Task.CompletedTask,
+                            static () => { })
                         .WaitAsync(TimeSpan.FromMilliseconds(remainingMilliseconds));
                     reclaimedAfterQuiescence = true;
                     continue;
