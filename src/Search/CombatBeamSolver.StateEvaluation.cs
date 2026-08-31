@@ -210,13 +210,19 @@ internal sealed partial class CombatBeamSolver
             .Sum(card => Math.Max(
                 1,
                 (int)Math.Ceiling(CardChoiceSupport.CardValue(card.Preview) * 2d)));
+        int freeCardOpportunityValue = FreeCardOpportunityValue(
+            simulator,
+            combat,
+            playerState,
+            _player.Creature);
         int futureResourceValue = combat.GetAmount<EnergyNextTurnPower>(_player.Creature) * 16
             + combat.GetAmount<DrawCardsNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<StarNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<RetainHandPower>(_player.Creature) * 4
             + combat.GetAmount<SummonNextTurnPower>(_player.Creature)
                 * (4 + Math.Min(12, liveCards.Count(card => card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2))
-            + retainedHandValue;
+            + retainedHandValue
+            + freeCardOpportunityValue;
         Creature? currentOsty = combat.GetOsty(_player);
         int ostyHp = currentOsty == null
             ? 0
@@ -420,6 +426,59 @@ internal sealed partial class CombatBeamSolver
             }
         }
         return (best[energyCapacity, starCapacity], zeroCostPlayableCount);
+    }
+
+    private static int FreeCardOpportunityValue(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        SimPlayerCombatState playerState,
+        Creature owner)
+        => FreeCardOpportunityValue(
+                simulator,
+                combat,
+                playerState,
+                CardType.Attack,
+                combat.GetAmount<FreeAttackPower>(owner))
+            + FreeCardOpportunityValue(
+                simulator,
+                combat,
+                playerState,
+                CardType.Skill,
+                combat.GetAmount<FreeSkillPower>(owner))
+            + FreeCardOpportunityValue(
+                simulator,
+                combat,
+                playerState,
+                CardType.Power,
+                combat.GetAmount<FreePowerPower>(owner));
+
+    private static int FreeCardOpportunityValue(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        SimPlayerCombatState playerState,
+        CardType cardType,
+        int freeUses)
+    {
+        if (freeUses <= 0)
+            return 0;
+
+        return playerState.Hand.Cards
+            .Where(card => card.Preview.Type == cardType
+                && !card.Preview.EnergyCost.CostsX
+                && combat.CanPlayCard(simulator, card))
+            .Select(card =>
+            {
+                int normalCost = Math.Max(
+                    0,
+                    (int)Math.Ceiling((double)card.Preview.EnergyCost.GetWithModifiers(CostModifiers.Local)));
+                int currentCost = Math.Max(0, card.GetEnergyCostWithModifiers(simulator, playerState));
+                int savedEnergy = Math.Max(0, normalCost - currentCost);
+                return savedEnergy * 16
+                    + Math.Min(16, Math.Max(1, (int)Math.Ceiling(CardChoiceSupport.CardValue(card.Preview))));
+            })
+            .OrderDescending()
+            .Take(freeUses)
+            .Sum();
     }
 
     private StateFingerprint BuildUnorderedPileKey(SimPlayerCombatState playerState)
