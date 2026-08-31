@@ -32,7 +32,8 @@ internal sealed partial class CombatBeamSolver(
     int? shortCheckpointMilliseconds = null,
     SolverPotionPolicy? potionPolicyOverride = null,
     PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
-    int? maximumPotionUses = null)
+    int? maximumPotionUses = null,
+    IReadOnlyList<PlanAction>? fixedPrefixActions = null)
 {
     private readonly SolverSearchProfile _profile = searchProfile ?? SolverSearchProfile.Short;
     private readonly SearchRunContext _run = new(
@@ -47,6 +48,7 @@ internal sealed partial class CombatBeamSolver(
     private readonly bool _isActEndingBoss = root.IsActEndingBoss;
     private readonly bool _detailedDiagnostics = policy.DetailedDiagnostics;
     private readonly int? _maximumPotionUses = maximumPotionUses;
+    private readonly IReadOnlyList<PlanAction> _fixedPrefixActions = fixedPrefixActions ?? [];
     private readonly SolverTheftPolicy? _theftPolicy = policy.TheftPolicy;
     private readonly SolverPotionPolicy _potionPolicy = potionPolicyOverride
         ?? (policy.TheftPolicy == SolverTheftPolicy.PreserveResources

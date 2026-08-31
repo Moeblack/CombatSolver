@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
@@ -24,6 +25,66 @@ namespace CombatSolver;
 
 internal sealed partial class CombatBeamSolver
 {
+    internal PlanAction? BuildOpeningFullRedrawPotionAction(PlanAction selectedPotionAction)
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        SimulationSnapshot? probeSnapshot = null;
+        try
+        {
+            CombatPredictionSimulator simulator = (CombatPredictionSimulator)rootSnapshot.Simulator;
+            SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+            PotionModel? potion = combat.GetPotionAtSlot(_player, selectedPotionAction.PotionSlot);
+            if (potion is not GamblersBrew
+                || !string.Equals(
+                    potion.Id.Entry,
+                    selectedPotionAction.PotionId,
+                    StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            SearchNode seed = new(
+                null,
+                0,
+                rootSnapshot.PotionUseCount,
+                rootSnapshot.PotionStrategicCost,
+                _startTurnNumber,
+                SearchRouteTraits.None,
+                0,
+                rootSnapshot.Score,
+                rootSnapshot.StateKey,
+                rootSnapshot.HasRisk,
+                rootSnapshot.BoundaryReason,
+                false,
+                null,
+                rootSnapshot,
+                CombatProgressState.Capture(rootSnapshot));
+            PlanAction baseAction = selectedPotionAction with { Choice = null };
+            probeSnapshot = ReplayAction(seed, baseAction);
+            CardChoiceSpec spec = PotionChoiceSupport.GetSpec(
+                (CombatPredictionSimulator)probeSnapshot.Simulator,
+                potion);
+            PlanCardChoice? fullRedraw = CardChoiceSupport.BuildChoices(
+                    spec,
+                    displayNames,
+                    _profile.MaxPileChoiceBranchesPerAction,
+                    _profile.MaxHandChoiceBranchesPerAction)
+                .OrderByDescending(choice => choice.Cards.Count)
+                .FirstOrDefault();
+            return fullRedraw == null
+                ? null
+                : baseAction with
+                {
+                    Choice = fullRedraw with { SourceId = potion.Id.Entry },
+                };
+        }
+        finally
+        {
+            probeSnapshot?.ReleaseSimulator();
+            rootSnapshot.ReleaseSimulator();
+        }
+    }
+
     private IEnumerable<SearchNode> Expand(SearchNode node)
     {
         cancellationToken.ThrowIfCancellationRequested();

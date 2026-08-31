@@ -257,7 +257,178 @@ internal static class CombatSearchCoordinator
             PlayerHp: potionFree.Snapshot.PlayerHp);
         List<SolverResult> searches = [primary, potionFree];
         SolverResult selected = primary;
-        for (int maximumPotionUses = primary.PotionCount - 1;
+        PlanAction[] posteriorPrefix = PrefixThroughFirstPotion(primary);
+        if (posteriorPrefix.Length > 0)
+        {
+            SolverResult posterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                SolverPotionPolicy.Smart,
+                baseline,
+                maximumPotionUses: primary.PotionCount,
+                fixedPrefixActions: posteriorPrefix).Solve();
+            bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
+                && posterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
+            posterior.SearchPhase = posteriorDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            posterior.DeepSearchTriggered = posteriorDeepTriggered;
+            posterior.DeepSearchImprovedResult = false;
+            posterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                posterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                posteriorDeepTriggered);
+            searches.Add(posterior);
+
+            bool posteriorWon = posterior.Snapshot.AllEnemiesDead
+                && !posterior.Snapshot.PlayerDead
+                && posterior.Snapshot.ProjectedPlayerHp > 0;
+            int posteriorDeficit = StrategicHpDeficit(root, posterior);
+            int primaryDeficit = StrategicHpDeficit(root, primary);
+            if (posteriorWon
+                && (posteriorDeficit < primaryDeficit
+                    || posteriorDeficit == primaryDeficit
+                        && (posterior.PotionCount < primary.PotionCount
+                            || posterior.PotionCount == primary.PotionCount
+                                && posterior.BestNode.Score > primary.BestNode.Score)))
+            {
+                selected = posterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SMART_POTION_POSTERIOR prefix_actions={posteriorPrefix.Length} " +
+                $"won={posteriorWon} hp_deficit={posteriorDeficit} " +
+                $"selected={ReferenceEquals(selected, posterior)}");
+        }
+        PlanAction? selectedFirstPotion = primary.BestNode.Actions
+            .FirstOrDefault(action => action.Kind == PlanActionKind.UsePotion);
+        PlanAction? fullRedrawAction = selectedFirstPotion == null
+            ? null
+            : new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    SolverPotionPolicy.Smart,
+                    baseline,
+                    maximumPotionUses: primary.PotionCount)
+                .BuildOpeningFullRedrawPotionAction(selectedFirstPotion);
+        if (fullRedrawAction != null)
+        {
+            SolverResult fullRedrawPosterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                SolverPotionPolicy.Smart,
+                baseline,
+                maximumPotionUses: primary.PotionCount,
+                fixedPrefixActions: [fullRedrawAction]).Solve();
+            bool fullRedrawDeepTriggered = shortCheckpointMilliseconds is { } redrawCheckpoint
+                && fullRedrawPosterior.Elapsed.TotalMilliseconds > redrawCheckpoint;
+            fullRedrawPosterior.SearchPhase = fullRedrawDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            fullRedrawPosterior.DeepSearchTriggered = fullRedrawDeepTriggered;
+            fullRedrawPosterior.DeepSearchImprovedResult = false;
+            fullRedrawPosterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                fullRedrawPosterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                fullRedrawDeepTriggered);
+            searches.Add(fullRedrawPosterior);
+
+            bool redrawWon = fullRedrawPosterior.Snapshot.AllEnemiesDead
+                && !fullRedrawPosterior.Snapshot.PlayerDead
+                && fullRedrawPosterior.Snapshot.ProjectedPlayerHp > 0;
+            bool selectedWon = selected.Snapshot.AllEnemiesDead
+                && !selected.Snapshot.PlayerDead
+                && selected.Snapshot.ProjectedPlayerHp > 0;
+            int redrawDeficit = StrategicHpDeficit(root, fullRedrawPosterior);
+            int selectedDeficit = StrategicHpDeficit(root, selected);
+            if (redrawWon
+                && (!selectedWon
+                    || redrawDeficit < selectedDeficit
+                    || redrawDeficit == selectedDeficit
+                        && (fullRedrawPosterior.PotionCount < selected.PotionCount
+                            || fullRedrawPosterior.PotionCount == selected.PotionCount
+                                && fullRedrawPosterior.BestNode.Score > selected.BestNode.Score)))
+            {
+                selected = fullRedrawPosterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SMART_POTION_FULL_REDRAW_POSTERIOR " +
+                $"won={redrawWon} hp_deficit={redrawDeficit} " +
+                $"selected={ReferenceEquals(selected, fullRedrawPosterior)}");
+
+            if (primary.PotionCount > 1)
+            {
+                SolverResult singlePotionPosterior = new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    SolverPotionPolicy.Smart,
+                    baseline,
+                    maximumPotionUses: 1,
+                    fixedPrefixActions: [fullRedrawAction]).Solve();
+                bool singlePotionDeepTriggered = shortCheckpointMilliseconds is { } singleCheckpoint
+                    && singlePotionPosterior.Elapsed.TotalMilliseconds > singleCheckpoint;
+                singlePotionPosterior.SearchPhase = singlePotionDeepTriggered
+                    ? SolverSearchPhase.Deep
+                    : SolverSearchPhase.Short;
+                singlePotionPosterior.DeepSearchTriggered = singlePotionDeepTriggered;
+                singlePotionPosterior.DeepSearchImprovedResult = false;
+                singlePotionPosterior.SingleSessionSearch = true;
+                PopulateSingleSessionTotals(
+                    singlePotionPosterior,
+                    shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                    singlePotionDeepTriggered);
+                searches.Add(singlePotionPosterior);
+
+                bool singleWon = singlePotionPosterior.Snapshot.AllEnemiesDead
+                    && !singlePotionPosterior.Snapshot.PlayerDead
+                    && singlePotionPosterior.Snapshot.ProjectedPlayerHp > 0;
+                selectedWon = selected.Snapshot.AllEnemiesDead
+                    && !selected.Snapshot.PlayerDead
+                    && selected.Snapshot.ProjectedPlayerHp > 0;
+                int singleDeficit = StrategicHpDeficit(root, singlePotionPosterior);
+                selectedDeficit = StrategicHpDeficit(root, selected);
+                if (singleWon
+                    && (!selectedWon
+                        || singleDeficit < selectedDeficit
+                        || singleDeficit == selectedDeficit
+                            && (singlePotionPosterior.PotionCount < selected.PotionCount
+                                || singlePotionPosterior.PotionCount == selected.PotionCount
+                                    && singlePotionPosterior.BestNode.Score > selected.BestNode.Score)))
+                {
+                    selected = singlePotionPosterior;
+                }
+                policy.Diagnostics.Info(
+                    $"[CombatSolver/Test] SMART_POTION_FULL_REDRAW_SINGLE_POSTERIOR " +
+                    $"won={singleWon} hp_deficit={singleDeficit} " +
+                    $"selected={ReferenceEquals(selected, singlePotionPosterior)}");
+            }
+        }
+        for (int maximumPotionUses = selected.PotionCount - 1;
              potionFreeWon && maximumPotionUses >= 1 && selected.PotionCount > 1;
              maximumPotionUses--)
         {
@@ -396,6 +567,58 @@ internal static class CombatSearchCoordinator
             shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
             forcedDeepTriggered);
 
+        List<SolverResult> searches = [primary, forcedPotion];
+        PlanAction[] prefix = PrefixThroughFirstPotion(forcedPotion);
+        if (prefix.Length > 0)
+        {
+            SolverResult posterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                SolverPotionPolicy.RequireAtLeastOne,
+                baseline,
+                maximumPotionUses: 1,
+                fixedPrefixActions: prefix).Solve();
+            bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
+                && posterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
+            posterior.SearchPhase = posteriorDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            posterior.DeepSearchTriggered = posteriorDeepTriggered;
+            posterior.DeepSearchImprovedResult = false;
+            posterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                posterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                posteriorDeepTriggered);
+            searches.Add(posterior);
+
+            bool posteriorWon = posterior.Snapshot.AllEnemiesDead
+                && !posterior.Snapshot.PlayerDead
+                && posterior.Snapshot.ProjectedPlayerHp > 0;
+            bool forcedSearchWon = forcedPotion.Snapshot.AllEnemiesDead
+                && !forcedPotion.Snapshot.PlayerDead
+                && forcedPotion.Snapshot.ProjectedPlayerHp > 0;
+            int posteriorDeficit = StrategicHpDeficit(root, posterior);
+            int forcedDeficit = StrategicHpDeficit(root, forcedPotion);
+            if (posteriorWon
+                && (!forcedSearchWon
+                    || posteriorDeficit < forcedDeficit
+                    || posteriorDeficit == forcedDeficit && posterior.BestNode.Score > forcedPotion.BestNode.Score))
+            {
+                forcedPotion = posterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SMART_POTION_POSTERIOR prefix_actions={prefix.Length} " +
+                $"won={posteriorWon} hp_deficit={posteriorDeficit} " +
+                $"selected={ReferenceEquals(forcedPotion, posterior)}");
+        }
+
         bool forcedWon = forcedPotion.Snapshot.AllEnemiesDead
             && !forcedPotion.Snapshot.PlayerDead
             && forcedPotion.Snapshot.ProjectedPlayerHp > 0;
@@ -419,13 +642,24 @@ internal static class CombatSearchCoordinator
         forcedPotion.PotionHpSaved = hpSaved;
         forcedPotion.PotionHpRequired = hpRequired;
         SolverResult selected = selectPotion ? forcedPotion : primary;
-        MergeAuditTotals(selected, primary, forcedPotion);
+        MergeAuditTotals(selected, [.. searches]);
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SMART_POTION_INTERVENTION result " +
             $"forced_won={forcedWon} saved={hpSaved} required={hpRequired} " +
             $"protects_more_loot={protectsMoreLoot} " +
             $"selected={(selectPotion ? "potion_route" : "potion_free")}");
         return selected;
+    }
+
+    private static PlanAction[] PrefixThroughFirstPotion(SolverResult result)
+    {
+        IReadOnlyList<PlanAction> actions = result.BestNode.Actions;
+        for (int index = 0; index < actions.Count; index++)
+        {
+            if (actions[index].Kind == PlanActionKind.UsePotion)
+                return actions.Take(index + 1).ToArray();
+        }
+        return [];
     }
 
     private static int CorrectedPotionHpSaved(

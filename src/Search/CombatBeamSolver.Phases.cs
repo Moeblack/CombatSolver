@@ -138,6 +138,7 @@ internal sealed partial class CombatBeamSolver
                 CombatProgressState.Capture(snapshot),
                 TurnSetupChoices: choices,
                 TurnSetupPlayState: turnSetupPlayState);
+            root = ApplyFixedPrefix(root);
             frontier.Add(root);
             if (_run.Transpositions.TryGetValue(root.StateKey, out TranspositionFrontier? existing))
                 existing.TryAccept(new TranspositionLabel(
@@ -705,6 +706,51 @@ internal sealed partial class CombatBeamSolver
             Elapsed = stopwatch.Elapsed,
             Continuations = continuations,
         };
+    }
+
+    private SearchNode ApplyFixedPrefix(SearchNode seed)
+    {
+        SearchNode node = seed;
+        foreach (PlanAction action in _fixedPrefixActions)
+        {
+            if (action.Kind == PlanActionKind.EndTurn
+                || action.EndsPlayerTurn
+                || action.Turn != node.Turn)
+            {
+                throw new InvalidOperationException(
+                    "固定搜索前缀目前只接受当前回合内、不结束回合的动作。");
+            }
+
+            SimulationSnapshot snapshot = Replay(
+                [action],
+                node.Snapshot,
+                node.Turn,
+                node.ActionCount);
+            bool terminal = snapshot.PlayerDead
+                || snapshot.AllEnemiesDead
+                || snapshot.BoundaryReason != SearchBoundaryReason.None;
+            SearchRouteTraits traits = action.Kind == PlanActionKind.UsePotion
+                ? ClassifyPotionTraits(node.Traits, node.Snapshot, snapshot)
+                : node.Traits;
+            node = new SearchNode(
+                action,
+                node.ActionCount + 1,
+                snapshot.PotionUseCount,
+                snapshot.PotionStrategicCost,
+                node.Turn,
+                traits,
+                node.FutureSoldHp,
+                ApplySoldHpPenalty(snapshot.Score, node.FutureSoldHp),
+                snapshot.StateKey,
+                snapshot.HasRisk,
+                snapshot.BoundaryReason,
+                terminal,
+                node,
+                snapshot,
+                node.CombatProgress);
+            node.Parent!.Snapshot.ReleaseSimulator();
+        }
+        return node;
     }
 
     private PlanAction WithDisplayNames(PlanAction action)
