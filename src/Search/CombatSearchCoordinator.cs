@@ -140,7 +140,9 @@ internal static class CombatSearchCoordinator
         SolverResult primary)
     {
         int primaryDeficit = StrategicHpDeficit(root, primary);
-        if (primaryDeficit == 0)
+        if (primaryDeficit == 0
+            || policy.PotionPolicy == SolverPotionPolicy.RequireAtLeastOne
+                && battleDamage.PotionsUsedSoFar == 0)
             return primary;
 
         IReadOnlyList<PlanAction> openingPowers = new CombatBeamSolver(
@@ -434,7 +436,7 @@ internal static class CombatSearchCoordinator
                 progressCallback,
                 profile,
                 shortCheckpointMilliseconds,
-                SolverPotionPolicy.Smart,
+                SolverPotionPolicy.RequireAtLeastOne,
                 baseline,
                 maximumPotionUses: primary.PotionCount,
                 fixedPrefixActions: posteriorPrefix).Solve();
@@ -499,7 +501,7 @@ internal static class CombatSearchCoordinator
                 progressCallback,
                 profile,
                 shortCheckpointMilliseconds,
-                SolverPotionPolicy.Smart,
+                SolverPotionPolicy.RequireAtLeastOne,
                 baseline,
                 maximumPotionUses: primary.PotionCount,
                 fixedPrefixActions: [fullRedrawAction]).Solve();
@@ -551,7 +553,7 @@ internal static class CombatSearchCoordinator
                     progressCallback,
                     profile,
                     shortCheckpointMilliseconds,
-                    SolverPotionPolicy.Smart,
+                    SolverPotionPolicy.RequireAtLeastOne,
                     baseline,
                     maximumPotionUses: 1,
                     fixedPrefixActions: [fullRedrawAction]).Solve();
