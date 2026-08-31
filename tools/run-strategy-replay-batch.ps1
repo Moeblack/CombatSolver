@@ -1,0 +1,462 @@
+<#
+.SYNOPSIS
+批量回放 CombatSolver 报告：High 追不平人工时自动转 Very High，单包失败后继续下一包。
+
+.EXAMPLE
+./tools/run-strategy-replay-batch.ps1 -ReportsRoot ./.local/issue-bundles/better-worldline-20260831/raw/reports -ManifestPath ./manifest.json
+
+.EXAMPLE
+./tools/run-strategy-replay-batch.ps1 -ReportsRoot ./reports -PreflightOnly
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true)]
+    [string]$ReportsRoot,
+
+    [string]$ManifestPath,
+    [string]$WorkbookPath,
+    [string]$WorkbookReaderScript = ".local/strategy-batch/read-noted-sheet.mjs",
+    [string]$NodePath = "node",
+    [string]$OutputDirectory,
+    [string[]]$ReportId,
+    [string[]]$ExcludeReportId = @("52911e5d91de488aa8a7f51512314bf4"),
+    [ValidateRange(1, 8)]
+    [int]$SearchParallelism = 4,
+    [ValidateRange(10, 3600)]
+    [int]$HighTimeoutSeconds = 180,
+    [ValidateRange(10, 3600)]
+    [int]$VeryHighTimeoutSeconds = 300,
+    [ValidateRange(0, 10000)]
+    [int]$MaxReports = 0,
+    [switch]$FullCombatOnly,
+    [switch]$PreflightOnly
+)
+
+$ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
+
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$runnerPath = Join-Path $PSScriptRoot "run-unattended-test.ps1"
+$reportsRootPath = [System.IO.Path]::GetFullPath($ReportsRoot)
+
+if (-not (Test-Path -LiteralPath $runnerPath -PathType Leaf)) {
+    throw "找不到无人值守测试入口：$runnerPath"
+}
+if (-not (Test-Path -LiteralPath $reportsRootPath -PathType Container)) {
+    throw "找不到报告目录：$reportsRootPath"
+}
+
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $OutputDirectory = Join-Path $projectRoot ".local/strategy-batch/results/$timestamp"
+}
+$outputPath = [System.IO.Path]::GetFullPath($OutputDirectory)
+New-Item -ItemType Directory -Path $outputPath -Force | Out-Null
+
+$jsonlPath = Join-Path $outputPath "strategy-replay-batch.jsonl"
+$jsonPath = Join-Path $outputPath "strategy-replay-batch.json"
+$csvPath = Join-Path $outputPath "strategy-replay-batch.csv"
+Set-Content -LiteralPath $jsonlPath -Value "" -NoNewline -Encoding UTF8
+
+function Read-Manifest {
+    if (-not [string]::IsNullOrWhiteSpace($ManifestPath)) {
+        $resolvedManifestPath = [System.IO.Path]::GetFullPath($ManifestPath)
+        if (-not (Test-Path -LiteralPath $resolvedManifestPath -PathType Leaf)) {
+            throw "找不到清单：$resolvedManifestPath"
+        }
+        $parsed = Get-Content -LiteralPath $resolvedManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -ne $parsed.manifest) {
+            return @($parsed.manifest)
+        }
+        return @($parsed)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($WorkbookPath)) {
+        $resolvedWorkbookPath = [System.IO.Path]::GetFullPath($WorkbookPath)
+        $resolvedReaderPath = [System.IO.Path]::GetFullPath((Join-Path $projectRoot $WorkbookReaderScript))
+        if (-not (Test-Path -LiteralPath $resolvedWorkbookPath -PathType Leaf)) {
+            throw "找不到表格：$resolvedWorkbookPath"
+        }
+        if (-not (Test-Path -LiteralPath $resolvedReaderPath -PathType Leaf)) {
+            throw "找不到表格清单读取器：$resolvedReaderPath"
+        }
+        $manifestText = & $NodePath $resolvedReaderPath $resolvedWorkbookPath 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            throw "读取表格失败：$manifestText"
+        }
+        $parsed = $manifestText | ConvertFrom-Json
+        return @($parsed.manifest)
+    }
+
+    return @(
+        Get-ChildItem -LiteralPath $reportsRootPath -Directory |
+            ForEach-Object {
+                [pscustomobject]@{
+                    reportId = $_.Name
+                    rank = $null
+                    originalLoss = $null
+                    manualLoss = $null
+                    note = $null
+                    encounter = $null
+                }
+            }
+    )
+}
+
+function Get-NullableInt {
+    param([object]$Value)
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string]$Value)) {
+        return $null
+    }
+    return [int]$Value
+}
+
+function New-BatchResult {
+    param(
+        [object]$Entry,
+        [string]$Status,
+        [string]$Reason,
+        [string]$ReplayStatePath,
+        [Nullable[int]]$TurnNumber,
+        [string]$Preset,
+        [Nullable[int]]$SolverLoss,
+        [Nullable[double]]$ElapsedSeconds,
+        [string]$RunId
+    )
+
+    $manualLoss = Get-NullableInt $Entry.manualLoss
+    $relativeToManual = $null
+    if ($null -ne $manualLoss -and $null -ne $SolverLoss) {
+        $relativeToManual = $manualLoss - $SolverLoss
+    }
+
+    return [pscustomobject][ordered]@{
+        reportId = [string]$Entry.reportId
+        rank = Get-NullableInt $Entry.rank
+        encounter = [string]$Entry.encounter
+        originalLoss = Get-NullableInt $Entry.originalLoss
+        manualLoss = $manualLoss
+        note = [string]$Entry.note
+        status = $Status
+        reason = $Reason
+        replayStatePath = $ReplayStatePath
+        turnNumber = $TurnNumber
+        comparisonScope = if ($null -ne $TurnNumber -and $TurnNumber -eq 1) { "full_combat" } elseif ($null -ne $TurnNumber) { "mid_combat" } else { $null }
+        preset = $Preset
+        solverLoss = $SolverLoss
+        relativeToManual = $relativeToManual
+        meetsManual = if ($null -ne $relativeToManual) { $relativeToManual -ge 0 } else { $null }
+        elapsedSeconds = $ElapsedSeconds
+        runId = $RunId
+        testedAt = (Get-Date).ToString("o")
+    }
+}
+
+function Save-BatchResult {
+    param([object]$Result)
+
+    $script:results.Add($Result)
+    $Result | ConvertTo-Json -Depth 20 -Compress | Add-Content -LiteralPath $jsonlPath -Encoding UTF8
+}
+
+function Find-ReplayCandidate {
+    param([string]$ReportDirectory)
+
+    $forensicsRoot = Join-Path $ReportDirectory "combat-solver/forensics/current"
+    $replayDirectory = Join-Path $forensicsRoot "replay-state"
+    $runDirectory = Join-Path $forensicsRoot "run-state"
+    if (-not (Test-Path -LiteralPath $replayDirectory -PathType Container)) {
+        return [pscustomobject]@{ candidate = $null; reason = "missing_replay_state_directory" }
+    }
+    if (-not (Test-Path -LiteralPath $runDirectory -PathType Container)) {
+        return [pscustomobject]@{ candidate = $null; reason = "missing_run_state_directory" }
+    }
+
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    $replayFiles = @(Get-ChildItem -LiteralPath $replayDirectory -File -Filter "*AutoTurnStart.json" | Sort-Object Name)
+    if ($replayFiles.Count -eq 0) {
+        return [pscustomobject]@{ candidate = $null; reason = "missing_auto_turn_start" }
+    }
+
+    foreach ($replayFile in $replayFiles) {
+        try {
+            $state = Get-Content -LiteralPath $replayFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            $reasons.Add("invalid_json")
+            continue
+        }
+
+        $runPath = Join-Path $runDirectory ([System.IO.Path]::ChangeExtension($replayFile.Name, ".save"))
+        if (-not (Test-Path -LiteralPath $runPath -PathType Leaf)) {
+            $reasons.Add("missing_paired_run_state")
+            continue
+        }
+        if ([int]$state.schemaVersion -ne 1) {
+            $reasons.Add("unsupported_schema")
+            continue
+        }
+        if ($null -eq $state.runRng -or [string]::IsNullOrWhiteSpace([string]$state.runRng.seed)) {
+            $reasons.Add("missing_seed")
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$state.encounterId) -or @($state.players).Count -eq 0) {
+            $reasons.Add("missing_combat_identity")
+            continue
+        }
+        if ($null -eq @($state.players)[0].orbs) {
+            $reasons.Add("missing_orb_state")
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$state.exactContinuationState) -or [string]$state.exactContinuationState -notmatch ";Y=") {
+            $reasons.Add("missing_turn_card_history")
+            continue
+        }
+
+        $turnNumber = if ($null -ne $state.roundNumber) {
+            [int]$state.roundNumber
+        }
+        else {
+            [int](@($state.players)[0].turnNumber)
+        }
+        if ($FullCombatOnly -and $turnNumber -ne 1) {
+            $reasons.Add("mid_combat_excluded")
+            continue
+        }
+
+        return [pscustomobject]@{
+            candidate = [pscustomobject]@{
+                replayPath = $replayFile.FullName
+                runPath = $runPath
+                state = $state
+                turnNumber = $turnNumber
+            }
+            reason = $null
+        }
+    }
+
+    $reason = if ($reasons.Count -gt 0) { ($reasons | Select-Object -Unique) -join "," } else { "no_replayable_auto_turn_start" }
+    return [pscustomobject]@{ candidate = $null; reason = $reason }
+}
+
+function Get-ProjectedLoss {
+    param([object]$TestResult)
+
+    foreach ($check in @($TestResult.completedChecks)) {
+        if ([string]$check -match "ProjectedBattleHpLost=(?<loss>\d+)") {
+            return [int]$Matches.loss
+        }
+    }
+    if ([string]$TestResult.error -match "首轮路线预计整场掉血\s+(?<loss>\d+)") {
+        return [int]$Matches.loss
+    }
+    return $null
+}
+
+function Invoke-ReplayTest {
+    param(
+        [object]$Entry,
+        [object]$Candidate,
+        [ValidateSet("High", "VeryHigh")]
+        [string]$Preset,
+        [int]$TimeoutSeconds
+    )
+
+    $state = $Candidate.state
+    $player = @($state.players)[0]
+    $manualLoss = Get-NullableInt $Entry.manualLoss
+    $expectedLoss = if ($null -ne $manualLoss) { $manualLoss } else { [int]::MaxValue }
+    $scenarioId = "batch-$([string]$Entry.reportId)-$($Preset.ToLowerInvariant())-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+
+    $monsterIds = @(
+        @($state.creatures) |
+            ForEach-Object { [string]$_.monsterId } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Unique
+    )
+    $potionPolicy = [string]$state.settings.potionPolicy
+    if ($potionPolicy -notin @("Disabled", "Smart", "RequireAtLeastOne")) {
+        $potionPolicy = "Smart"
+    }
+
+    $runnerParameters = [ordered]@{
+        ScenarioId = $scenarioId
+        CharacterId = [string]$player.characterId
+        Seed = [string]$state.runRng.seed
+        RunSnapshotPath = $Candidate.runPath
+        ReplayStatePath = $Candidate.replayPath
+        EncounterId = [string]$state.encounterId
+        Ascension = [int]$state.ascensionLevel
+        ActIndexForTest = [int]$state.currentActIndex
+        InitialPlayerHp = [int]$player.currentHp
+        InitialPlayerMaxHp = [int]$player.maxHp
+        InitialPlayerBlock = [int]$player.block
+        InitialPlayerEnergy = [int]$player.energy
+        InitialPlayerStars = [int]$player.stars
+        PerformancePresetForTest = $Preset
+        PotionPolicyForTest = $potionPolicy
+        SearchMaxDegreeOfParallelismForTest = $SearchParallelism
+        ExpectedInitialProjectedBattleHpLostAtMost = $expectedLoss
+        ExpectedInitialOnlyDeathRoutesFound = 0
+        StopAfterInitialSolverResultAssertion = $true
+        TimeoutSeconds = $TimeoutSeconds
+        ExitOnComplete = $true
+    }
+    if ($monsterIds.Count -gt 0) {
+        $runnerParameters.Add("AdditionalMonsterId", [string[]]$monsterIds)
+    }
+
+    $startedAt = Get-Date
+    $payloadEnvironmentVariable = "COMBATSOLVER_BATCH_RUNNER_PAYLOAD"
+    $previousPayload = [Environment]::GetEnvironmentVariable($payloadEnvironmentVariable, "Process")
+    $payload = @{
+        runnerPath = $runnerPath
+        parameters = $runnerParameters
+    } | ConvertTo-Json -Depth 20 -Compress
+    try {
+        [Environment]::SetEnvironmentVariable($payloadEnvironmentVariable, $payload, "Process")
+        $childCommand = '$payload = $env:COMBATSOLVER_BATCH_RUNNER_PAYLOAD | ConvertFrom-Json -AsHashtable; $runnerPath = $payload.runnerPath; $parameters = $payload.parameters; & $runnerPath @parameters'
+        $launcherOutput = & pwsh -NoProfile -Command $childCommand 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        [Environment]::SetEnvironmentVariable($payloadEnvironmentVariable, $previousPayload, "Process")
+    }
+    $elapsed = ((Get-Date) - $startedAt).TotalSeconds
+
+    $resultPath = Join-Path ([Environment]::GetFolderPath("LocalApplicationData")) "CombatSolver/headless-runtime/Roaming/SlayTheSpire2/combat_solver_test_result.json"
+    $testResult = $null
+    if (Test-Path -LiteralPath $resultPath -PathType Leaf) {
+        try {
+            $parsedResult = Get-Content -LiteralPath $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$parsedResult.scenarioId -eq $scenarioId) {
+                $testResult = $parsedResult
+            }
+        }
+        catch {
+            $testResult = $null
+        }
+    }
+
+    if ($null -eq $testResult) {
+        $tail = ($launcherOutput -split "`r?`n" | Where-Object { $_ } | Select-Object -Last 3) -join " | "
+        return [pscustomobject]@{
+            status = "failed_runtime"
+            reason = "missing_result exit=$exitCode $tail".Trim()
+            loss = $null
+            elapsed = [math]::Round($elapsed, 2)
+            runId = $null
+        }
+    }
+
+    $loss = Get-ProjectedLoss $testResult
+    $errorText = [string]$testResult.error
+    $timedOut = $errorText -match "超时|timeout|timed out" -or [string]$testResult.status -eq "TimedOut"
+    $status = if ($timedOut) {
+        "timeout"
+    }
+    elseif ($null -ne $loss -and $null -ne $manualLoss -and $loss -gt $manualLoss) {
+        "quality_gap"
+    }
+    elseif ([string]$testResult.status -eq "Passed") {
+        "passed"
+    }
+    elseif ($null -ne $loss -and $null -eq $manualLoss) {
+        "observed"
+    }
+    else {
+        "failed_runtime"
+    }
+
+    return [pscustomobject]@{
+        status = $status
+        reason = if ($status -eq "passed" -or $status -eq "observed" -or $status -eq "quality_gap") { $null } else { $errorText }
+        loss = $loss
+        elapsed = [math]::Round($elapsed, 2)
+        runId = [string]$testResult.runId
+    }
+}
+
+$entries = @(Read-Manifest)
+if ($ReportId.Count -gt 0) {
+    $requestedIds = [System.Collections.Generic.HashSet[string]]::new([string[]]$ReportId)
+    $entries = @($entries | Where-Object { $requestedIds.Contains([string]$_.reportId) })
+}
+$entries = @($entries | Sort-Object @{ Expression = { if ($null -eq $_.rank) { [int]::MaxValue } else { [int]$_.rank } } }, reportId)
+if ($MaxReports -gt 0) {
+    $entries = @($entries | Select-Object -First $MaxReports)
+}
+
+$results = [System.Collections.Generic.List[object]]::new()
+$index = 0
+foreach ($entry in $entries) {
+    $index++
+    $entryReportId = [string]$entry.reportId
+    Write-Host "[$index/$($entries.Count)] $entryReportId" -ForegroundColor Cyan
+
+    if ($ExcludeReportId -contains $entryReportId) {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "excluded" -Reason "explicitly_excluded" -ReplayStatePath $null -TurnNumber $null -Preset $null -SolverLoss $null -ElapsedSeconds $null -RunId $null)
+        Write-Host "  跳过：已排除"
+        continue
+    }
+
+    $reportDirectory = Join-Path $reportsRootPath $entryReportId
+    if (-not (Test-Path -LiteralPath $reportDirectory -PathType Container)) {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "blocked_preflight" -Reason "missing_report_directory" -ReplayStatePath $null -TurnNumber $null -Preset $null -SolverLoss $null -ElapsedSeconds $null -RunId $null)
+        Write-Host "  跳过：报告目录不存在"
+        continue
+    }
+
+    $preflight = Find-ReplayCandidate $reportDirectory
+    if ($null -eq $preflight.candidate) {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "blocked_preflight" -Reason $preflight.reason -ReplayStatePath $null -TurnNumber $null -Preset $null -SolverLoss $null -ElapsedSeconds $null -RunId $null)
+        Write-Host "  跳过：$($preflight.reason)"
+        continue
+    }
+
+    $candidate = $preflight.candidate
+    if ($PreflightOnly) {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "ready" -Reason $null -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset $null -SolverLoss $null -ElapsedSeconds $null -RunId $null)
+        Write-Host "  可回放：Turn $($candidate.turnNumber)"
+        continue
+    }
+
+    Write-Host "  High / DOP $SearchParallelism" -ForegroundColor DarkCyan
+    $high = Invoke-ReplayTest -Entry $entry -Candidate $candidate -Preset High -TimeoutSeconds $HighTimeoutSeconds
+    if ($high.status -in @("passed", "observed")) {
+        $finalStatus = if ($high.status -eq "passed") { "passed_high" } else { "observed_high" }
+        Save-BatchResult (New-BatchResult -Entry $entry -Status $finalStatus -Reason $high.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High" -SolverLoss $high.loss -ElapsedSeconds $high.elapsed -RunId $high.runId)
+        Write-Host "  完成：High 战损 $($high.loss)" -ForegroundColor Green
+        continue
+    }
+    if ($high.status -ne "quality_gap") {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status $high.status -Reason $high.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High" -SolverLoss $high.loss -ElapsedSeconds $high.elapsed -RunId $high.runId)
+        Write-Host "  结束：$($high.status)" -ForegroundColor Yellow
+        continue
+    }
+
+    Write-Host "  High 战损 $($high.loss)，未追平人工；转 Very High" -ForegroundColor Yellow
+    $veryHigh = Invoke-ReplayTest -Entry $entry -Candidate $candidate -Preset VeryHigh -TimeoutSeconds $VeryHighTimeoutSeconds
+    $totalElapsed = [math]::Round($high.elapsed + $veryHigh.elapsed, 2)
+    if ($veryHigh.status -eq "passed") {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "passed_very_high" -Reason $null -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
+        Write-Host "  完成：Very High 战损 $($veryHigh.loss)" -ForegroundColor Green
+    }
+    elseif ($veryHigh.status -eq "quality_gap") {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "quality_gap" -Reason "high=$($high.loss); veryHigh=$($veryHigh.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
+        Write-Host "  策略缺口：Very High 战损 $($veryHigh.loss)" -ForegroundColor Red
+    }
+    else {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status $veryHigh.status -Reason $veryHigh.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
+        Write-Host "  结束：$($veryHigh.status)" -ForegroundColor Yellow
+    }
+}
+
+ConvertTo-Json -InputObject @($results) -Depth 20 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+$results | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+
+$summary = $results | Group-Object status | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Count)" }
+Write-Host "批量完成：$($summary -join ', ')" -ForegroundColor Cyan
+Write-Host "JSON：$jsonPath"
+Write-Host "CSV：$csvPath"
