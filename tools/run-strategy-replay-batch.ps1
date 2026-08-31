@@ -26,9 +26,19 @@ param(
     [int]$HighTimeoutSeconds = 180,
     [ValidateRange(10, 3600)]
     [int]$VeryHighTimeoutSeconds = 300,
+    [ValidateRange(0, 3600000)]
+    [int]$ShortBudgetOverrideMilliseconds = 0,
+    [ValidateRange(0, 3600000)]
+    [int]$DeepBudgetOverrideMilliseconds = 0,
     [ValidateRange(0, 10000)]
     [int]$MaxReports = 0,
+    [ValidateRange(0, 10000)]
+    [int]$MinimumRank = 0,
+    [ValidateRange(0, 10000)]
+    [int]$MaximumRank = 0,
     [switch]$FullCombatOnly,
+    [switch]$HighOnly,
+    [switch]$DetailedDiagnostics,
     [switch]$PreflightOnly
 )
 
@@ -271,6 +281,7 @@ function Invoke-ReplayTest {
 
     $monsterIds = @(
         @($state.creatures) |
+            Where-Object { [string]$_.side -eq "Enemy" } |
             ForEach-Object { [string]$_.monsterId } |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
             Select-Object -Unique
@@ -302,6 +313,15 @@ function Invoke-ReplayTest {
         StopAfterInitialSolverResultAssertion = $true
         TimeoutSeconds = $TimeoutSeconds
         ExitOnComplete = $true
+    }
+    if ($DetailedDiagnostics) {
+        $runnerParameters.Add("EnableDetailedDiagnosticLogsForTest", 1)
+    }
+    if ($ShortBudgetOverrideMilliseconds -gt 0) {
+        $runnerParameters.Add("ShortSearchBudgetOverrideMilliseconds", $ShortBudgetOverrideMilliseconds)
+    }
+    if ($DeepBudgetOverrideMilliseconds -gt 0) {
+        $runnerParameters.Add("DeepSearchBudgetOverrideMilliseconds", $DeepBudgetOverrideMilliseconds)
     }
     if ($monsterIds.Count -gt 0) {
         $runnerParameters.Add("AdditionalMonsterId", [string[]]$monsterIds)
@@ -384,6 +404,12 @@ if ($ReportId.Count -gt 0) {
     $entries = @($entries | Where-Object { $requestedIds.Contains([string]$_.reportId) })
 }
 $entries = @($entries | Sort-Object @{ Expression = { if ($null -eq $_.rank) { [int]::MaxValue } else { [int]$_.rank } } }, reportId)
+if ($MinimumRank -gt 0) {
+    $entries = @($entries | Where-Object { $null -ne $_.rank -and [int]$_.rank -ge $MinimumRank })
+}
+if ($MaximumRank -gt 0) {
+    $entries = @($entries | Where-Object { $null -ne $_.rank -and [int]$_.rank -le $MaximumRank })
+}
 if ($MaxReports -gt 0) {
     $entries = @($entries | Select-Object -First $MaxReports)
 }
@@ -435,13 +461,18 @@ foreach ($entry in $entries) {
         Write-Host "  结束：$($high.status)" -ForegroundColor Yellow
         continue
     }
+    if ($HighOnly) {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "quality_gap_high" -Reason "high=$($high.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High" -SolverLoss $high.loss -ElapsedSeconds $high.elapsed -RunId $high.runId)
+        Write-Host "  High 策略缺口：战损 $($high.loss)" -ForegroundColor Red
+        continue
+    }
 
     Write-Host "  High 战损 $($high.loss)，未追平人工；转 Very High" -ForegroundColor Yellow
     $veryHigh = Invoke-ReplayTest -Entry $entry -Candidate $candidate -Preset VeryHigh -TimeoutSeconds $VeryHighTimeoutSeconds
     $totalElapsed = [math]::Round($high.elapsed + $veryHigh.elapsed, 2)
     if ($veryHigh.status -eq "passed") {
-        Save-BatchResult (New-BatchResult -Entry $entry -Status "passed_very_high" -Reason $null -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
-        Write-Host "  完成：Very High 战损 $($veryHigh.loss)" -ForegroundColor Green
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "very_high_only" -Reason "high=$($high.loss); veryHigh=$($veryHigh.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
+        Write-Host "  仅 Very High 追平：战损 $($veryHigh.loss)；High 仍需优化" -ForegroundColor Yellow
     }
     elseif ($veryHigh.status -eq "quality_gap") {
         Save-BatchResult (New-BatchResult -Entry $entry -Status "quality_gap" -Reason "high=$($high.loss); veryHigh=$($veryHigh.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)

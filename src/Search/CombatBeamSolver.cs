@@ -60,6 +60,7 @@ internal sealed partial class CombatBeamSolver(
         _profile,
         _isActEndingBoss,
         _initialEnemyCount,
+        root.HasUnusedCardReplayAllocator,
         _theftPolicy,
         _potionPolicy,
         _run,

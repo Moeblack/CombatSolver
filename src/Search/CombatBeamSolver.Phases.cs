@@ -423,6 +423,7 @@ internal sealed partial class CombatBeamSolver
                     $"[CombatSolver/Debug] TURN_LAYER_POTIONS completed_turns={searchedTurnLayers} " +
                     $"frontier={SummarizePotionCandidates(frontier)} " +
                     $"completed={SummarizePotionCandidates(completed)} " +
+                    $"opening_lineages={SummarizeOpeningLineages(frontier)} " +
                     $"frontier_routes={SummarizeDiagnosticRoutes(frontier, 24)} " +
                     $"touch_choices={SummarizePotionChoiceTargets(frontier, "TOUCH_OF_INSANITY")}");
                 if (searchedTurnLayers == 2)

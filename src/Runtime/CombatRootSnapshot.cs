@@ -4,6 +4,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Rooms;
 using CombatSolver.Engine.InCombat.Simulation;
 
@@ -36,6 +37,7 @@ internal sealed class CombatRootSnapshot
     public int CapturedRunModSubscriberCount { get; }
     public int CapturedCombatModSubscriberCount { get; }
     public bool CapturedBaseLibCardModifiers { get; }
+    public bool HasUnusedCardReplayAllocator { get; }
 
     private CombatRootSnapshot(
         Player playerIdentity,
@@ -61,7 +63,8 @@ internal sealed class CombatRootSnapshot
         int capturedHookListenerCount,
         int capturedRunModSubscriberCount,
         int capturedCombatModSubscriberCount,
-        bool capturedBaseLibCardModifiers)
+        bool capturedBaseLibCardModifiers,
+        bool hasUnusedCardReplayAllocator)
     {
         PlayerIdentity = playerIdentity;
         Enemies = enemies;
@@ -87,6 +90,7 @@ internal sealed class CombatRootSnapshot
         CapturedRunModSubscriberCount = capturedRunModSubscriberCount;
         CapturedCombatModSubscriberCount = capturedCombatModSubscriberCount;
         CapturedBaseLibCardModifiers = capturedBaseLibCardModifiers;
+        HasUnusedCardReplayAllocator = hasUnusedCardReplayAllocator;
     }
 
     public static CombatRootSnapshot Capture(CombatState state)
@@ -113,6 +117,9 @@ internal sealed class CombatRootSnapshot
             playerState.TurnNumber,
             forecast,
             playerState.TurnNumber);
+        bool hasUnusedCardReplayAllocator = simulatedCombat.RelicsOf(player)
+            .OfType<ThrowingAxe>()
+            .Any(relic => !relic.IsMelted && !relic._usedThisCombat);
         if (!string.Equals(
                 continuationBefore.StateText,
                 projected.StateText,
@@ -170,7 +177,8 @@ internal sealed class CombatRootSnapshot
             simulatedCombat.RootHookListenerCount,
             simulatedCombat.RootRunModSubscriberCount,
             simulatedCombat.RootCombatModSubscriberCount,
-            simulatedCombat.RootHasBaseLibCardModifiers);
+            simulatedCombat.RootHasBaseLibCardModifiers,
+            hasUnusedCardReplayAllocator);
     }
 
     public CombatPredictionSimulator ForkSimulator() => _rootSimulator.Fork();

@@ -56,12 +56,15 @@ internal sealed partial class CombatBeamSolver
         PlanActionKind Kind,
         string CardId,
         string PotionId,
-        uint? TargetCombatId);
+        uint? TargetCombatId,
+        string FirstCardId,
+        uint? FirstCardTargetCombatId);
 
     private sealed class BeamRetentionPolicy(
         SolverSearchProfile _profile,
         bool _isActEndingBoss,
         int _initialEnemyCount,
+        bool _preserveReplayAllocatorOpening,
         SolverTheftPolicy? _theftPolicy,
         SolverPotionPolicy _potionPolicy,
         SearchRunContext _run,
@@ -504,6 +507,17 @@ internal sealed partial class CombatBeamSolver
                         (SearchNode?)null,
                         (best, node) => IsBetterOffensive(node, best) ? node : best), limit);
                     AddRequired(required, FindBestSetup(candidates), limit);
+                    if (_preserveReplayAllocatorOpening)
+                    {
+                        AddRequired(required, FindBestCuratedTurnBoundaryHand(candidates), limit);
+                        AddRequired(required, FindBestTacticalEnabler(candidates), limit);
+                        AddRequired(required, FindBestTargetPressure(candidates), limit);
+                        AddRequired(required, FindBestDeckCuration(candidates), limit);
+                        AddRequired(required, candidates
+                            .OrderByDescending(node => node.Snapshot.ProjectedShuffleOrderValue)
+                            .ThenByDescending(BeamRankScore)
+                            .First(), limit);
+                    }
                 }
             }
             bool endTurnFrontier = ranked.All(node =>
@@ -933,15 +947,20 @@ internal sealed partial class CombatBeamSolver
             return key.Finish();
         }
 
-        private static RootActionLineageSignature BuildRootActionLineageSignature(SearchNode node)
+        private RootActionLineageSignature BuildRootActionLineageSignature(SearchNode node)
         {
             PlanAction action = RootActionLineageNode(node).Action
                 ?? throw new InvalidOperationException("搜索首步谱系缺少动作。");
+            PlanAction? firstCard = _preserveReplayAllocatorOpening
+                ? node.Actions.FirstOrDefault(candidate => candidate.Kind == PlanActionKind.PlayCard)
+                : null;
             return new RootActionLineageSignature(
                 action.Kind,
                 action.CardId,
                 action.PotionId,
-                action.TargetCombatId);
+                action.TargetCombatId,
+                firstCard?.CardId ?? "",
+                firstCard?.TargetCombatId);
         }
 
         private static SearchNode RootActionLineageNode(SearchNode node)
@@ -1583,6 +1602,28 @@ internal sealed partial class CombatBeamSolver
                                                 && (node.Snapshot.EnemyHp < best.Snapshot.EnemyHp
                                                     || node.Snapshot.EnemyHp == best.Snapshot.EnemyHp
                                                         && node.Score > best.Score))))
+                    ? node
+                    : best);
+
+        private static SearchNode? FindBestCuratedTurnBoundaryHand(IEnumerable<SearchNode> nodes)
+            => nodes.Aggregate(
+                (SearchNode?)null,
+                (best, node) => best == null
+                    || node.Snapshot.ProjectedPlayerHp > best.Snapshot.ProjectedPlayerHp
+                    || node.Snapshot.ProjectedPlayerHp == best.Snapshot.ProjectedPlayerHp
+                        && (node.Snapshot.OstyHp > best.Snapshot.OstyHp
+                            || node.Snapshot.OstyHp == best.Snapshot.OstyHp
+                                && (node.Snapshot.ProjectedShuffleOrderValue
+                                        > best.Snapshot.ProjectedShuffleOrderValue
+                                    || node.Snapshot.ProjectedShuffleOrderValue
+                                        == best.Snapshot.ProjectedShuffleOrderValue
+                                        && (node.Snapshot.ReachableHandValue > best.Snapshot.ReachableHandValue
+                                            || node.Snapshot.ReachableHandValue == best.Snapshot.ReachableHandValue
+                                                && (node.Snapshot.HandCount < best.Snapshot.HandCount
+                                                    || node.Snapshot.HandCount == best.Snapshot.HandCount
+                                                        && (node.Snapshot.EnemyHp < best.Snapshot.EnemyHp
+                                                            || node.Snapshot.EnemyHp == best.Snapshot.EnemyHp
+                                                                && node.Score > best.Score)))))
                     ? node
                     : best);
 

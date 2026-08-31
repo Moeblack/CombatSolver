@@ -52,6 +52,7 @@ internal readonly record struct StrategicEffectContext(
     int UsefulCardPlays,
     int AttackPlays,
     int SkillPlays,
+    int BlockSkillPlays,
     int PowerPlays,
     int ExhaustPlays,
     int ShivPlays,
@@ -59,7 +60,8 @@ internal readonly record struct StrategicEffectContext(
     int SkillEnergySpend,
     int PowerEnergySpend,
     int AverageCardValue,
-    int BestCardValue)
+    int BestCardValue,
+    int AverageAttackValue)
 {
     public static StrategicEffectContext Build(
         IReadOnlyList<PredictedCard> liveCards,
@@ -69,6 +71,7 @@ internal readonly record struct StrategicEffectContext(
     {
         int attackCount = 0;
         int skillCount = 0;
+        int blockSkillCount = 0;
         int powerCount = 0;
         int exhaustCount = 0;
         int shivCount = 0;
@@ -96,6 +99,8 @@ internal readonly record struct StrategicEffectContext(
                 case CardType.Skill:
                     skillCount++;
                     skillEnergy += energyCost;
+                    if (card.DynamicVars.Keys.Any(IsBlockDynamicVar))
+                        blockSkillCount++;
                     break;
                 case CardType.Power:
                     powerCount++;
@@ -124,6 +129,7 @@ internal readonly record struct StrategicEffectContext(
             : Math.Min(deckSize * 2, remainingTurns * cardsPerTurn);
         int attackPlays = ReachablePlays(attackCount, deckSize, reachableCards);
         int skillPlays = ReachablePlays(skillCount, deckSize, reachableCards);
+        int blockSkillPlays = ReachablePlays(blockSkillCount, deckSize, reachableCards);
         int powerPlays = Math.Min(powerCount, reachableCards);
         int exhaustPlays = Math.Min(exhaustCount, reachableCards);
         int shivPlays = ReachablePlays(shivCount, deckSize, reachableCards);
@@ -136,6 +142,7 @@ internal readonly record struct StrategicEffectContext(
             reachableCards,
             attackPlays,
             skillPlays,
+            blockSkillPlays,
             powerPlays,
             exhaustPlays,
             shivPlays,
@@ -143,7 +150,8 @@ internal readonly record struct StrategicEffectContext(
             skillEnergy,
             powerEnergy,
             Math.Max(1, totalCardValue / deckSize),
-            Math.Max(1, bestCardValue));
+            Math.Max(1, bestCardValue),
+            attackCount == 0 ? 0 : Math.Max(1, totalAttackValue / attackCount));
     }
 
     private static int ReachablePlays(int matchingCards, int deckSize, int reachableCards)
@@ -158,6 +166,9 @@ internal readonly record struct StrategicEffectContext(
             || key.Contains("Doom", StringComparison.OrdinalIgnoreCase)
             || key.Contains("Debuff", StringComparison.OrdinalIgnoreCase)
             || key.Contains("StrengthLoss", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsBlockDynamicVar(string key)
+        => key.Contains("Block", StringComparison.OrdinalIgnoreCase);
 }
 
 internal static class StrategicEffectModel
@@ -186,7 +197,16 @@ internal static class StrategicEffectModel
             AccuracyPower => Damage(amount * context.ShivPlays, enemyHp),
             SleightOfFleshPower => Damage(amount * context.DebuffApplications, enemyHp),
             StrengthPower => Damage(amount * context.AttackPlays, enemyHp),
-            DexterityPower => Prevention(amount * context.SkillPlays, context),
+            LethalityPower when context.AttackPlays > 0 => Damage(
+                context.AverageAttackValue
+                    * Math.Min(context.AttackPlays, context.RemainingTurns)
+                    * amount / 100,
+                enemyHp),
+            ReaperFormPower when context.AttackPlays > 0 => Damage(
+                context.AverageAttackValue * context.AttackPlays * amount,
+                enemyHp),
+            LethalityPower or ReaperFormPower => StrategicEffectVector.Zero,
+            DexterityPower => Prevention(amount * context.BlockSkillPlays, context),
             DemonFormPower when context.AttackPlays > 0 => Damage(
                 amount * Math.Max(1, context.AttackPlays / Math.Max(1, context.RemainingTurns))
                     * context.RemainingTurns * (context.RemainingTurns + 1) / 2,

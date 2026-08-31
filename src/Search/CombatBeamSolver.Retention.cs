@@ -62,12 +62,78 @@ internal sealed partial class CombatBeamSolver
         SearchMeasurement measurement = _run.Performance.Begin();
         try
         {
-            return Retention.RankBest(nodes, _profile.BeamWidth, preserveDefensiveRoute: true);
+            List<SearchNode> pool = nodes.ToList();
+            List<SearchNode> global = Retention.RankBest(
+                pool,
+                _profile.BeamWidth,
+                preserveDefensiveRoute: true);
+            if (_profile.Phase != SolverSearchPhase.Deep || pool.Count <= _profile.BeamWidth)
+                return global;
+            if (!root.HasUnusedCardReplayAllocator)
+                return global;
+
+            int channelWidth = Math.Clamp(_profile.BeamWidth / 12, 6, 12);
+            List<List<SearchNode>> openingChannels = pool
+                .Select(node => (Node: node, Opening: FindOpeningCardNode(node)))
+                .Where(item => item.Opening?.Parent is { } parent
+                    && (item.Opening.Snapshot.PersistentBuffValue > parent.Snapshot.PersistentBuffValue
+                        || item.Opening.Snapshot.StrategicEffects.RetentionValue
+                            > parent.Snapshot.StrategicEffects.RetentionValue))
+                .GroupBy(item => (
+                    item.Node.PotionCount,
+                    FirstCardId: item.Opening!.Action!.CardId))
+                .OrderByDescending(group => group.Max(item =>
+                    item.Opening!.Snapshot.StrategicEffects.RetentionValue))
+                .ThenByDescending(group => group.Max(item => item.Node.Score))
+                .Take(8)
+                .Select(group => Retention.RankBest(
+                    group.Select(item => item.Node),
+                    channelWidth,
+                    preserveDefensiveRoute: true))
+                .ToList();
+            if (openingChannels.Count == 0)
+                return global;
+
+            int expandedLimit = Math.Min(
+                pool.Count,
+                checked(_profile.BeamWidth + Math.Max(12, _profile.BeamWidth / 3)));
+            List<SearchNode> selected = [.. global];
+            HashSet<SearchNode> selectedSet = new(global, ReferenceEqualityComparer.Instance);
+            for (int round = 0;
+                 selected.Count < expandedLimit && openingChannels.Any(channel => round < channel.Count);
+                 round++)
+            {
+                foreach (IReadOnlyList<SearchNode> channel in openingChannels)
+                {
+                    if (round >= channel.Count || !selectedSet.Add(channel[round]))
+                        continue;
+                    selected.Add(channel[round]);
+                    if (selected.Count >= expandedLimit)
+                        break;
+                }
+            }
+            selected.Sort((left, right) =>
+            {
+                int byRetention = left.RetentionRank.CompareTo(right.RetentionRank);
+                return byRetention != 0 ? byRetention : right.Score.CompareTo(left.Score);
+            });
+            return selected;
         }
         finally
         {
             _run.Performance.End(SearchMetricPhase.Prune, measurement);
         }
+    }
+
+    private static SearchNode? FindOpeningCardNode(SearchNode node)
+    {
+        SearchNode? opening = null;
+        for (SearchNode? cursor = node; cursor?.Action != null; cursor = cursor.Parent)
+        {
+            if (cursor.Action.Kind == PlanActionKind.PlayCard)
+                opening = cursor;
+        }
+        return opening;
     }
 
     private void CaptureContinuation(SearchNode node)
@@ -143,6 +209,23 @@ internal sealed partial class CombatBeamSolver
                 $"enemy{node.Snapshot.EnemyHp}:hand{node.Snapshot.HandCount}/" +
                 $"{node.Snapshot.ReachableHandValue}/{node.Snapshot.ZeroCostPlayableCount}:" +
                 $"traits{node.Traits}"));
+        return string.IsNullOrEmpty(summary) ? "-" : summary;
+    }
+
+    private static string SummarizeOpeningLineages(IEnumerable<SearchNode> nodes)
+    {
+        string summary = string.Join(';', nodes
+            .GroupBy(node => (
+                node.PotionCount,
+                FirstCardId: node.Actions.FirstOrDefault(action =>
+                    action.Kind == PlanActionKind.PlayCard)?.CardId ?? "-"))
+            .OrderBy(group => group.Key.PotionCount)
+            .ThenBy(group => group.Key.FirstCardId, StringComparer.Ordinal)
+            .Select(group =>
+                $"p{group.Key.PotionCount}/{group.Key.FirstCardId}:{group.Count()}:" +
+                $"hp{group.Max(node => node.Snapshot.ProjectedPlayerHp)}:" +
+                $"setup{group.Max(node => node.Snapshot.StrategicEffects.RetentionValue)}:" +
+                $"order{group.Max(node => node.Snapshot.ProjectedShuffleOrderValue)}"));
         return string.IsNullOrEmpty(summary) ? "-" : summary;
     }
 
