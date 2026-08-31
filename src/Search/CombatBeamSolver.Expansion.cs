@@ -196,33 +196,7 @@ internal sealed partial class CombatBeamSolver
             }
         }
 
-        nonDominated.Sort(static (left, right) =>
-        {
-            int byScore = right.Node.Score.CompareTo(left.Node.Score);
-            return byScore != 0
-                ? byScore
-                : right.NormalizedValue.CompareTo(left.NormalizedValue);
-        });
-        int regularQueuedCount = Math.Min(_profile.MaxCardBranchesPerNode, nonDominated.Count);
-        List<ActionCandidate> queuedCandidates = nonDominated.Take(regularQueuedCount).ToList();
-        ActionCandidate? revivalWindowCandidate = nonDominated
-            .Where(candidate => candidate.Node.Snapshot.RevivingEnemyCount > snapshot.RevivingEnemyCount)
-            .OrderByDescending(candidate => candidate.Node.Snapshot.RevivingEnemyCount)
-            .ThenBy(candidate => candidate.Node.Snapshot.RawEnemyHp)
-            .ThenBy(candidate => candidate.Node.Snapshot.MaxCurrentEnemyHp)
-            .ThenByDescending(candidate => candidate.Node.Snapshot.ProjectedPlayerHp)
-            .Select(candidate => (ActionCandidate?)candidate)
-            .FirstOrDefault();
-        if (revivalWindowCandidate is { } revivalCandidate
-            && !queuedCandidates.Any(candidate => ReferenceEquals(candidate.Node, revivalCandidate.Node)))
-        {
-            queuedCandidates.Add(revivalCandidate);
-        }
-        foreach (ActionCandidate candidate in nonDominated.Skip(regularQueuedCount))
-        {
-            if (CurrentTurnRoutingChoice(candidate.Node) != null)
-                queuedCandidates.Add(candidate);
-        }
+        List<ActionCandidate> queuedCandidates = SelectActionCandidates(node, nonDominated);
         _run.TopQueueActionsDropped += nonDominated.Count - queuedCandidates.Count;
         foreach (ActionCandidate candidate in nonDominated)
         {
@@ -1685,6 +1659,14 @@ internal sealed partial class CombatBeamSolver
             block,
             pure,
             declinedExtraTurn);
+        ActionOptionFamily optionFamilies = ClassifyActionOptionFamilies(
+            cardType,
+            targetCombatId,
+            before,
+            after,
+            damage,
+            block,
+            pure);
         return new ActionCandidate(
             node with { Traits = traits },
             cardType,
@@ -1698,8 +1680,158 @@ internal sealed partial class CombatBeamSolver
             after.CumulativePlayerHpLost,
             after.LongTermResourceValue,
             after.AngerCopiesGenerated,
+            optionFamilies,
             pure,
             normalized);
+    }
+
+    private List<ActionCandidate> SelectActionCandidates(
+        SearchNode parent,
+        List<ActionCandidate> candidates)
+    {
+        candidates.Sort(static (left, right) =>
+        {
+            int byScore = right.Node.Score.CompareTo(left.Node.Score);
+            return byScore != 0
+                ? byScore
+                : right.NormalizedValue.CompareTo(left.NormalizedValue);
+        });
+        int limit = Math.Min(_profile.MaxCardBranchesPerNode, candidates.Count);
+        List<ActionCandidate> selected = new(limit + 2);
+
+        void Add(ActionCandidate candidate, bool allowOverflow = false)
+        {
+            if ((!allowOverflow && selected.Count >= limit)
+                || selected.Any(current => ReferenceEquals(current.Node, candidate.Node)))
+            {
+                return;
+            }
+            selected.Add(candidate);
+        }
+
+        // A resolved routing choice and a revival window are semantic branch boundaries. Preserve
+        // the previous overflow behavior for them; the ordinary family portfolio remains inside the
+        // configured per-node card branch budget.
+        foreach (ActionCandidate candidate in candidates)
+        {
+            if (CurrentTurnRoutingChoice(candidate.Node) != null)
+                Add(candidate, allowOverflow: true);
+        }
+        ActionCandidate? revivalWindowCandidate = candidates
+            .Where(candidate => candidate.Node.Snapshot.RevivingEnemyCount
+                > parent.Snapshot.RevivingEnemyCount)
+            .OrderByDescending(candidate => candidate.Node.Snapshot.RevivingEnemyCount)
+            .ThenBy(candidate => candidate.Node.Snapshot.RawEnemyHp)
+            .ThenBy(candidate => candidate.Node.Snapshot.MaxCurrentEnemyHp)
+            .ThenByDescending(candidate => candidate.Node.Snapshot.ProjectedPlayerHp)
+            .Select(candidate => (ActionCandidate?)candidate)
+            .FirstOrDefault();
+        if (revivalWindowCandidate is { } revivalCandidate)
+            Add(revivalCandidate, allowOverflow: true);
+
+        foreach (ActionOptionFamily family in new[]
+                 {
+                     ActionOptionFamily.ImmediateDefense,
+                     ActionOptionFamily.ImmediateOffense,
+                     ActionOptionFamily.ResourceAndCycle,
+                     ActionOptionFamily.PersistentSetup,
+                     ActionOptionFamily.Control,
+                     ActionOptionFamily.TargetRemoval,
+                     ActionOptionFamily.HpInvestment,
+                 })
+        {
+            ActionCandidate? representative = candidates
+                .Where(candidate => candidate.OptionFamilies.HasFlag(family))
+                .Select(candidate => (ActionCandidate?)candidate)
+                .FirstOrDefault();
+            if (representative is { } candidate)
+                Add(candidate);
+        }
+
+        foreach (IGrouping<uint, ActionCandidate> targetGroup in candidates
+                     .Where(candidate => candidate.TargetCombatId.HasValue && candidate.Damage > 0)
+                     .GroupBy(candidate => candidate.TargetCombatId!.Value))
+        {
+            Add(targetGroup.First());
+        }
+
+        foreach (ActionCandidate candidate in candidates)
+            Add(candidate);
+
+        int baselineCount = Math.Min(limit, candidates.Count);
+        HashSet<SearchNode> baseline = new(ReferenceEqualityComparer.Instance);
+        foreach (ActionCandidate candidate in candidates.Take(baselineCount))
+            baseline.Add(candidate.Node);
+        _run.ActionAdmissionRepresentativesProtected += selected.Count(candidate =>
+            !baseline.Contains(candidate.Node));
+        if (_detailedDiagnostics && parent.ActionCount == 0)
+        {
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Debug] ACTION_ADMISSION candidates={candidates.Count} " +
+                $"limit={_profile.MaxCardBranchesPerNode} selected={selected.Count} " +
+                $"protected={selected.Count(candidate => !baseline.Contains(candidate.Node))} " +
+                $"families={string.Join(',', selected.Select(candidate => candidate.OptionFamilies))}");
+        }
+        return selected;
+    }
+
+    private static ActionOptionFamily ClassifyActionOptionFamilies(
+        CardType cardType,
+        uint? targetCombatId,
+        SimulationSnapshot before,
+        SimulationSnapshot after,
+        int damage,
+        int block,
+        bool pure)
+    {
+        ActionOptionFamily families = ActionOptionFamily.None;
+        if (block > 0
+            || after.ProjectedPlayerHp > before.ProjectedPlayerHp
+            || after.PlayerHp > before.PlayerHp)
+        {
+            families |= ActionOptionFamily.ImmediateDefense;
+        }
+        if (damage > 0)
+            families |= ActionOptionFamily.ImmediateOffense;
+        if (after.Energy > before.Energy
+            || after.Stars > before.Stars
+            || after.HandCount >= before.HandCount
+            || after.FutureResourceValue > before.FutureResourceValue
+            || after.LiveDeckClutter < before.LiveDeckClutter)
+        {
+            families |= ActionOptionFamily.ResourceAndCycle;
+        }
+        if (cardType == CardType.Power
+            || after.PersistentBuffValue > before.PersistentBuffValue
+            || after.DelayedDamageValue > before.DelayedDamageValue
+            || after.ReplayPotentialValue > before.ReplayPotentialValue
+            || after.ReactiveDamageValue > before.ReactiveDamageValue
+            || after.LongTermResourceValue > before.LongTermResourceValue)
+        {
+            families |= ActionOptionFamily.PersistentSetup;
+        }
+        if (after.SandpitRemaining > before.SandpitRemaining
+            || after.EnemyStrengthSuppression > before.EnemyStrengthSuppression
+            || after.EnemyWeakTurns > before.EnemyWeakTurns
+            || after.EnemyVulnerableTurns > before.EnemyVulnerableTurns
+            || after.LiveDeckClutter < before.LiveDeckClutter
+            || !pure && damage == 0 && block == 0)
+        {
+            families |= ActionOptionFamily.Control;
+        }
+        if (targetCombatId.HasValue
+            && (after.AliveEnemyCount < before.AliveEnemyCount
+                || after.FocusTargetCurrentThreat < before.FocusTargetCurrentThreat))
+        {
+            families |= ActionOptionFamily.TargetRemoval;
+        }
+        if (after.PlayerHp < before.PlayerHp
+            || after.PlayerMaxHp < before.PlayerMaxHp
+            || after.CumulativePlayerHpLost > before.CumulativePlayerHpLost)
+        {
+            families |= ActionOptionFamily.HpInvestment;
+        }
+        return families;
     }
 
     private SearchRouteTraits ClassifyCardTraits(

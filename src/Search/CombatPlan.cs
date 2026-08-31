@@ -559,7 +559,7 @@ internal sealed class SolverResult
     public required int PotionCount { get; init; }
     public int ProjectedBattlePotionCount => BattlePotionsUsedSoFar + PotionCount;
     public required int PotionHpSaved { get; internal set; }
-    public required int PotionHpRequired { get; init; }
+    public required int PotionHpRequired { get; internal set; }
     public required int PotionBranchesRejected { get; init; }
     public required SolverTheftPolicy? TheftPolicy { get; init; }
     public required int OutstandingStolenResource { get; init; }

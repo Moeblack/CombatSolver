@@ -23,6 +23,7 @@ internal sealed class CombatRootSnapshot
     public int InitialPlayerHp { get; }
     public int InitialPlayerMaxHp { get; }
     public int PotionSlotCount { get; }
+    public int SearchablePotionCount { get; }
     public ulong InitialAliveEnemyMask { get; }
     public CombatSide CurrentSide { get; }
     public PlayerTurnPhase PlayerPhase { get; }
@@ -48,6 +49,7 @@ internal sealed class CombatRootSnapshot
         int initialPlayerHp,
         int initialPlayerMaxHp,
         int potionSlotCount,
+        int searchablePotionCount,
         ulong initialAliveEnemyMask,
         CombatSide currentSide,
         PlayerTurnPhase playerPhase,
@@ -72,6 +74,7 @@ internal sealed class CombatRootSnapshot
         InitialPlayerHp = initialPlayerHp;
         InitialPlayerMaxHp = initialPlayerMaxHp;
         PotionSlotCount = potionSlotCount;
+        SearchablePotionCount = searchablePotionCount;
         InitialAliveEnemyMask = initialAliveEnemyMask;
         CurrentSide = currentSide;
         PlayerPhase = playerPhase;
@@ -155,6 +158,7 @@ internal sealed class CombatRootSnapshot
             player.Creature.CurrentHp,
             player.Creature.MaxHp,
             player.PotionSlots.Count,
+            player.PotionSlots.Count(potion => potion != null && PotionOnUseSupport.CanSearch(potion)),
             aliveEnemyMask,
             state.CurrentSide,
             playerState.Phase,

@@ -208,10 +208,20 @@ internal static class CombatSearchCoordinator
         int? shortCheckpointMilliseconds,
         SolverResult primary)
     {
-        if (policy.PotionPolicy != SolverPotionPolicy.Smart
-            || primary.PotionCount == 0)
-        {
+        if (policy.PotionPolicy != SolverPotionPolicy.Smart)
             return primary;
+        if (primary.PotionCount == 0)
+        {
+            return AuditMissedSmartPotionUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                primary);
         }
 
         policy.Diagnostics.Info(
@@ -318,6 +328,101 @@ internal static class CombatSearchCoordinator
             $"corrected_saved={correctedSaved} required={selected.PotionHpRequired} " +
             $"potion_protects_more_loot={potionProtectsMoreLoot} " +
             $"selected={(ReferenceEquals(selected, potionFree) ? "potion_free" : "potion_route")}");
+        return selected;
+    }
+
+    private static SolverResult AuditMissedSmartPotionUse(
+        CombatRootSnapshot root,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot policy,
+        CancellationToken cancellationToken,
+        Action<SolverProgress>? progressCallback,
+        SolverSearchProfile profile,
+        int? shortCheckpointMilliseconds,
+        SolverResult primary)
+    {
+        bool primaryWon = primary.Snapshot.AllEnemiesDead
+            && !primary.Snapshot.PlayerDead
+            && primary.Snapshot.ProjectedPlayerHp > 0;
+        int primaryHpDeficit = StrategicHpDeficit(root, primary);
+        if (root.SearchablePotionCount == 0
+            || primaryWon && primaryHpDeficit < SolverWeights.PotionMinimumHpSaved)
+        {
+            return primary;
+        }
+
+        PotionFreePolicyBaseline baseline = new(
+            primaryWon,
+            primaryHpDeficit,
+            primary.Snapshot.PlayerHp);
+        policy.Diagnostics.Info(
+            $"[CombatSolver/Test] SMART_POTION_INTERVENTION start " +
+            $"potion_free_won={primaryWon} hp_deficit={primaryHpDeficit} " +
+            $"searchable_potions={root.SearchablePotionCount}");
+        SolverResult forcedPotion;
+        try
+        {
+            forcedPotion = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                SolverPotionPolicy.RequireAtLeastOne,
+                baseline,
+                maximumPotionUses: 1).Solve();
+        }
+        catch (PotionPolicyUnsatisfiedException)
+        {
+            policy.Diagnostics.Info(
+                "[CombatSolver/Test] SMART_POTION_INTERVENTION result forced_route_missing=true selected=potion_free");
+            return primary;
+        }
+
+        bool forcedDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
+            && forcedPotion.Elapsed.TotalMilliseconds > checkpoint;
+        forcedPotion.SearchPhase = forcedDeepTriggered
+            ? SolverSearchPhase.Deep
+            : SolverSearchPhase.Short;
+        forcedPotion.DeepSearchTriggered = forcedDeepTriggered;
+        forcedPotion.DeepSearchImprovedResult = false;
+        forcedPotion.SingleSessionSearch = true;
+        PopulateSingleSessionTotals(
+            forcedPotion,
+            shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+            forcedDeepTriggered);
+
+        bool forcedWon = forcedPotion.Snapshot.AllEnemiesDead
+            && !forcedPotion.Snapshot.PlayerDead
+            && forcedPotion.Snapshot.ProjectedPlayerHp > 0;
+        int hpSaved = CorrectedPotionHpSaved(root, forcedPotion, primary);
+        int ambergrisCount = forcedPotion.BestNode.Actions.Count(action =>
+            action.Kind == PlanActionKind.UsePotion
+            && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
+        int strategicHpCost = forcedPotion.BestNode.Actions
+            .Where(action => action.Kind == PlanActionKind.UsePotion && action.PotionId != null)
+            .Sum(action => PotionUsePolicy.StrategicHpCost(action.PotionId!));
+        int hpRequired = PotionUsePolicy.EffectiveStrategicHpCost(
+            strategicHpCost,
+            ambergrisCount,
+            root.InitialPlayerMaxHp);
+        bool protectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
+            && forcedPotion.OutstandingStolenResource < primary.OutstandingStolenResource;
+        bool selectPotion = forcedWon
+            && (!primaryWon || protectsMoreLoot || hpSaved >= hpRequired);
+        forcedPotion.PotionHpSaved = hpSaved;
+        forcedPotion.PotionHpRequired = hpRequired;
+        SolverResult selected = selectPotion ? forcedPotion : primary;
+        MergeAuditTotals(selected, primary, forcedPotion);
+        policy.Diagnostics.Info(
+            $"[CombatSolver/Test] SMART_POTION_INTERVENTION result " +
+            $"forced_won={forcedWon} saved={hpSaved} required={hpRequired} " +
+            $"protects_more_loot={protectsMoreLoot} " +
+            $"selected={(selectPotion ? "potion_route" : "potion_free")}");
         return selected;
     }
 

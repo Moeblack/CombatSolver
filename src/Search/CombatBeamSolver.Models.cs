@@ -89,6 +89,7 @@ internal sealed partial class CombatBeamSolver
         public int Expanded;
         public int DominatedActionsPruned;
         public int TopQueueActionsDropped;
+        public int ActionAdmissionRepresentativesProtected;
         public int DuplicateCardBranchesPruned;
         public int ChoiceBranchesEvaluated;
         public int ShuffleBranchesPruned = 0;
@@ -131,6 +132,19 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
+    [Flags]
+    private enum ActionOptionFamily
+    {
+        None = 0,
+        ImmediateDefense = 1 << 0,
+        ImmediateOffense = 1 << 1,
+        ResourceAndCycle = 1 << 2,
+        PersistentSetup = 1 << 3,
+        Control = 1 << 4,
+        TargetRemoval = 1 << 5,
+        HpInvestment = 1 << 6,
+    }
+
     private readonly record struct ActionCandidate(
         SearchNode Node,
         CardType CardType,
@@ -144,6 +158,7 @@ internal sealed partial class CombatBeamSolver
         int CumulativeHpLost,
         int LongTermResourceValue,
         int AngerCopiesGenerated,
+        ActionOptionFamily OptionFamilies,
         bool IsPure,
         double NormalizedValue);
 

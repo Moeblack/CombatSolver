@@ -736,6 +736,7 @@ internal sealed partial class CombatBeamSolver
             ?? throw new InvalidOperationException("并行展开 worker 没有成功结果。");
         SearchRunContext source = worker._run;
         _run.DuplicateCardBranchesPruned += source.DuplicateCardBranchesPruned;
+        _run.ActionAdmissionRepresentativesProtected += source.ActionAdmissionRepresentativesProtected;
         _run.ChoiceBranchesEvaluated += source.ChoiceBranchesEvaluated;
         _run.ShuffleBranchesPruned += source.ShuffleBranchesPruned;
         _run.SoldHpBranchesPruned += source.SoldHpBranchesPruned;
@@ -745,6 +746,7 @@ internal sealed partial class CombatBeamSolver
         _run.RepeatableNoProgressBranchesPruned += source.RepeatableNoProgressBranchesPruned;
         _run.StandPatProbes += source.StandPatProbes;
         source.DuplicateCardBranchesPruned = 0;
+        source.ActionAdmissionRepresentativesProtected = 0;
         source.ChoiceBranchesEvaluated = 0;
         source.ShuffleBranchesPruned = 0;
         source.SoldHpBranchesPruned = 0;
@@ -781,34 +783,7 @@ internal sealed partial class CombatBeamSolver
                 batch);
         }
 
-        nonDominated.Sort(static (left, right) =>
-        {
-            int byScore = right.Node.Score.CompareTo(left.Node.Score);
-            return byScore != 0
-                ? byScore
-                : right.NormalizedValue.CompareTo(left.NormalizedValue);
-        });
-        int regularQueuedCount = Math.Min(_profile.MaxCardBranchesPerNode, nonDominated.Count);
-        List<ActionCandidate> queuedCandidates = nonDominated.Take(regularQueuedCount).ToList();
-        ActionCandidate? revivalWindowCandidate = nonDominated
-            .Where(candidate =>
-                candidate.Node.Snapshot.RevivingEnemyCount > parent.Snapshot.RevivingEnemyCount)
-            .OrderByDescending(candidate => candidate.Node.Snapshot.RevivingEnemyCount)
-            .ThenBy(candidate => candidate.Node.Snapshot.RawEnemyHp)
-            .ThenBy(candidate => candidate.Node.Snapshot.MaxCurrentEnemyHp)
-            .ThenByDescending(candidate => candidate.Node.Snapshot.ProjectedPlayerHp)
-            .Select(candidate => (ActionCandidate?)candidate)
-            .FirstOrDefault();
-        if (revivalWindowCandidate is { } revivalCandidate
-            && !queuedCandidates.Any(candidate => ReferenceEquals(candidate.Node, revivalCandidate.Node)))
-        {
-            queuedCandidates.Add(revivalCandidate);
-        }
-        foreach (ActionCandidate candidate in nonDominated.Skip(regularQueuedCount))
-        {
-            if (CurrentTurnRoutingChoice(candidate.Node) != null)
-                queuedCandidates.Add(candidate);
-        }
+        List<ActionCandidate> queuedCandidates = SelectActionCandidates(parent, nonDominated);
         _run.TopQueueActionsDropped += nonDominated.Count - queuedCandidates.Count;
         foreach (ActionCandidate candidate in nonDominated)
         {
