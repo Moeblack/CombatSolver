@@ -200,13 +200,14 @@ internal sealed partial class CombatBeamSolver
             .Sum(enemy =>
             {
                 int poison = Math.Max(0, combat.GetAmount<PoisonPower>(enemy));
+                int demise = Math.Max(0, combat.GetAmount<DemisePower>(enemy));
                 int doom = Math.Max(0, combat.GetAmount<DoomPower>(enemy));
                 int currentHp = Math.Max(0, simulator.State.GetCreature(enemy).CurrentHp);
                 int cappedDoom = Math.Min(currentHp, doom);
                 int doomProgress = currentHp <= 0
                     ? 0
                     : (int)Math.Min(currentHp, (long)cappedDoom * cappedDoom / currentHp);
-                return poison + doomProgress;
+                return poison + demise + doomProgress;
             });
         int reactiveDamageValue = Math.Max(
             0,
@@ -433,6 +434,7 @@ internal sealed partial class CombatBeamSolver
             DemonFormPower or CreativeAiPower => amount * 5,
             ThunderPower => amount * 3,
             LightningRodPower => amount * 4,
+            MasterPlannerPower => amount * 4,
             StrengthPower or DexterityPower => amount * 2,
             _ => amount,
         };
@@ -471,6 +473,7 @@ internal sealed partial class CombatBeamSolver
             LightningRod => 4,
             Thunder => 3,
             DemonForm or CreativeAi => 5,
+            MasterPlanner => 4,
             _ when card.Type == CardType.Power => 2,
             _ => 0,
         };
