@@ -274,6 +274,28 @@ internal static class SolverController
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
     }
 
+    internal static void ShowTurnSetupContinuationPreview(
+        NGame host,
+        CombatState state,
+        int turn)
+    {
+        AssertMainThread();
+        if (!ReferenceEquals(_combat.State, state)
+            || _combat.ContinuationSource is not { } source)
+        {
+            throw new InvalidOperationException("回合准备页面没有可显示的既有跨回合路线。");
+        }
+        SolverOverlay.ShowResult(
+            host,
+            SolverOverlaySnapshot.CapturePendingTurnSetup(
+                source,
+                turn,
+                UnexpectedReplanCount > 0));
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_RESULT_PREVIEW turn={turn} " +
+            "source=continuation native_choice_pending=true");
+    }
+
     internal static void StartDeploymentAfterTurnSetup(
         NGame host,
         CombatState state,

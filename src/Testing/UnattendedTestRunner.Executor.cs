@@ -178,11 +178,18 @@ internal sealed partial class UnattendedTestRunner
                             && trace.Stage == "Selected");
                         if (solverSelected)
                             throw new InvalidOperationException("单步执行越过边界并替玩家完成了下一回合选牌。");
+                        if (SolverOverlay.CurrentSnapshotTurnForTesting != expectedTurn)
+                        {
+                            throw new InvalidOperationException(
+                                $"下一回合选牌页已显示，但路线 UI 仍停在第 " +
+                                $"{SolverOverlay.CurrentSnapshotTurnForTesting?.ToString() ?? "-"} 回合；" +
+                                $"预期第 {expectedTurn} 回合。");
+                        }
                         runner._completedChecks.Add(
-                            $"SingleStepBoundary:Turn={expectedTurn}:Surface=Hand:Selected=0");
+                            $"SingleStepBoundary:Turn={expectedTurn}:Surface=Hand:Selected=0:UiTurn={expectedTurn}");
                         Entry.Logger.Info(
                             $"[CombatSolver/Test] SINGLE_STEP_BOUNDARY turn={expectedTurn} " +
-                            "surface=Hand waiting_for_player=true solver_selected=false");
+                            $"surface=Hand waiting_for_player=true solver_selected=false ui_turn={expectedTurn}");
                         if (request.SingleStepResumeModeForTest is not { } resumeMode)
                             return Observation(combatEnded: false);
 

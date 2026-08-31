@@ -100,6 +100,7 @@ internal static class SolverOverlay
     internal static bool VisualSettingsConfiguredForTesting
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
     internal static float OverlayOpacityForTesting => _panel?.Modulate.A ?? 1f;
+    internal static int? CurrentSnapshotTurnForTesting => _lastSnapshot?.StartTurnNumber;
     internal static SolverOverlayTheme ActiveThemeForTesting => SolverUiTokens.IsLightTheme
         ? SolverOverlayTheme.Light
         : SolverOverlayTheme.Dark;

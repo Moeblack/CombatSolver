@@ -52,37 +52,60 @@ internal sealed record SolverOverlaySnapshot(
     bool HasRisk)
 {
     public static SolverOverlaySnapshot Capture(SolverResult result, bool unexpectedReplan)
+        => Capture(result, result.StartTurnNumber, unexpectedReplan, pendingTurnSetup: false);
+
+    public static SolverOverlaySnapshot CapturePendingTurnSetup(
+        SolverResult result,
+        int turn,
+        bool unexpectedReplan)
+        => Capture(result, turn, unexpectedReplan, pendingTurnSetup: true);
+
+    private static SolverOverlaySnapshot Capture(
+        SolverResult result,
+        int startTurnNumber,
+        bool unexpectedReplan,
+        bool pendingTurnSetup)
     {
+        int searchedTurns = result.StartTurnNumber + result.SearchedTurns - startTurnNumber;
+        if (searchedTurns <= 0)
+        {
+            throw new InvalidOperationException(
+                $"既有路线不包含等待选择的第 {startTurnNumber} 回合。");
+        }
         IReadOnlyList<string> unmirrored = result.UnmirroredDetails().ToArray();
         IReadOnlyList<string> compensated = result.CompensatedDetails().ToArray();
         bool hasRisk = !result.Forecast.IsExactForModeledDamage
             || unmirrored.Count > 0
             || compensated.Count > 0;
         string confidence = ConfidenceText(result);
-        SolverOverlayTone statusTone = result.ProjectedBattleHpLossIncrease > 0
+        SolverOverlayTone statusTone = pendingTurnSetup
+            ? SolverOverlayTone.Accent
+            : result.ProjectedBattleHpLossIncrease > 0
             ? SolverOverlayTone.Danger
             : result.WasReused
                 ? SolverOverlayTone.Success
                 : SolverOverlayTone.Accent;
-        string statusText = result.ProjectedBattleHpLossIncrease > 0
+        string statusText = pendingTurnSetup
+            ? "等待回合开始选择"
+            : result.ProjectedBattleHpLossIncrease > 0
             ? "重算后战损上升"
             : result.WasReused
                 ? "方案已复用"
                 : "方案就绪";
-        string summaryText = result.CombatEndedTurn == result.StartTurnNumber
+        string summaryText = result.CombatEndedTurn == startTurnNumber
             ? $"[color={SolverUiTokens.Palette.SuccessHex}]本回合结束战斗  │  {confidence}[/color]"
-            : $"[color={SolverUiTokens.Palette.TextSecondaryHex}]预计路线 [b]{result.SearchedTurns}[/b] 回合  │  {confidence}[/color]";
+            : $"[color={SolverUiTokens.Palette.TextSecondaryHex}]预计路线 [b]{searchedTurns}[/b] 回合  │  {confidence}[/color]";
         string hpOutcomeText = result.ProjectedBattleHpLost > 0
             ? result.ProjectedBattleHpLossIncrease > 0
                 ? $"本局扣血  已 {result.BattleHpLostSoFar}    预计 {result.ProjectedBattleHpLost} HP    重算增加 {result.ProjectedBattleHpLossIncrease} HP"
                 : $"本局扣血  已 {result.BattleHpLostSoFar}    预计 {result.ProjectedBattleHpLost} HP"
             : "本局扣血  0 HP";
 
-        SolverOverlayTurnSnapshot[] turns = Enumerable.Range(0, result.SearchedTurns)
-            .Select(index => CaptureTurn(result, result.StartTurnNumber + index))
+        SolverOverlayTurnSnapshot[] turns = Enumerable.Range(0, searchedTurns)
+            .Select(index => CaptureTurn(result, startTurnNumber + index))
             .ToArray();
         return new SolverOverlaySnapshot(
-            result.StartTurnNumber,
+            startTurnNumber,
             statusText,
             statusTone,
             summaryText,
@@ -91,7 +114,7 @@ internal sealed record SolverOverlaySnapshot(
             hpOutcomeText,
             result.OnlyDeathRoutesFound,
             turns,
-            BuildDetails(result, unmirrored, compensated, unexpectedReplan),
+            BuildDetails(result, startTurnNumber, unmirrored, compensated, unexpectedReplan),
             hasRisk);
     }
 
@@ -195,6 +218,7 @@ internal sealed record SolverOverlaySnapshot(
 
     private static string BuildDetails(
         SolverResult result,
+        int displayedTurn,
         IReadOnlyList<string> unmirrored,
         IReadOnlyList<string> compensated,
         bool unexpectedReplan)
@@ -208,7 +232,7 @@ internal sealed record SolverOverlaySnapshot(
             $"[color={SolverUiTokens.Palette.TextMutedHex}]运行[/color]  后台分配 {FormatMegabytes(result.TotalWorkerAllocatedBytes)} MB  │  GC {result.TotalGen0Collections}/{result.TotalGen1Collections}/{result.TotalGen2Collections}  │  暂停 {result.TotalGcPauseDuration.TotalMilliseconds:F1} ms  │  延迟探测 {result.StandPatProbes}",
             $"[color={SolverUiTokens.Palette.TextMutedHex}]战损[/color]  本局已发生 {result.BattleHpLostSoFar}  │  路线未来卖血 {result.FutureSoldHp}  │  本局累计卖血 {result.SoldHp}/{result.SoldHpThreshold}",
             $"[color={SolverUiTokens.Palette.TextMutedHex}]药水[/color]  本局已喝 {result.BattlePotionsUsedSoFar} 瓶  │  路线还要用 {result.PotionCount} 瓶  │  预计省血 {result.PotionHpSaved}/{result.PotionHpRequired} HP  │  门槛淘汰 {result.PotionBranchesRejected}",
-            $"[color={SolverUiTokens.Palette.TextMutedHex}]防守[/color]  本回合最高可起防 {result.MaxBlockByTurn.GetValueOrDefault(result.StartTurnNumber)}  │  路线实际起防 {result.ActualBlockByTurn.GetValueOrDefault(result.StartTurnNumber)}  │  卖血 {result.SoldHpByTurn.GetValueOrDefault(result.StartTurnNumber)}",
+            $"[color={SolverUiTokens.Palette.TextMutedHex}]防守[/color]  本回合最高可起防 {result.MaxBlockByTurn.GetValueOrDefault(displayedTurn)}  │  路线实际起防 {result.ActualBlockByTurn.GetValueOrDefault(displayedTurn)}  │  卖血 {result.SoldHpByTurn.GetValueOrDefault(displayedTurn)}",
             $"[color={SolverUiTokens.Palette.TextMutedHex}]边界[/color]  {BoundaryText(result.BoundaryReason)}  │  停止洗牌分支 {result.ShuffleBranchesPruned}  │  不可避免战损 {result.UnavoidableHpLost}",
         ];
         if (result.TheftPolicy is { } theftPolicy)

@@ -120,6 +120,7 @@ internal static class PlayerTurnSetupCoordinator
         public SolverProgress? RenderedProgress;
         public int SearchState;
         public bool ReplayDrivingStarted { get; set; }
+        public bool ReplaySurfacePrepared { get; set; }
         public bool DeployAfterSetup { get; set; }
         public IReadOnlyList<PlanCardChoice>? PlannedChoices
             => ReplayChoices ?? Result?.TurnSetupChoices;
@@ -342,12 +343,10 @@ internal static class PlayerTurnSetupCoordinator
         }
         else
         {
-            if (SolverController.FullAutoEnabled)
-                StartReplayDriver(active, host);
-            Entry.Logger.Info(
-                $"[CombatSolver/Test] TURN_SETUP_PLAN_READY turn={player.PlayerCombatState.TurnNumber} " +
-                $"source=continuation choices={replayChoices!.Count} search=false " +
-                $"driving={active.ReplayDrivingStarted.ToString().ToLowerInvariant()}");
+            SolverController.ShowTurnSetupContinuationPreview(
+                host,
+                active.Combat,
+                player.PlayerCombatState.TurnNumber);
         }
         LogSetupPowers(player, "before_original");
         Task originalSetup = InvokeOriginalSetupAsync(manager, turnState, player, choiceContext);
@@ -355,6 +354,8 @@ internal static class PlayerTurnSetupCoordinator
         {
             if (initialSearch != null)
                 await TryStartSearchAfterVisibleChoiceAsync(active, host, originalSetup, "setup");
+            else
+                await PrepareReplayChoiceSurfaceAsync(active, host, originalSetup, "setup");
             await active.Choices.AwaitPhaseAsync(originalSetup);
         }
         catch (OperationCanceledException) when (
@@ -416,6 +417,8 @@ internal static class PlayerTurnSetupCoordinator
                 ?? throw new InvalidOperationException("回合准备自动出牌缺少游戏节点。");
             if (active.InitialSearch != null)
                 await TryStartSearchAfterVisibleChoiceAsync(active, host, original, "auto_pre_play");
+            else
+                await PrepareReplayChoiceSurfaceAsync(active, host, original, "auto_pre_play");
             await active.Choices.AwaitPhaseAsync(original);
             await active.Choices.CompleteAsync();
             LogSetupPowers(player, "after_original");
@@ -600,6 +603,32 @@ internal static class PlayerTurnSetupCoordinator
             $"[CombatSolver/Test] TURN_SETUP_PLAN turn={turn} choices={result.TurnSetupChoices.Count} " +
             $"expanded={result.ExpandedNodes} searched_turns={result.SearchedTurns} " +
             "awaiting_user_start=true");
+    }
+
+    private static async Task PrepareReplayChoiceSurfaceAsync(
+        ActivePlan active,
+        NGame host,
+        Task phaseTask,
+        string phase)
+    {
+        if (active.ReplaySurfacePrepared)
+            return;
+        if (!await active.Choices.WaitForFirstVisibleSurfaceAsync(host, phaseTask, active.Token))
+            return;
+        if (active.ReplaySurfacePrepared)
+            return;
+
+        active.ReplaySurfacePrepared = true;
+        int turn = active.Player.PlayerCombatState!.TurnNumber;
+        if (SolverController.FullAutoEnabled)
+            StartReplayDriver(active, host);
+        else
+            active.Choices.ReleaseVisibleSurface();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_PLAN_READY turn={turn} " +
+            $"source=continuation choices={active.ReplayChoices!.Count} search=false " +
+            $"phase={phase} visible=true " +
+            $"driving={active.ReplayDrivingStarted.ToString().ToLowerInvariant()}");
     }
 
     private static bool RequiresSolverChoice(Player player)
