@@ -44,6 +44,7 @@ internal sealed partial class UnattendedTestRunner
         AssertGeneratedCardCreatorDrivesSupermassive(combat, player);
         AssertLiveOriginalRemovalDoesNotAffectSnapshot(combat, player, card);
         AssertReplayCardIdentityDistinguishesGeneratedCopies(simulator, player);
+        AssertDeploymentCardIdentitySurvivesEarlierCopyLeavingHand(card);
         AssertMissingSandpitIsACompletedFranticEscape(combat, player);
         AssertTerminalMonsterMovesStopForecasting();
 
@@ -410,6 +411,31 @@ internal sealed partial class UnattendedTestRunner
                 generatedCopy))
         {
             throw new InvalidOperationException("回放卡牌身份没有选中计划中的生成复制。");
+        }
+    }
+
+    private static void AssertDeploymentCardIdentitySurvivesEarlierCopyLeavingHand(
+        CardModel liveCard)
+    {
+        CardModel canonical = ModelDb.AllCards.Single(card => card.Id == liveCard.Id);
+        CardModel earlierCopy = canonical.ToMutable();
+        CardModel plannedCopy = canonical.ToMutable();
+        plannedCopy.ExhaustOnNextPlay = !earlierCopy.ExhaustOnNextPlay;
+        string plannedStateKey = CardChoiceSupport.ChoiceCardKey(plannedCopy);
+        PlanAction action = new(
+            PlanActionKind.PlayCard,
+            1,
+            plannedCopy.Id.Entry,
+            CardOccurrence: 1,
+            CardStateKey: plannedStateKey,
+            CardStateOccurrence: 0);
+
+        if (!ReferenceEquals(
+                SolverController.FindCardForDeployment([plannedCopy], action),
+                plannedCopy))
+        {
+            throw new InvalidOperationException(
+                "实机部署没有在前一个同名实例离手后保持计划卡牌身份。");
         }
     }
 

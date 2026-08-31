@@ -1428,13 +1428,7 @@ internal static class SolverController
                 else
                 {
                     List<CardModel> hand = player.PlayerCombatState!.Hand.Cards.ToList();
-                    CardModel card = hand
-                        .Where(item => item.Id.Entry == action.CardId)
-                        .Skip(action.CardOccurrence)
-                        .FirstOrDefault()
-                        ?? throw new InvalidOperationException(
-                            $"部署时找不到手牌 {action.CardId}#{action.CardOccurrence}；" +
-                            $"当前手牌={string.Join(',', hand.Select(item => item.Id.Entry))}。");
+                    CardModel card = FindCardForDeployment(hand, action);
                     if (!card.CanPlayTargeting(target))
                     {
                         bool targetValid = card.IsValidTarget(target);
@@ -1640,6 +1634,33 @@ internal static class SolverController
             CompleteDeployment(deployment);
             SolverOverlay.RefreshControls();
         }
+    }
+
+    internal static CardModel FindCardForDeployment(
+        IReadOnlyList<CardModel> hand,
+        PlanAction action)
+    {
+        if (!string.IsNullOrEmpty(action.CardStateKey))
+        {
+            CardModel? stateMatch = hand
+                .Where(card => string.Equals(
+                    CardChoiceSupport.ChoiceCardKey(card),
+                    action.CardStateKey,
+                    StringComparison.Ordinal))
+                .Skip(action.CardStateOccurrence)
+                .FirstOrDefault();
+            return stateMatch ?? throw new InvalidOperationException(
+                $"部署时找不到计划中的手牌状态 {action.CardId}@{action.CardStateOccurrence}；" +
+                $"当前手牌={string.Join(',', hand.Select(card => CardChoiceSupport.ChoiceCardKey(card)))}。");
+        }
+
+        return hand
+            .Where(card => string.Equals(card.Id.Entry, action.CardId, StringComparison.Ordinal))
+            .Skip(action.CardOccurrence)
+            .FirstOrDefault()
+            ?? throw new InvalidOperationException(
+                $"部署时找不到手牌 {action.CardId}#{action.CardOccurrence}；" +
+                $"当前手牌={string.Join(',', hand.Select(card => card.Id.Entry))}。");
     }
 
     private static async Task<GameAction> EnqueueAndCaptureActionAsync(
