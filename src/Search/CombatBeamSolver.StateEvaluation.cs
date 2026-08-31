@@ -198,7 +198,14 @@ internal sealed partial class CombatBeamSolver
         int futureResourceValue = combat.GetAmount<EnergyNextTurnPower>(_player.Creature) * 16
             + combat.GetAmount<DrawCardsNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<StarNextTurnPower>(_player.Creature) * 8
-            + combat.GetAmount<RetainHandPower>(_player.Creature) * 4;
+            + combat.GetAmount<RetainHandPower>(_player.Creature) * 4
+            + combat.GetAmount<SummonNextTurnPower>(_player.Creature)
+                * (4 + Math.Min(12, liveCards.Count(card => card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2));
+        Creature? currentOsty = combat.GetOsty(_player);
+        int ostyHp = currentOsty == null
+            ? 0
+            : simulator.State.GetCreature(currentOsty).CurrentHp;
+        int ostyMaxHp = combat.GetOstyMaxHp(simulator, _player);
         persistentBuffValue += liveCards.Count(card => card.Preview is Soul);
         int delayedDamageValue = combat.KnownEnemies
             .Where(enemy => combat.ContainsCreature(enemy) && simulator.State.GetCreature(enemy).IsAlive)
@@ -280,7 +287,6 @@ internal sealed partial class CombatBeamSolver
         int automaticPotionUseCount = combat.PotionUses.Count(use => use.Automatic);
         (int reachableHandValue, int zeroCostPlayableCount) =
             CalculateReachableHandPotential(simulator, combat, playerState);
-
         return new SimulationSnapshot(
             score,
             key,
@@ -318,6 +324,8 @@ internal sealed partial class CombatBeamSolver
             retainedAttackValue,
             replayPotentialValue,
             futureResourceValue,
+            ostyHp,
+            ostyMaxHp,
             delayedDamageValue,
             reactiveDamageValue,
             enemyStrengthSuppression,

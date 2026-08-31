@@ -443,7 +443,8 @@ internal sealed partial class CombatBeamSolver
                     node.Snapshot.AllEnemiesDead
                     && node.PotionCount == 0
                     && node.FutureSoldHp == 0
-                    && node.Snapshot.PlayerHp >= initialHp))
+                    && node.Snapshot.CumulativePlayerHpLost == 0
+                    && node.Snapshot.PlayerMaxHp >= root.InitialPlayerMaxHp))
             {
                 foreach (SearchNode node in frontier)
                     node.Snapshot.ReleaseSimulator();

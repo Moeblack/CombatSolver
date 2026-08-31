@@ -460,9 +460,40 @@ internal sealed partial class CombatBeamSolver
             }
 
             List<SearchNode> required = [];
+            foreach (IGrouping<int, SearchNode> victoryGroup in ranked
+                         .Where(node => node.Snapshot.AllEnemiesDead)
+                         .GroupBy(node => node.PotionCount)
+                         .OrderBy(group => group.Key))
+            {
+                AddRequired(required, victoryGroup.Aggregate(
+                    (SearchNode?)null,
+                    (best, node) => IsBetterCompletedVictory(node, best) ? node : best), limit);
+            }
+            if (preserveDefensiveRoute && _profile.Phase == SolverSearchPhase.Deep)
+            {
+                foreach (IGrouping<int, SearchNode> potionGroup in ranked
+                             .GroupBy(node => node.PotionCount)
+                             .OrderBy(group => group.Key))
+                {
+                    IReadOnlyList<SearchNode> group = potionGroup.ToList();
+                    AddRequired(required, FindBestFreshResourceStandPat(group), limit);
+                    AddRequired(required, FindBestStandPat(group, SearchRouteTraits.Scaling), limit);
+                    AddRequired(required, FindBestStandPat(group, SearchRouteTraits.Resource), limit);
+                    AddRequired(required, FindBestStandPat(group, SearchRouteTraits.Control), limit);
+                }
+            }
             bool endTurnFrontier = ranked.All(node =>
                 node.Action is { } action
                 && (action.Kind == PlanActionKind.EndTurn || action.EndsPlayerTurn));
+            if (endTurnFrontier && preserveDefensiveRoute)
+            {
+                foreach (IGrouping<int, SearchNode> potionGroup in ranked
+                             .GroupBy(node => node.PotionCount)
+                             .OrderBy(group => group.Key))
+                {
+                    AddRequired(required, FindBestTurnBoundaryHand(potionGroup), effectiveLimit);
+                }
+            }
             int orderedPileQuota = orderedPileCohorts.Count == 0
                 ? 0
                 : endTurnFrontier
@@ -765,7 +796,6 @@ internal sealed partial class CombatBeamSolver
                         AddRequired(required, FindBestLane(potionCountGroup.ToList(), trait), limit);
                     }
                 }
-                AddRequired(required, FindBestDelayed(ranked), limit);
                 List<SearchNode> pareto = new(3);
                 foreach (SearchNode candidate in ranked)
                 {
@@ -930,7 +960,8 @@ internal sealed partial class CombatBeamSolver
             => effect is PlanChoiceEffect.SetFreeThisCombat
                 or PlanChoiceEffect.Exhaust
                 or PlanChoiceEffect.Transform
-                or PlanChoiceEffect.Modify;
+                or PlanChoiceEffect.Modify
+                or PlanChoiceEffect.ApplyRetain;
 
         private double RoutingParentScore(IReadOnlyList<SearchNode> nodes)
             => nodes.Max(node =>
@@ -1231,7 +1262,8 @@ internal sealed partial class CombatBeamSolver
                     or PlanChoiceEffect.GenerateToHand
                     or PlanChoiceEffect.Exhaust
                     or PlanChoiceEffect.Transform
-                    or PlanChoiceEffect.Modify))
+                    or PlanChoiceEffect.Modify
+                    or PlanChoiceEffect.ApplyRetain))
             {
                 return false;
             }
@@ -1284,9 +1316,50 @@ internal sealed partial class CombatBeamSolver
             => current == null
                 || candidate.Snapshot.ProjectedPlayerHp > current.Snapshot.ProjectedPlayerHp
                 || candidate.Snapshot.ProjectedPlayerHp == current.Snapshot.ProjectedPlayerHp
-                    && (candidate.Snapshot.PlayerBlock > current.Snapshot.PlayerBlock
-                        || candidate.Snapshot.PlayerBlock == current.Snapshot.PlayerBlock
-                            && candidate.Score > current.Score);
+                    && (candidate.Snapshot.OstyHp > current.Snapshot.OstyHp
+                        || candidate.Snapshot.OstyHp == current.Snapshot.OstyHp
+                            && (candidate.Snapshot.OstyMaxHp > current.Snapshot.OstyMaxHp
+                                || candidate.Snapshot.OstyMaxHp == current.Snapshot.OstyMaxHp
+                                    && (candidate.Snapshot.PlayerBlock > current.Snapshot.PlayerBlock
+                                        || candidate.Snapshot.PlayerBlock == current.Snapshot.PlayerBlock
+                                            && candidate.Score > current.Score)));
+
+        private bool IsBetterCompletedVictory(SearchNode candidate, SearchNode? current)
+        {
+            if (current == null)
+                return true;
+            SimulationSnapshot candidateSnapshot = candidate.Snapshot;
+            SimulationSnapshot currentSnapshot = current.Snapshot;
+            int candidateOutstanding = _theftPolicy == SolverTheftPolicy.PreserveResources
+                ? candidateSnapshot.OutstandingStolenResource
+                : 0;
+            int currentOutstanding = _theftPolicy == SolverTheftPolicy.PreserveResources
+                ? currentSnapshot.OutstandingStolenResource
+                : 0;
+            int byHpLost = candidateSnapshot.CumulativePlayerHpLost
+                .CompareTo(currentSnapshot.CumulativePlayerHpLost);
+            if (byHpLost != 0)
+                return byHpLost < 0;
+            int byMaxHp = candidateSnapshot.PlayerMaxHp.CompareTo(currentSnapshot.PlayerMaxHp);
+            if (byMaxHp != 0)
+                return byMaxHp > 0;
+            int byOutstanding = candidateOutstanding.CompareTo(currentOutstanding);
+            if (byOutstanding != 0)
+                return byOutstanding < 0;
+            int byLongTerm = candidateSnapshot.LongTermResourceValue
+                .CompareTo(currentSnapshot.LongTermResourceValue);
+            if (byLongTerm != 0)
+                return byLongTerm > 0;
+            int byAnger = candidateSnapshot.AngerCopiesGenerated
+                .CompareTo(currentSnapshot.AngerCopiesGenerated);
+            if (byAnger != 0)
+                return byAnger < 0;
+            int byPotionCost = candidate.PotionStrategicCost.CompareTo(current.PotionStrategicCost);
+            if (byPotionCost != 0)
+                return byPotionCost < 0;
+            int bySoldHp = candidate.FutureSoldHp.CompareTo(current.FutureSoldHp);
+            return bySoldHp != 0 ? bySoldHp < 0 : IsBetterSearchNode(candidate, current);
+        }
 
         private static bool IsBetterUtilityDefensive(SearchNode candidate, SearchNode? current)
             => current == null
@@ -1452,6 +1525,24 @@ internal sealed partial class CombatBeamSolver
             return best;
         }
 
+        private static SearchNode? FindBestTurnBoundaryHand(IEnumerable<SearchNode> nodes)
+            => nodes.Aggregate(
+                (SearchNode?)null,
+                (best, node) => best == null
+                    || node.Snapshot.ProjectedPlayerHp > best.Snapshot.ProjectedPlayerHp
+                    || node.Snapshot.ProjectedPlayerHp == best.Snapshot.ProjectedPlayerHp
+                        && (node.Snapshot.OstyHp > best.Snapshot.OstyHp
+                            || node.Snapshot.OstyHp == best.Snapshot.OstyHp
+                                && (node.Snapshot.HandCount > best.Snapshot.HandCount
+                                    || node.Snapshot.HandCount == best.Snapshot.HandCount
+                                        && (node.Snapshot.ReachableHandValue > best.Snapshot.ReachableHandValue
+                                            || node.Snapshot.ReachableHandValue == best.Snapshot.ReachableHandValue
+                                                && (node.Snapshot.EnemyHp < best.Snapshot.EnemyHp
+                                                    || node.Snapshot.EnemyHp == best.Snapshot.EnemyHp
+                                                        && node.Score > best.Score))))
+                    ? node
+                    : best);
+
         private SearchNode? FindBestCompressionAttackGrowth(IReadOnlyList<SearchNode> nodes)
         {
             SearchNode? best = null;
@@ -1579,7 +1670,9 @@ internal sealed partial class CombatBeamSolver
                     + snapshot.Stars * 8
                     + snapshot.HandCount
                     + snapshot.ReachableHandValue
-                    + snapshot.FutureResourceValue,
+                    + snapshot.FutureResourceValue
+                    + snapshot.OstyHp * 16
+                    + snapshot.OstyMaxHp * 4,
                 SearchRouteTraits.LongTermResource => snapshot.LongTermResourceValue,
                 SearchRouteTraits.Control => snapshot.SandpitRemaining * 32
                     + snapshot.EnemyStrengthSuppression * 32
@@ -1607,44 +1700,68 @@ internal sealed partial class CombatBeamSolver
                 _ => throw new ArgumentOutOfRangeException(nameof(trait), trait, null),
             };
 
-        private SearchNode? FindBestDelayed(IReadOnlyList<SearchNode> nodes)
+        private SearchNode? FindBestStandPat(
+            IReadOnlyList<SearchNode> nodes,
+            SearchRouteTraits trait)
         {
             const int limit = 8;
-            List<SearchNode> probes = new(limit);
-            foreach (SearchNode node in nodes)
-            {
-                if (!node.Traits.HasFlag(SearchRouteTraits.Control)
-                    && !node.Traits.HasFlag(SearchRouteTraits.Scaling))
-                {
-                    continue;
-                }
-                int index = 0;
-                while (index < probes.Count
-                       && (probes[index].Snapshot.ProjectedPlayerHp > node.Snapshot.ProjectedPlayerHp
-                           || probes[index].Snapshot.ProjectedPlayerHp == node.Snapshot.ProjectedPlayerHp
-                               && probes[index].Score >= node.Score))
-                {
-                    index++;
-                }
-                if (index >= limit)
-                    continue;
-                probes.Insert(index, node);
-                if (probes.Count > limit)
-                    probes.RemoveAt(limit);
-            }
+            List<SearchNode> probes = nodes
+                .Where(node => node.Traits.HasFlag(trait))
+                .OrderByDescending(node => node.Snapshot.ProjectedPlayerHp)
+                .ThenByDescending(node => LaneValue(node.Snapshot, trait))
+                .ThenByDescending(node => node.Score)
+                .Take(limit)
+                .ToList();
 
             SearchNode? best = null;
             StandPatEvaluation bestEvaluation = default;
             foreach (SearchNode node in probes)
             {
                 StandPatEvaluation evaluation = _evaluateStandPat(node);
+                int evaluationValue = trait == SearchRouteTraits.Resource
+                    ? evaluation.ResourceValue
+                    : evaluation.DelayedDamage;
+                int bestEvaluationValue = trait == SearchRouteTraits.Resource
+                    ? bestEvaluation.ResourceValue
+                    : bestEvaluation.DelayedDamage;
                 if (best == null
                     || evaluation.AllEnemiesDead && !bestEvaluation.AllEnemiesDead
                     || evaluation.AllEnemiesDead == bestEvaluation.AllEnemiesDead
-                        && (evaluation.DelayedDamage > bestEvaluation.DelayedDamage
-                            || evaluation.DelayedDamage == bestEvaluation.DelayedDamage
-                                && (evaluation.ProjectedPlayerHp > bestEvaluation.ProjectedPlayerHp
-                                    || evaluation.ProjectedPlayerHp == bestEvaluation.ProjectedPlayerHp
+                        && (evaluation.ProjectedPlayerHp > bestEvaluation.ProjectedPlayerHp
+                            || evaluation.ProjectedPlayerHp == bestEvaluation.ProjectedPlayerHp
+                                && (evaluationValue > bestEvaluationValue
+                                    || evaluationValue == bestEvaluationValue
+                                        && node.Score > best.Score)))
+                {
+                    best = node;
+                    bestEvaluation = evaluation;
+                }
+            }
+            return best;
+        }
+
+        private SearchNode? FindBestFreshResourceStandPat(IReadOnlyList<SearchNode> nodes)
+        {
+            SearchNode? best = null;
+            StandPatEvaluation bestEvaluation = default;
+            foreach (SearchNode node in nodes.Where(node => node.Parent is { } parent
+                         && (node.Snapshot.FutureResourceValue > parent.Snapshot.FutureResourceValue
+                             || node.Snapshot.StrategicEffects.ResourcePotential
+                                > parent.Snapshot.StrategicEffects.ResourcePotential)))
+            {
+                StandPatEvaluation evaluation = _evaluateStandPat(node);
+                if (best == null
+                    || evaluation.AllEnemiesDead && !bestEvaluation.AllEnemiesDead
+                    || evaluation.AllEnemiesDead == bestEvaluation.AllEnemiesDead
+                        && (evaluation.ProjectedPlayerHp > bestEvaluation.ProjectedPlayerHp
+                            || evaluation.ProjectedPlayerHp == bestEvaluation.ProjectedPlayerHp
+                                && (evaluation.ResourceValue > bestEvaluation.ResourceValue
+                                    || evaluation.ResourceValue == bestEvaluation.ResourceValue
+                                        && node.Snapshot.CumulativePlayerHpLost
+                                            < best.Snapshot.CumulativePlayerHpLost
+                                    || evaluation.ResourceValue == bestEvaluation.ResourceValue
+                                        && node.Snapshot.CumulativePlayerHpLost
+                                            == best.Snapshot.CumulativePlayerHpLost
                                         && node.Score > best.Score)))
                 {
                     best = node;
@@ -1686,6 +1803,8 @@ internal sealed partial class CombatBeamSolver
                 && left.Snapshot.Energy >= right.Snapshot.Energy
                 && left.Snapshot.Stars >= right.Snapshot.Stars
                 && left.Snapshot.FutureResourceValue >= right.Snapshot.FutureResourceValue
+                && left.Snapshot.OstyHp >= right.Snapshot.OstyHp
+                && left.Snapshot.OstyMaxHp >= right.Snapshot.OstyMaxHp
                 && RetainedAttackGrowth(left.Snapshot) >= RetainedAttackGrowth(right.Snapshot)
                 && left.Snapshot.ReplayPotentialValue >= right.Snapshot.ReplayPotentialValue
                 && left.Snapshot.FocusTargetPressure >= right.Snapshot.FocusTargetPressure
@@ -1718,6 +1837,8 @@ internal sealed partial class CombatBeamSolver
                 || left.Snapshot.Energy > right.Snapshot.Energy
                 || left.Snapshot.Stars > right.Snapshot.Stars
                 || left.Snapshot.FutureResourceValue > right.Snapshot.FutureResourceValue
+                || left.Snapshot.OstyHp > right.Snapshot.OstyHp
+                || left.Snapshot.OstyMaxHp > right.Snapshot.OstyMaxHp
                 || RetainedAttackGrowth(left.Snapshot) > RetainedAttackGrowth(right.Snapshot)
                 || left.Snapshot.ReplayPotentialValue > right.Snapshot.ReplayPotentialValue
                 || left.Snapshot.FocusTargetPressure > right.Snapshot.FocusTargetPressure

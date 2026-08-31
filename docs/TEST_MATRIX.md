@@ -16,7 +16,8 @@
 | `STRATEGY-HP-INVESTMENT-DYNAMIC` | 通过（headless） | 一张提供能量和抽牌的牌直接支付 `6 HP`，超过普通战斗原 `5 HP` 阈值；同起点保守路线存在时，至少一条确实换来战斗进度的投资分支获得保护，最终结果仍按整场战损选择零卖血路线。runId `02b131c187d1433c94ea558e485c591d`。 | 2026-08-31 |
 | `STRATEGY-ACTION-ADMISSION-COVERAGE` | 通过（headless） | 固定单节点分支预算 `3`，六种不同即时攻击、过牌与费用控制候选竞争；至少一个原即时 Top-N 之外的战略家族代表进入 frontier。runId `06eb33b27c344825b0801d282b7b8df2`。 | 2026-08-31 |
 | `STRATEGY-DOP-EQUIVALENCE` | 通过（headless） | 固定 `250` 节点下 DOP1/DOP2 的动作、评分、展开、转移、分族保路、生命投资和全部非时序剪枝统计一致；DOP2 实际形成至少两路并发。runId `64414648aaae4406a570a0ff59ef1f17`。 | 2026-08-31 |
-| `STRATEGY-REPLAY-FDDD-MEDIUM` | 通过（headless） | 严格组合永世沙漏报告同检查点的 `run-state` 与 `replay-state`，完整 `ContinuationStamp` 一致；Medium `24/60` Beam、Smart、DOP4、8GB No-GC 下首动独门技术，第 `4` 回合无药击杀，预计战损 `3`，追平并优于玩家 `6` 战损上界。runId `a202961e07c44ac3a91d314ade881cdb`。 | 2026-08-31 |
+| `STRATEGY-REPLAY-FDDD-MEDIUM` | 通过（headless） | 严格组合永世沙漏报告同检查点的 `run-state` 与 `replay-state`，完整 `ContinuationStamp` 一致；Medium `24/60` Beam、Smart、DOP4、8GB No-GC 下首动独门技术，第 `4` 回合无药击杀，预计战损 `3`，追平并优于玩家 `6` 战损上界。当前源码回归 runId `3e1f05195228471bbea6cafaabcab1d7`。 | 2026-08-31 |
+| `STRATEGY-REPLAY-0F7F-VERYHIGH-RETAIN-ROUTING` | 通过（headless） | 严格恢复蜂群术士报告首回合根及完整 RNG；VeryHigh、禁用药水、DOP4、8GB No-GC 下完整路线第 `13` 回合无药击杀，预计整场战损 `0`，从报告原求解器 `57` 追平人工 `0`。runId `34d0742df3c74ee6a9a5006eabf0ece2`。 | 2026-08-31 |
 
 ## 0.23.0
 

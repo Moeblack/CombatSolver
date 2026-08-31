@@ -60,7 +60,8 @@ internal sealed partial class CombatBeamSolver
     private readonly record struct StandPatEvaluation(
         bool AllEnemiesDead,
         int DelayedDamage,
-        int ProjectedPlayerHp);
+        int ProjectedPlayerHp,
+        int ResourceValue);
 
     private readonly record struct ThreatFocus(
         uint? CombatId,

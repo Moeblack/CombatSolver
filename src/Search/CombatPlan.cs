@@ -307,6 +307,8 @@ internal sealed class SimulationSnapshot(
     int retainedAttackValue,
     int replayPotentialValue,
     int futureResourceValue,
+    int ostyHp,
+    int ostyMaxHp,
     int delayedDamageValue,
     int reactiveDamageValue,
     int enemyStrengthSuppression,
@@ -380,6 +382,8 @@ internal sealed class SimulationSnapshot(
     public int RetainedAttackValue { get; } = retainedAttackValue;
     public int ReplayPotentialValue { get; } = replayPotentialValue;
     public int FutureResourceValue { get; } = futureResourceValue;
+    public int OstyHp { get; } = ostyHp;
+    public int OstyMaxHp { get; } = ostyMaxHp;
     public int DelayedDamageValue { get; } = delayedDamageValue;
     public int ReactiveDamageValue { get; } = reactiveDamageValue;
     public int EnemyStrengthSuppression { get; } = enemyStrengthSuppression;

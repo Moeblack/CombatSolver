@@ -175,7 +175,15 @@ internal sealed partial class CombatBeamSolver
         StandPatEvaluation evaluation = new(
             end.AllEnemiesDead,
             Math.Max(0, node.Snapshot.EnemyHp - end.EnemyHp),
-            end.ProjectedPlayerHp);
+            end.ProjectedPlayerHp,
+            end.Energy * 16
+                + end.Stars * 8
+                + end.HandCount
+                + end.ReachableHandValue
+                + end.FutureResourceValue
+                + end.OstyHp * 16
+                + end.OstyMaxHp * 4);
+        end.ReleaseSimulator();
         _run.StandPatCache.Add(node.StateKey, evaluation);
         _run.StandPatProbes++;
         return evaluation;

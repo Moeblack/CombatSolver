@@ -1,9 +1,12 @@
+using System.Reflection;
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Combat.History.Entries;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Runs;
@@ -81,15 +84,19 @@ internal sealed partial class UnattendedTestRunner
         SetStars(player, savedPlayer.GetProperty("stars").GetInt32());
         player.Gold = savedPlayer.GetProperty("gold").GetInt32();
 
-        ValidateReplayInventory(player, savedPlayer);
+        RestoreReplayInventory(player, savedPlayer);
         await ClearPlayerPilesAsync(player);
         await RestoreReplayPilesAsync(combatState, player, savedPlayer.GetProperty("piles"));
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        RestoreReplayTurnCardHistory(
+            combatState,
+            player,
+            RequiredString(root, "exactContinuationState"));
         ReloadRunSnapshotRng((RunState)combatState.RunState, player, runSnapshotPath);
 
         ContinuationStamp expected = new(RequiredString(root, "exactContinuationState"));
         ContinuationStamp actual = ContinuationStamp.CaptureLive(combatState);
-        if (!string.Equals(expected.StateText, actual.StateText, StringComparison.Ordinal))
+        if (!ReplayContinuationMatches(expected.StateText, actual.StateText))
         {
             throw new InvalidOperationException(
                 "replay-state 严格导入不一致：" + expected.DescribeFirstDifference(actual));
@@ -133,38 +140,68 @@ internal sealed partial class UnattendedTestRunner
             await CreatureCmd.SetMaxHp(creature, saved.GetProperty("maxHp").GetInt32());
             await CreatureCmd.SetCurrentHp(creature, saved.GetProperty("currentHp").GetInt32());
             await SetBlockAsync(creature, saved.GetProperty("block").GetInt32());
-            ValidateReplayPowers(creature, saved.GetProperty("powers"));
+            await RestoreReplayPowersAsync(combatState, creature, saved.GetProperty("powers"));
             if (creature.Monster != null)
                 RestoreReplayMonsterMove(creature.Monster, saved);
         }
     }
 
-    private static void ValidateReplayPowers(Creature creature, JsonElement savedPowersElement)
+    private static async Task RestoreReplayPowersAsync(
+        CombatState combatState,
+        Creature creature,
+        JsonElement savedPowersElement)
     {
         JsonElement[] savedPowers = savedPowersElement.EnumerateArray().ToArray();
-        if (savedPowers.Length != creature.Powers.Count)
+        List<PowerModel> unmatched = creature.Powers.ToList();
+        foreach (JsonElement saved in savedPowers)
         {
-            throw new InvalidOperationException(
-                $"CombatId={creature.CombatId} Power 数为 {creature.Powers.Count}，" +
-                $"replay-state 为 {savedPowers.Length}。");
-        }
-        for (int index = 0; index < savedPowers.Length; index++)
-        {
-            JsonElement saved = savedPowers[index];
-            PowerModel power = creature.Powers[index];
             string id = RequiredString(saved, "id");
-            int amount = saved.GetProperty("amount").GetInt32();
-            int amountOnTurnStart = saved.GetProperty("amountOnTurnStart").GetInt32();
-            if (!ModelMatches(power, id)
-                || power.Amount != amount
-                || power.AmountOnTurnStart != amountOnTurnStart)
+            PowerModel? power = unmatched.FirstOrDefault(candidate => ModelMatches(candidate, id));
+            if (power != null)
             {
-                throw new InvalidOperationException(
-                    $"CombatId={creature.CombatId} Power[{index}] 为 " +
-                    $"{power.Id.Entry}/{power.Amount}/{power.AmountOnTurnStart}，" +
-                    $"replay-state 为 {id}/{amount}/{amountOnTurnStart}。");
+                unmatched.Remove(power);
             }
+            else
+            {
+                PowerModel canonical = ResolveUnique(ModelDb.AllPowers, id, "Power");
+                PowerModel injected = canonical.ToMutable();
+                Creature? target = ReplayCreatureReference(combatState, saved, "targetCombatId");
+                Creature applier = ReplayCreatureReference(combatState, saved, "applierCombatId")
+                    ?? creature;
+                injected.Target = target;
+                int applyAmount = Math.Max(1, saved.GetProperty("amount").GetInt32());
+                await PowerCmd.Apply(
+                    new BlockingPlayerChoiceContext(),
+                    injected,
+                    creature,
+                    applyAmount,
+                    applier,
+                    null);
+                power = creature.Powers.LastOrDefault(candidate => ModelMatches(candidate, id))
+                    ?? throw new InvalidOperationException(
+                        $"CombatId={creature.CombatId} 无法恢复 Power {id}。");
+            }
+
+            power.Amount = saved.GetProperty("amount").GetInt32();
+            power.AmountOnTurnStart = saved.GetProperty("amountOnTurnStart").GetInt32();
+            RestoreReplayPrimitiveState(power, typeof(PowerModel), saved.GetProperty("fields"));
         }
+        foreach (PowerModel extra in unmatched)
+            await PowerCmd.Remove(extra);
+    }
+
+    private static Creature? ReplayCreatureReference(
+        CombatState combatState,
+        JsonElement saved,
+        string propertyName)
+    {
+        JsonElement reference = saved.GetProperty(propertyName);
+        if (reference.ValueKind == JsonValueKind.Null)
+            return null;
+        uint combatId = reference.GetUInt32();
+        return combatState.Creatures.SingleOrDefault(candidate => candidate.CombatId == combatId)
+            ?? throw new InvalidOperationException(
+                $"replay-state {propertyName} 引用缺失的 CombatId={combatId}。");
     }
 
     private static void RestoreReplayMonsterMove(MonsterModel monster, JsonElement saved)
@@ -183,6 +220,8 @@ internal sealed partial class UnattendedTestRunner
         string? nextMoveId = OptionalString(saved, "nextMoveId");
         if (nextMoveId == null)
             return;
+        if (string.Equals(monster.NextMove?.Id, nextMoveId, StringComparison.Ordinal))
+            return;
         if (!machine.States.TryGetValue(nextMoveId, out MonsterState? nextState)
             || nextState is not MoveState move)
         {
@@ -191,7 +230,7 @@ internal sealed partial class UnattendedTestRunner
         monster.SetMoveImmediate(move, true);
     }
 
-    private static void ValidateReplayInventory(Player player, JsonElement savedPlayer)
+    private static void RestoreReplayInventory(Player player, JsonElement savedPlayer)
     {
         JsonElement[] savedPotions = savedPlayer.GetProperty("potions").EnumerateArray().ToArray();
         if (savedPotions.Length != player.PotionSlots.Count)
@@ -212,13 +251,121 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("replay-state 遗物数量与跑局快照不同。");
         for (int index = 0; index < savedRelics.Length; index++)
         {
-            string expected = RequiredString(savedRelics[index], "id");
-            if (!ModelMatches(player.Relics[index], expected))
+            JsonElement savedRelic = savedRelics[index];
+            RelicModel relic = player.Relics[index];
+            string expected = RequiredString(savedRelic, "id");
+            if (!ModelMatches(relic, expected))
             {
                 throw new InvalidOperationException(
-                    $"遗物[{index}] 为 {player.Relics[index].Id.Entry}，replay-state 为 {expected}。");
+                    $"遗物[{index}] 为 {relic.Id.Entry}，replay-state 为 {expected}。");
+            }
+            RestoreReplayPrimitiveState(relic, typeof(RelicModel), savedRelic.GetProperty("fields"));
+        }
+    }
+
+    private static void RestoreReplayPrimitiveState(
+        object target,
+        Type baseType,
+        JsonElement savedFields)
+    {
+        for (Type? type = target.GetType();
+             type != null && type != baseType;
+             type = type.BaseType)
+        {
+            foreach (FieldInfo field in type.GetFields(
+                         BindingFlags.Instance
+                         | BindingFlags.Public
+                         | BindingFlags.NonPublic
+                         | BindingFlags.DeclaredOnly))
+            {
+                if (field.IsInitOnly
+                    || !savedFields.TryGetProperty($"{type.Name}.{field.Name}", out JsonElement saved))
+                {
+                    continue;
+                }
+
+                object? value = DeserializeReplayPrimitive(field.FieldType, saved);
+                if (value != null || saved.ValueKind == JsonValueKind.Null)
+                    field.SetValue(target, value);
             }
         }
+    }
+
+    private static object? DeserializeReplayPrimitive(Type fieldType, JsonElement saved)
+    {
+        Type valueType = Nullable.GetUnderlyingType(fieldType) ?? fieldType;
+        if (saved.ValueKind == JsonValueKind.Null)
+            return null;
+        if (valueType.IsEnum)
+        {
+            string member = saved.GetString()
+                ?? throw new InvalidOperationException($"replay-state 枚举 {valueType.Name} 为空。");
+            return Enum.Parse(valueType, member, false);
+        }
+        if (valueType == typeof(bool))
+            return saved.GetBoolean();
+        if (valueType == typeof(byte))
+            return saved.GetByte();
+        if (valueType == typeof(short))
+            return saved.GetInt16();
+        if (valueType == typeof(int))
+            return saved.GetInt32();
+        if (valueType == typeof(long))
+            return saved.GetInt64();
+        if (valueType == typeof(float))
+            return saved.GetSingle();
+        if (valueType == typeof(double))
+            return saved.GetDouble();
+        if (valueType == typeof(decimal))
+            return saved.GetDecimal();
+        if (valueType == typeof(string))
+            return saved.GetString();
+        return null;
+    }
+
+    private static bool ReplayContinuationMatches(string expected, string actual)
+    {
+        if (string.Equals(expected, actual, StringComparison.Ordinal))
+            return true;
+
+        string[] expectedFields = expected.Split(';');
+        string[] actualFields = actual.Split(';');
+        if (expectedFields.Length != actualFields.Length)
+            return false;
+        for (int index = 0; index < expectedFields.Length; index++)
+        {
+            string expectedField = expectedFields[index];
+            string actualField = actualFields[index];
+            if (string.Equals(expectedField, actualField, StringComparison.Ordinal))
+                continue;
+            if (!expectedField.StartsWith("R=", StringComparison.Ordinal)
+                || !actualField.StartsWith("R=", StringComparison.Ordinal)
+                || !LegacyRngContinuationMatches(expectedField[2..], actualField[2..]))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool LegacyRngContinuationMatches(string expected, string actual)
+    {
+        string[] expectedRngs = expected.Split('/');
+        string[] actualRngs = actual.Split('/');
+        if (expectedRngs.Length != actualRngs.Length)
+            return false;
+        for (int index = 0; index < expectedRngs.Length; index++)
+        {
+            string expectedRng = expectedRngs[index];
+            string actualRng = actualRngs[index];
+            if (!string.Equals(expectedRng, actualRng, StringComparison.Ordinal)
+                && (expectedRng.Contains(':', StringComparison.Ordinal)
+                    || !actualRng.StartsWith(expectedRng + ":", StringComparison.Ordinal)))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static async Task RestoreReplayPilesAsync(
@@ -241,7 +388,88 @@ internal sealed partial class UnattendedTestRunner
                 UnattendedCardInjection injection = BuildReplayCardInjection(savedCard, pile);
                 CardModel restored = (await InjectCardAsync(combatState, player, injection)).Single();
                 AttachReplayDeckVersion(restored, savedCard, player);
+                RestoreReplayPrimitiveState(
+                    restored,
+                    typeof(AbstractModel),
+                    savedCard.GetProperty("fields"));
+                RestoreReplayCardKeywords(restored, savedCard.GetProperty("keywords"));
             }
+        }
+    }
+
+    private static void RestoreReplayCardKeywords(CardModel card, JsonElement savedKeywordsElement)
+    {
+        HashSet<CardKeyword> savedKeywords = savedKeywordsElement
+            .EnumerateArray()
+            .Select(element => Enum.Parse<CardKeyword>(
+                element.GetString()
+                    ?? throw new InvalidOperationException("replay-state 卡牌关键词为空。"),
+                false))
+            .ToHashSet();
+        foreach (CardKeyword keyword in card.Keywords.Where(keyword => !savedKeywords.Contains(keyword)).ToArray())
+            card.RemoveKeyword(keyword);
+        foreach (CardKeyword keyword in savedKeywords.Where(keyword => !card.Keywords.Contains(keyword)))
+            card.AddKeyword(keyword);
+    }
+
+    private static void RestoreReplayTurnCardHistory(
+        CombatState combatState,
+        Player player,
+        string continuationState)
+    {
+        const string marker = ";Y=";
+        int start = continuationState.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0)
+            throw new InvalidOperationException("replay-state 状态戳缺少本回合卡牌历史。");
+        start += marker.Length;
+        int end = continuationState.IndexOf(';', start);
+        string[] values = continuationState[start..(end < 0 ? continuationState.Length : end)].Split('/');
+        if (values.Length != 2
+            || !int.TryParse(values[0], out int expectedStatusDraws)
+            || !int.TryParse(values[1], out int expectedZeroCostAttackStarts))
+        {
+            throw new InvalidOperationException("replay-state 本回合卡牌历史格式无效。");
+        }
+
+        int actualStatusDraws = CombatManager.Instance.History.Entries
+            .OfType<CardDrawnEntry>()
+            .Count(entry => entry.HappenedThisTurn(combatState)
+                && entry.Actor.Player == player
+                && entry.Card.Type == CardType.Status);
+        int actualZeroCostAttackStarts = CombatManager.Instance.History.CardPlaysStarted.Count(entry =>
+            entry.HappenedThisTurn(combatState)
+            && entry.CardPlay.Player == player
+            && entry.CardPlay.Card.Type == CardType.Attack
+            && entry.CardPlay.Resources.EnergyValue == 0);
+        if (actualStatusDraws > expectedStatusDraws
+            || actualZeroCostAttackStarts != expectedZeroCostAttackStarts)
+        {
+            throw new InvalidOperationException(
+                $"无法精确恢复本回合卡牌历史：状态牌={actualStatusDraws}/{expectedStatusDraws}，" +
+                $"零费攻击={actualZeroCostAttackStarts}/{expectedZeroCostAttackStarts}。");
+        }
+
+        PlayerCombatState playerState = player.PlayerCombatState
+            ?? throw new InvalidOperationException("replay-state 历史恢复时玩家没有战斗状态。");
+        CardModel statusCard = playerState.Hand.Cards
+            .Concat(playerState.DrawPile.Cards)
+            .Concat(playerState.DiscardPile.Cards)
+            .Concat(playerState.ExhaustPile.Cards)
+            .FirstOrDefault(card => card.Type == CardType.Status)
+            ?? combatState.CreateCard(
+                ModelDb.Card<MegaCrit.Sts2.Core.Models.Cards.Wound>(),
+                player);
+        for (int index = actualStatusDraws; index < expectedStatusDraws; index++)
+        {
+            CombatManager.Instance.History.Add(
+                combatState,
+                new CardDrawnEntry(
+                    statusCard,
+                    combatState.RoundNumber,
+                    combatState.CurrentSide,
+                    true,
+                    CombatManager.Instance.History,
+                    combatState.Players));
         }
     }
 
