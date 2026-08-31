@@ -207,6 +207,14 @@ internal sealed partial class CombatBeamSolver
                 selectedCandidate.PotionStrategicCost,
                 selectedCandidate.AmbergrisCount,
                 initialPlayerMaxHp);
+            if (potionPolicy == SolverPotionPolicy.Smart
+                && selectedCandidate.AmbergrisCount == 0
+                && potionFreeWon)
+            {
+                potionHpRequired = PotionUsePolicy.SmartRequiredHpSaved(
+                    potionHpRequired,
+                    potionFreeStrategicHpDeficit);
+            }
             if (potionPolicy == SolverPotionPolicy.RequireAtLeastOne)
             {
                 potionHpRequired = PotionUsePolicy.AdditionalRequiredUseStrategicHpCost(

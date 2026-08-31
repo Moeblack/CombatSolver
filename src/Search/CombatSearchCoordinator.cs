@@ -347,7 +347,7 @@ internal static class CombatSearchCoordinator
             && primary.Snapshot.ProjectedPlayerHp > 0;
         int primaryHpDeficit = StrategicHpDeficit(root, primary);
         if (root.SearchablePotionCount == 0
-            || primaryWon && primaryHpDeficit < SolverWeights.PotionMinimumHpSaved)
+            || primaryWon && primaryHpDeficit == 0)
         {
             return primary;
         }
@@ -410,6 +410,8 @@ internal static class CombatSearchCoordinator
             strategicHpCost,
             ambergrisCount,
             root.InitialPlayerMaxHp);
+        if (ambergrisCount == 0 && primaryWon)
+            hpRequired = PotionUsePolicy.SmartRequiredHpSaved(hpRequired, primaryHpDeficit);
         bool protectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
             && forcedPotion.OutstandingStolenResource < primary.OutstandingStolenResource;
         bool selectPotion = forcedWon
