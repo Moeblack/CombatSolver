@@ -5,7 +5,9 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Afflictions;
 using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Enchantments;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
@@ -655,6 +657,44 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("子分支卡牌变更污染了父 Hook listener 缓存。");
         }
 
+        childCard.MutablePreview.BaseReplayCount++;
+        if (!ReferenceEquals(childListenersAfter, childCombat.IterateHookListeners()))
+        {
+            throw new InvalidOperationException(
+                "不改变卡牌 listener 身份的字段写入错误重建了 Hook listener 缓存。");
+        }
+
+        PredictedCard attachedListenerProbe = PredictedCard.Create(ModelDb.Card<PommelStrike>(), player);
+        if (!childSimulator.AddToPile(attachedListenerProbe, PileType.Discard).Success)
+            throw new InvalidOperationException("卡牌附属 listener 测试无法加入生成牌。");
+        IEnumerable<AbstractModel> listenersBeforeEnchant = childCombat.IterateHookListeners();
+        attachedListenerProbe.Enchant(ModelDb.Enchantment<Clone>().ToMutable(), 1m);
+        EnchantmentModel enchantment = attachedListenerProbe.Preview.Enchantment
+            ?? throw new InvalidOperationException("卡牌附属 listener 测试没有添加附魔。");
+        IEnumerable<AbstractModel> listenersAfterEnchant = childCombat.IterateHookListeners();
+        if (ReferenceEquals(listenersBeforeEnchant, listenersAfterEnchant)
+            || !listenersAfterEnchant.Contains(enchantment))
+        {
+            throw new InvalidOperationException("新增附魔没有精确失效 Hook listener 缓存。");
+        }
+
+        AfflictionModel affliction = childSimulator.Afflict<Bound>(attachedListenerProbe, 1)
+            ?? throw new InvalidOperationException("卡牌附属 listener 测试没有添加苦难。");
+        IEnumerable<AbstractModel> listenersAfterAfflict = childCombat.IterateHookListeners();
+        if (ReferenceEquals(listenersAfterEnchant, listenersAfterAfflict)
+            || !listenersAfterAfflict.Contains(affliction))
+        {
+            throw new InvalidOperationException("新增苦难没有精确失效 Hook listener 缓存。");
+        }
+        attachedListenerProbe.ClearAffliction();
+        IEnumerable<AbstractModel> listenersAfterClear = childCombat.IterateHookListeners();
+        if (ReferenceEquals(listenersAfterAfflict, listenersAfterClear)
+            || listenersAfterClear.Contains(affliction))
+        {
+            throw new InvalidOperationException("清除苦难没有精确失效 Hook listener 缓存。");
+        }
+        childSimulator.RemoveFromCombat(attachedListenerProbe);
+
         if (!childState.Hand.Remove(childCard))
             throw new InvalidOperationException("预测卡牌所有权测试无法从子手牌移除卡牌。");
         childState.DiscardPile.Add(childCard);
@@ -663,8 +703,17 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("预测卡牌移动后没有保持父子牌堆所有权隔离。");
         }
-        if (!childState.DiscardPile.Remove(childCard) || childCard.GetPile(childState) is not null)
-            throw new InvalidOperationException("预测卡牌移除后没有清理牌堆反向引用。");
+
+        IEnumerable<AbstractModel> childListenersBeforeRemoval = childCombat.IterateHookListeners();
+        childSimulator.RemoveFromCombat(childCard);
+        IEnumerable<AbstractModel> childListenersAfterRemoval = childCombat.IterateHookListeners();
+        if (ReferenceEquals(childListenersBeforeRemoval, childListenersAfterRemoval)
+            || childListenersAfterRemoval.Contains(childCard.Preview)
+            || childCard.GetPile(childState) is not null)
+        {
+            throw new InvalidOperationException(
+                "卡牌移出战斗后没有精确失效 Hook listener 缓存或清理牌堆反向引用。");
+        }
 
         PredictedCard clearProbe = new(liveCard);
         SimCardPile clearPile = new(PileType.Hand, [clearProbe]);

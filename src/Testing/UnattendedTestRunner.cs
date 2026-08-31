@@ -127,6 +127,9 @@ internal sealed partial class UnattendedTestRunner
                 return RunCompletion.InitialSearchHeld;
             }
             _assertions.AssertAfterExecution(scenario, outcome);
+            // SolverResult test observations are required through the post-combat assertions,
+            // but must not survive into ReturnToMainMenu and the protocol's reuse Gen2.
+            SolverController.ReleaseUnattendedResultReferencesForTesting();
 
             SetStage("cleanup");
             await _host.ReturnToMainMenu();

@@ -78,6 +78,8 @@ internal sealed partial class UnattendedTestRunner
                 await InjectRelicAsync(runPlayer, injection);
             if (!string.IsNullOrWhiteSpace(request.RunSnapshotPath))
                 await ApplyRunSnapshotAsync(runState, runPlayer, request.RunSnapshotPath);
+            if (request.ClearRunDeck)
+                ClearRunDeck(runState, runPlayer);
             foreach (UnattendedCardInjection injection in request.RunCards)
                 await InjectRunCardAsync(runState, runPlayer, injection);
 

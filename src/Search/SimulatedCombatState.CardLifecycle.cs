@@ -355,7 +355,7 @@ internal sealed partial class SimulatedCombatState
                 for (int index = 0; index < power.Amount; index++)
                 {
                     PredictedCard copy = selected.CreateClone();
-                    copy.MutablePreview.ClearAfflictionInternal();
+                    copy.ClearAffliction();
                     copies.Add(copy);
                 }
                 simulator.AddGeneratedCardsToCombat(

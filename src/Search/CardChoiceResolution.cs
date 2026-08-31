@@ -170,6 +170,7 @@ internal static partial class CardChoiceSupport
 
         simulator.RemoveFromCombat(original);
         replacement.MutablePreview.HasBeenRemovedFromState = false;
+        replacement.NotifyHookListenerStructureChanged();
         pile.Insert(Math.Min(index, pile.Cards.Count), replacement);
         var generation = simulator.History.CardGenerated(
             replacement,

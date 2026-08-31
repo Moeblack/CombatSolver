@@ -3,8 +3,10 @@ using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Rooms;
+using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 
 namespace CombatSolver;
@@ -98,11 +100,19 @@ internal sealed class CombatRootSnapshot
             ?? throw new InvalidOperationException("找不到本地玩家。");
         PlayerCombatState playerState = player.PlayerCombatState
             ?? throw new InvalidOperationException("玩家没有战斗状态。");
-        LiveCombatStamp liveBefore = LiveCombatStamp.Capture(state);
+        AbstractModel[] liveCombatHookListeners = state.IterateHookListeners().ToArray();
+        if (liveCombatHookListeners.Any(PredictionModModelSupport.IsBaseLibCardModifier))
+        {
+            PredictionModModelSupport.RegisterBaseLibCardModifierOwners(
+                state.Players
+                    .Where(candidate => candidate.PlayerCombatState != null)
+                    .SelectMany(candidate => candidate.PlayerCombatState!.AllCards));
+        }
         ContinuationStamp continuationBefore = ContinuationStamp.CaptureLive(state);
+        LiveCombatStamp liveBefore = LiveCombatStamp.FromContinuation(continuationBefore);
         IntentForecast forecast = IntentForecaster.Build(state, SolverWeights.SetupValueHorizonTurns);
 
-        SimulatedCombatState simulatedCombat = new(state);
+        SimulatedCombatState simulatedCombat = new(state, liveCombatHookListeners);
         CombatPredictionSimulator simulator = new(simulatedCombat);
         ContinuationStamp projected = ContinuationStamp.CapturePredicted(
             player,
@@ -120,8 +130,8 @@ internal sealed class CombatRootSnapshot
                 continuationBefore.DescribeFirstDifference(projected));
         }
 
-        LiveCombatStamp liveAfter = LiveCombatStamp.Capture(state);
         ContinuationStamp continuationAfter = ContinuationStamp.CaptureLive(state);
+        LiveCombatStamp liveAfter = LiveCombatStamp.FromContinuation(continuationAfter);
         if (!string.Equals(liveBefore.StateText, liveAfter.StateText, StringComparison.Ordinal)
             || !string.Equals(
                 continuationBefore.StateText,

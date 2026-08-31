@@ -34,7 +34,11 @@ internal static class CombatPredictedCardExtensions
     // Mirrors CardModel.CreateClone, but returns a PredictedCard instead of a CardModel.
     public static PredictedCard CreateClone(this PredictedCard card)
     {
-        var clonedCard = PredictionUtils.CloneModelForSimulation(card.Preview);
+        var clonedCard = PredictionUtils.CloneCardStateForSimulation(card.Preview);
+        // CloneCardStateForSimulation restores these fields for prediction COW. Gameplay
+        // CardModel.CreateClone instead keeps the reset values from CardModel.AfterCloned.
+        clonedCard.DeckVersion = null;
+        clonedCard.HasBeenRemovedFromState = false;
         clonedCard._cloneOf = card.Original;
         clonedCard.ExhaustOnNextPlay = false;
         return PredictedCard.FromGenerated(clonedCard);
@@ -55,7 +59,7 @@ internal static class CombatPredictedCardExtensions
     {
         PredictedCard source = card;
         if (card.Preview.IsDupe && card.Preview.DupeOf is { } original)
-            source = PredictedCard.FromGenerated(PredictionUtils.CloneModelForSimulation(original));
+            source = PredictedCard.FromGenerated(PredictionUtils.CloneCardStateForSimulation(original));
         PredictedCard dupe = source.CreateCloneForPlayer(player);
         dupe.MutablePreview.IsDupe = true;
         dupe.MutablePreview.RemoveKeyword(CardKeyword.Exhaust);
@@ -71,6 +75,7 @@ internal static class CombatPredictedCardExtensions
         previewCard.Affliction = affliction;
         previewCard.Affliction.Card = previewCard;
         previewCard.Affliction._amount = (int)amount;
+        card.NotifyHookListenerStructureChanged();
     }
 
     // Mirrors CardModel.ClearAfflictionInternal without firing live-model side effects.
@@ -81,6 +86,7 @@ internal static class CombatPredictedCardExtensions
             var previewCard = card.MutablePreview;
             previewCard.Affliction!.ClearInternal();
             previewCard.Affliction = null;
+            card.NotifyHookListenerStructureChanged();
         }
     }
 

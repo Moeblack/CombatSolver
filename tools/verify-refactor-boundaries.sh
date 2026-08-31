@@ -212,7 +212,7 @@ EOF
 search_gc_policy_path="$repository_root/src/Runtime/SearchGcPolicy.cs"
 for gc_chain_rule in \
     'return WaitForReclaimChainAsync(_reclaimTask)' \
-    'failure == null && _reclaimRequired'; do
+    'failure == null && (_regionExitRequired || _reclaimRequired)'; do
     require_fixed "$search_gc_policy_path" "$gc_chain_rule" 'missing serialized reclaim-chain rule'
 done
 forbid_fixed \

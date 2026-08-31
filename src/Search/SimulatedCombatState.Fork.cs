@@ -113,7 +113,7 @@ internal sealed partial class SimulatedCombatState
         if (fork._registeredCombatCards is not null)
         {
             foreach (PredictedCard card in fork._registeredCombatCards)
-                card.SetMutationObserver(fork.InvalidateBaseHookListenersObserver);
+                fork.ObserveCardMutations(card);
         }
         fork._generatedCombatCards = ForkCardList(_generatedCombatCards, context);
 

@@ -407,6 +407,7 @@ internal sealed partial class CombatPredictionSimulator
             ?? throw new InvalidOperationException("Cannot remove card from combat because it is not in a pile.");
         pile.Remove(card);
         card.MutablePreview.HasBeenRemovedFromState = true;
+        card.NotifyHookListenerStructureChanged();
         if (State.CombatState is ICombatPredictionCardEventSink eventSink)
             eventSink.AfterCardRemovedFromCombat(card);
     }
@@ -434,6 +435,7 @@ internal sealed partial class CombatPredictionSimulator
             // Vanilla dispatches Hook.AfterCardChangedPiles here, which is not mirrored for the same reasons
             // as in AddToPile.
             card.MutablePreview.HasBeenRemovedFromState = true;
+            card.NotifyHookListenerStructureChanged();
             if (State.CombatState is ICombatPredictionCardEventSink eventSink)
                 eventSink.AfterCardRemovedFromCombat(card);
         }
@@ -458,6 +460,7 @@ internal sealed partial class CombatPredictionSimulator
 
         oldPile.Remove(card);
         card.MutablePreview.GiveToAnotherPlayer(newOwner);
+        card.NotifyHookListenerStructureChanged();
         AddToPile(card, pileType, position, isChangingOwners: true);
     }
 }

@@ -306,17 +306,20 @@ internal sealed record ContinuationStamp(string StateText)
     {
         text.Append(';').Append(marker).Append('=');
         foreach (CardModel card in pile.Cards)
-            AppendCard(text, card);
+            AppendCard(text, card, discoverUnregisteredBaseLibModifiers: true);
     }
 
     private static void AppendPredictedPile(StringBuilder text, SimCardPile pile, char marker)
     {
         text.Append(';').Append(marker).Append('=');
         foreach (PredictedCard card in pile.Cards)
-            AppendCard(text, card.Preview);
+            AppendCard(text, card.Preview, discoverUnregisteredBaseLibModifiers: false);
     }
 
-    private static void AppendCard(StringBuilder text, CardModel card)
+    private static void AppendCard(
+        StringBuilder text,
+        CardModel card,
+        bool discoverUnregisteredBaseLibModifiers)
     {
         text.Append(card.Id.Entry).Append('+').Append(card.CurrentUpgradeLevel)
             .Append('/').Append(card.EnergyCost.CostsX).Append(':')
@@ -366,6 +369,12 @@ internal sealed record ContinuationStamp(string StateText)
                 text.Append('-');
                 break;
         }
+        text.Append("/baselib=");
+        if (!PredictionModModelSupport.AppendBaseLibCardModifierState(
+                text,
+                card,
+                discoverUnregisteredBaseLibModifiers))
+            text.Append('-');
         text.Append(',');
     }
 

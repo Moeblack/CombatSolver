@@ -847,6 +847,14 @@ internal sealed partial class CombatBeamSolver
         if (card.TryGetCachedFingerprint(out ulong cachedFirst, out ulong cachedSecond))
             return new StateFingerprint(cachedFirst, cachedSecond);
         SearchMeasurement measurement = _run.Performance.Begin();
+        StateFingerprint fingerprint = CaptureCardStateFingerprintForTesting(card);
+        card.SetCachedFingerprint(fingerprint.First, fingerprint.Second);
+        _run.Performance.End(SearchMetricPhase.CardFingerprintMiss, measurement);
+        return fingerprint;
+    }
+
+    internal static StateFingerprint CaptureCardStateFingerprintForTesting(PredictedCard card)
+    {
         CardModel preview = card.Preview;
         StateFingerprintBuilder key = new();
         key.Add(preview.Id.Entry);
@@ -887,10 +895,41 @@ internal sealed partial class CombatBeamSolver
                 key.Add(scythe.IncreasedDamage);
                 break;
         }
-        StateFingerprint fingerprint = key.Finish();
-        card.SetCachedFingerprint(fingerprint.First, fingerprint.Second);
-        _run.Performance.End(SearchMetricPhase.CardFingerprintMiss, measurement);
-        return fingerprint;
+        if (card.HasExternallyMutableAttachedModels)
+            AppendBaseLibCardModifiers(ref key, preview);
+        return key.Finish();
+    }
+
+    private static void AppendBaseLibCardModifiers(
+        ref StateFingerprintBuilder key,
+        CardModel card)
+    {
+        List<AbstractModel> modifiers = [];
+        PredictionModModelSupport.AppendCardAttachedListeners(card, modifiers);
+        key.Add('M');
+        key.Add(modifiers.Count);
+        foreach (AbstractModel modifier in modifiers)
+        {
+            Type type = modifier.GetType();
+            key.Add(type.Assembly.GetName().Name);
+            key.Add(type.FullName);
+            BaseLibCardModifierFingerprintState state =
+                PredictionModModelSupport.CaptureBaseLibCardModifierFingerprintState(modifier);
+            key.Add(state.Amount);
+            key.Add(state.Priority);
+            key.Add(state.IntProperties.Length);
+            foreach ((string name, int value) in state.IntProperties)
+            {
+                key.Add(name);
+                key.Add(value);
+            }
+            key.Add(state.AdditionalProperties.Length);
+            foreach ((string name, string value) in state.AdditionalProperties)
+            {
+                key.Add(name);
+                key.Add(value);
+            }
+        }
     }
 
     private void AppendPile(ref StateFingerprintBuilder key, SimCardPile pile, char marker)

@@ -195,6 +195,119 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("已取消搜索的回调重新写入了控制器状态。");
         }
+
+        long priorReleaseDeadline = System.Environment.TickCount64 + 30_000;
+        while (SolverController.PendingSearchReferenceReleaseCountForTesting != 0)
+        {
+            if (System.Environment.TickCount64 >= priorReleaseDeadline)
+                throw new TimeoutException("前一项取消搜索在 30 秒内没有释放 worker+callback 引用。");
+            await NextFrameAsync();
+        }
+
+        int releasesScheduledBefore =
+            SolverController.SearchReferenceReleaseScheduledCountForTesting;
+        int releasesCompletedBefore =
+            SolverController.SearchReferenceReleaseCompletedCountForTesting;
+        int cancellationsDisposedBefore =
+            SolverController.SearchCtsDisposeCountForTesting;
+        TaskCompletionSource deferredVisualSetupCompletion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        bool staleDeferredOperationRan = false;
+        _ = SolverController.StartCombatDeferredOperation(async token =>
+        {
+            await deferredVisualSetupCompletion.Task;
+            token.ThrowIfCancellationRequested();
+            staleDeferredOperationRan = true;
+        });
+        SolverController.RequestSearch(host, combat, SearchReason.Manual);
+        if (!SolverController.IsSearching)
+            throw new InvalidOperationException("搜索 A 没有建立控制器会话。");
+        SolverController.RequestSearch(host, combat, SearchReason.Manual);
+        if (!SolverController.IsSearching)
+            throw new InvalidOperationException("搜索 B 没有替换搜索 A。");
+        int staleTurnSetupGeneration = SolverController.CombatLifecycleGeneration;
+        SolverController.Reset("unattended_search_replacement_release");
+        SolverController.ReleaseUnattendedResultReferencesForTesting();
+        if (SolverController.LastCompletedResultForTesting != null
+            || SolverController.LastTurnSetupResultForTesting != null
+            || SolverController.LastSearchFailureForTesting != null)
+        {
+            throw new InvalidOperationException(
+                "最终断言后仍由无人测试观察字段保留上一场 SolverResult 图。");
+        }
+        if (SolverController.RecordTurnSetupFailure(
+                combat,
+                staleTurnSetupGeneration,
+                new InvalidOperationException("stale turn setup failure"))
+            || SolverController.RecordTurnSetupStateMismatch(
+                combat,
+                staleTurnSetupGeneration,
+                "stale turn setup mismatch"))
+        {
+            throw new InvalidOperationException(
+                "Reset 后的旧回合准备完成仍写入了新控制器生命周期。");
+        }
+        Task referenceRelease = SolverController.LastCombatReferenceReleaseForTesting;
+        long releaseDeadline = System.Environment.TickCount64 + 30_000;
+        while (SolverController.SearchReferenceReleaseCompletedCountForTesting
+               - releasesCompletedBefore < 2)
+        {
+            if (System.Environment.TickCount64 >= releaseDeadline)
+                throw new TimeoutException("搜索 A/B 在 30 秒内没有释放 worker+callback 引用。");
+            await NextFrameAsync();
+        }
+        if (referenceRelease.IsCompleted)
+        {
+            throw new InvalidOperationException(
+                "Reset 引用屏障没有等待回合开始 visual-setup 延迟任务。");
+        }
+        deferredVisualSetupCompletion.TrySetResult();
+        while (!referenceRelease.IsCompleted)
+        {
+            if (System.Environment.TickCount64 >= releaseDeadline)
+            {
+                throw new TimeoutException(
+                    "搜索 A/B 在 Reset 后 30 秒内没有越过 worker+callback 引用释放屏障。");
+            }
+            await NextFrameAsync();
+        }
+        await referenceRelease;
+        if (staleDeferredOperationRan)
+            throw new InvalidOperationException("已取消的旧战斗延迟任务仍在 Reset 后执行。");
+        int releasesScheduled =
+            SolverController.SearchReferenceReleaseScheduledCountForTesting
+            - releasesScheduledBefore;
+        int releasesCompleted =
+            SolverController.SearchReferenceReleaseCompletedCountForTesting
+            - releasesCompletedBefore;
+        int cancellationsDisposed =
+            SolverController.SearchCtsDisposeCountForTesting
+            - cancellationsDisposedBefore;
+        if (releasesScheduled != 2
+            || releasesCompleted != 2
+            || cancellationsDisposed != 2)
+        {
+            throw new InvalidOperationException(
+                $"搜索 A/B 的 Reset 引用释放不完整：scheduled={releasesScheduled} " +
+                $"completed={releasesCompleted} cts_disposed={cancellationsDisposed}。");
+        }
+
+        var deploymentLifecycle =
+            await SolverController.ExerciseDeploymentSessionLifecycleForTestingAsync();
+        if (!deploymentLifecycle.StaleCompletionPreservedCurrentSession
+            || !deploymentLifecycle.BarrierWaitedForBothOperations
+            || deploymentLifecycle.ReleasesScheduled != 2
+            || deploymentLifecycle.ReleasesCompleted != 2
+            || deploymentLifecycle.CancellationsDisposed != 2)
+        {
+            throw new InvalidOperationException(
+                $"部署 A/B 的 Reset 引用释放不完整：" +
+                $"stale_preserved={deploymentLifecycle.StaleCompletionPreservedCurrentSession} " +
+                $"barrier_waited={deploymentLifecycle.BarrierWaitedForBothOperations} " +
+                $"scheduled={deploymentLifecycle.ReleasesScheduled} " +
+                $"completed={deploymentLifecycle.ReleasesCompleted} " +
+                $"cts_disposed={deploymentLifecycle.CancellationsDisposed}。");
+        }
     }
 
     private static void AssertBugReportAutomaticClassification()

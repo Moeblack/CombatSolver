@@ -9,6 +9,7 @@ internal sealed class SimCardPile
     private bool _hasCachedFingerprint;
     private ulong _cachedFingerprintFirst;
     private ulong _cachedFingerprintSecond;
+    private bool _fingerprintCacheDisabled;
 
     public PileType Type { get; }
 
@@ -94,11 +95,13 @@ internal sealed class SimCardPile
     {
         first = _cachedFingerprintFirst;
         second = _cachedFingerprintSecond;
-        return _hasCachedFingerprint;
+        return !_fingerprintCacheDisabled && _hasCachedFingerprint;
     }
 
     internal void SetCachedFingerprint(ulong first, ulong second)
     {
+        if (_fingerprintCacheDisabled)
+            return;
         _cachedFingerprintFirst = first;
         _cachedFingerprintSecond = second;
         _hasCachedFingerprint = true;
@@ -106,6 +109,12 @@ internal sealed class SimCardPile
 
     internal void InvalidateFingerprint()
     {
+        _hasCachedFingerprint = false;
+    }
+
+    internal void DisableFingerprintCache()
+    {
+        _fingerprintCacheDisabled = true;
         _hasCachedFingerprint = false;
     }
 

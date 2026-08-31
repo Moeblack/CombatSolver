@@ -27,6 +27,7 @@ internal static class PredictedCardExtensions
         if (enchantment.CanEnchant(card.Preview))
         {
             PredictionUtils.EnchantCard(enchantment, card.MutablePreview, amount);
+            card.NotifyHookListenerStructureChanged();
         }
 
         return card;

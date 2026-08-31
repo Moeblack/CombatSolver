@@ -110,6 +110,7 @@ internal static class PlayerTurnSetupCoordinator
         IReadOnlyList<PlanCardChoice>? replayChoices)
     {
         public CombatState Combat { get; } = combat;
+        public int LifecycleGeneration { get; } = SolverController.CombatLifecycleGeneration;
         public Player Player { get; } = player;
         public NativeChoiceSession Choices { get; } = choices;
         public CancellationToken Token { get; } = token;
@@ -122,6 +123,7 @@ internal static class PlayerTurnSetupCoordinator
         public bool ReplayDrivingStarted { get; set; }
         public bool ReplaySurfacePrepared { get; set; }
         public bool DeployAfterSetup { get; set; }
+        public int DisposeState;
         public IReadOnlyList<PlanCardChoice>? PlannedChoices
             => ReplayChoices ?? Result?.TurnSetupChoices;
         public TaskCompletionSource PlanReady { get; } = new(
@@ -151,7 +153,24 @@ internal static class PlayerTurnSetupCoordinator
     [ThreadStatic]
     private static bool _invokingOriginalAutoPrePlay;
     private static CancellationTokenSource? _cancellation;
+    private static CancellationTokenSource? _deferredSetupCancellation;
     private static ActivePlan? _active;
+    private static Task _activeOperation = Task.CompletedTask;
+
+    private static bool IsCurrentActivePlan(ActivePlan active)
+        => ReferenceEquals(_active, active)
+           && !active.Token.IsCancellationRequested
+           && SolverController.IsCurrentCombatLifecycle(
+               active.Combat,
+               active.LifecycleGeneration);
+
+    private static bool CanPublishForPlan(ActivePlan active)
+        => !active.Token.IsCancellationRequested
+           && SolverController.IsCurrentCombatLifecycle(
+               active.Combat,
+               active.LifecycleGeneration)
+           && (ReferenceEquals(_active, active)
+               || (_active == null && Volatile.Read(ref active.DisposeState) != 0));
 
     public static bool TryInterceptSetup(
         CombatManager manager,
@@ -162,6 +181,7 @@ internal static class PlayerTurnSetupCoordinator
     {
         task = null;
         if (_invokingOriginalSetup
+            || !_activeOperation.IsCompleted
             || !Entry.Enabled
             || SolverController.SolverDisabled
             || SolverController.AutomaticSearchPaused
@@ -187,7 +207,15 @@ internal static class PlayerTurnSetupCoordinator
             return false;
         }
 
-        task = RunSetupAsync(manager, turnState, player, choiceContext, combat, replayChoices);
+        Task operation = RunSetupAsync(
+            manager,
+            turnState,
+            player,
+            choiceContext,
+            combat,
+            replayChoices);
+        _activeOperation = operation;
+        task = operation;
         if (UnattendedAsyncActivityTracker.IsRequestActive)
             task = UnattendedAsyncActivityTracker.Track(task);
         return true;
@@ -204,25 +232,38 @@ internal static class PlayerTurnSetupCoordinator
         task = null;
         if (_invokingOriginalAutoPrePlay
             || _active is not { } active
+            || !IsCurrentActivePlan(active)
             || !ReferenceEquals(active.Player, player)
             || !ReferenceEquals(active.Combat, manager.DebugOnlyGetState()))
         {
             return false;
         }
-        task = RunAutoPrePlayAsync(manager, turnState, choiceContext, setupTask, player, active);
+        Task operation = RunAutoPrePlayAsync(
+            manager,
+            turnState,
+            choiceContext,
+            setupTask,
+            player,
+            active);
+        _activeOperation = operation;
+        task = operation;
         if (UnattendedAsyncActivityTracker.IsRequestActive)
             task = UnattendedAsyncActivityTracker.Track(task);
         return true;
     }
 
     public static bool IsManaging(CombatState combat)
-        => _active is { } active && ReferenceEquals(active.Combat, combat);
+        => _active is { } active
+           && IsCurrentActivePlan(active)
+           && ReferenceEquals(active.Combat, combat);
 
     public static bool IsSearching
-        => _active is { InitialSearch: not null, Result: null, SearchState: 1 };
+        => _deferredSetupCancellation != null
+           || _active is { InitialSearch: not null, Result: null, SearchState: 1 };
 
     public static bool HasPendingPlannedChoice(CombatState combat)
         => _active is { PlannedChoices: not null } active
+           && IsCurrentActivePlan(active)
            && ReferenceEquals(active.Combat, combat)
            && active.Choices.IsVisibleSurfaceOpen;
 
@@ -232,6 +273,7 @@ internal static class PlayerTurnSetupCoordinator
         bool deployAfterSetup)
     {
         if (_active is not { PlannedChoices: not null } active
+            || !IsCurrentActivePlan(active)
             || !ReferenceEquals(active.Combat, combat)
             || !active.Choices.IsVisibleSurfaceOpen)
         {
@@ -251,24 +293,53 @@ internal static class PlayerTurnSetupCoordinator
         return true;
     }
 
-    public static void Reset(string reason)
+    public static Task Reset(string reason)
     {
-        _cancellation?.Cancel();
-        _cancellation?.Dispose();
+        CancellationTokenSource? cancellation = _cancellation;
+        Task operation = _activeOperation;
+        cancellation?.Cancel();
         _cancellation = null;
+        if (cancellation != null)
+        {
+            Interlocked.CompareExchange(
+                ref _deferredSetupCancellation,
+                null,
+                cancellation);
+        }
+        _activeOperation = Task.CompletedTask;
         DisposeActive();
         if (SolverSettings.Current.EnableDetailedDiagnosticLogs)
             Entry.Logger.Info($"[CombatSolver/Debug] TURN_SETUP_RESET reason={reason}");
+        return ReleaseCancellationAfterOperationAsync(operation, cancellation);
+    }
+
+    private static async Task ReleaseCancellationAfterOperationAsync(
+        Task operation,
+        CancellationTokenSource? cancellation)
+    {
+        await operation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        cancellation?.Dispose();
     }
 
     public static void CancelForSolverDisabled()
     {
-        _cancellation?.Cancel();
+        // Before the solver core starts, cancellation would make Harmony return from the
+        // intercepted setup without ever invoking the game's original setup. Let the barrier
+        // open and take the main-thread native fallback instead.
+        if (!ReferenceEquals(_deferredSetupCancellation, _cancellation))
+            _cancellation?.Cancel();
         _active?.Choices.ReleaseVisibleSurface();
     }
 
     public static bool StopSearchByUser()
     {
+        if (ReferenceEquals(_deferredSetupCancellation, _cancellation)
+            && _deferredSetupCancellation != null)
+        {
+            // SolverController has already set AutomaticSearchPaused. The deferred callback
+            // observes that state and runs the native setup rather than starting a search.
+            return true;
+        }
         if (_active is not { InitialSearch: not null, Result: null, SearchState: 1 } active)
             return false;
         Interlocked.Exchange(ref active.SearchState, 2);
@@ -292,22 +363,160 @@ internal static class PlayerTurnSetupCoordinator
         _cancellation?.Cancel();
         _cancellation?.Dispose();
         _cancellation = new CancellationTokenSource();
+        CancellationTokenSource cancellation = _cancellation;
         CancellationToken token = _cancellation.Token;
+        Task rootCaptureBarrier = SearchGcPolicy.CaptureRootSnapshotBarrier();
+        if (!rootCaptureBarrier.IsCompleted)
+        {
+            NGame host = NGame.Instance
+                ?? throw new InvalidOperationException("回合准备根快照等待缺少游戏节点。");
+            SolverDispatcher.Ensure(host);
+            Entry.Logger.Info("[CombatSolver/Test] TURN_SETUP_ROOT_CAPTURE_DEFERRED");
+            _deferredSetupCancellation = cancellation;
+            try
+            {
+                await ResumeSetupAfterRootCaptureBarrierAsync(
+                    manager,
+                    turnState,
+                    player,
+                    choiceContext,
+                    combat,
+                    replayChoices,
+                    rootCaptureBarrier,
+                    cancellation);
+            }
+            finally
+            {
+                Interlocked.CompareExchange(
+                    ref _deferredSetupCancellation,
+                    null,
+                    cancellation);
+            }
+            return;
+        }
+        await RunSetupAfterRootCaptureBarrierAsync(
+            manager,
+            turnState,
+            player,
+            choiceContext,
+            combat,
+            replayChoices,
+            token);
+    }
+
+    private static async Task ResumeSetupAfterRootCaptureBarrierAsync(
+        CombatManager manager,
+        object turnState,
+        Player player,
+        HookPlayerChoiceContext choiceContext,
+        CombatState combat,
+        IReadOnlyList<PlanCardChoice>? replayChoices,
+        Task barrier,
+        CancellationTokenSource cancellation)
+    {
+        CancellationToken token = cancellation.Token;
+        try
+        {
+            await barrier.WaitAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            return;
+        }
+
+        TaskCompletionSource<Task> dispatched = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        SolverDispatcher.Post(() =>
+        {
+            Interlocked.CompareExchange(
+                ref _deferredSetupCancellation,
+                null,
+                cancellation);
+            if (token.IsCancellationRequested
+                || !ReferenceEquals(_cancellation, cancellation)
+                || !ReferenceEquals(manager.DebugOnlyGetState(), combat))
+            {
+                dispatched.TrySetResult(Task.CompletedTask);
+                return;
+            }
+            try
+            {
+                if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
+                {
+                    Entry.Logger.Info(
+                        "[CombatSolver/Test] TURN_SETUP_ROOT_CAPTURE_FALLBACK reason=solver_inactive");
+                    dispatched.TrySetResult(InvokeOriginalSetupAsync(
+                        manager,
+                        turnState,
+                        player,
+                        choiceContext));
+                    return;
+                }
+                Entry.Logger.Info("[CombatSolver/Test] TURN_SETUP_ROOT_CAPTURE_RESUMED");
+                dispatched.TrySetResult(RunSetupAfterRootCaptureBarrierAsync(
+                    manager,
+                    turnState,
+                    player,
+                    choiceContext,
+                    combat,
+                    replayChoices,
+                    token));
+            }
+            catch (Exception ex)
+            {
+                dispatched.TrySetException(ex);
+            }
+        });
+
+        // A canceled setup still waits for this queued callback to drop its captured combat
+        // references. Once the callback begins the returned core task remains part of Reset's
+        // release barrier until it has fully unwound.
+        Task continuation = await dispatched.Task.ConfigureAwait(false);
+        await continuation.ConfigureAwait(false);
+    }
+
+    private static async Task RunSetupAfterRootCaptureBarrierAsync(
+        CombatManager manager,
+        object turnState,
+        Player player,
+        HookPlayerChoiceContext choiceContext,
+        CombatState combat,
+        IReadOnlyList<PlanCardChoice>? replayChoices,
+        CancellationToken token)
+    {
         InitialSearchContext? initialSearch = null;
         if (replayChoices == null)
         {
             try
             {
                 SolverSettingsSnapshot settings = SolverSettings.Capture();
-                initialSearch = new InitialSearchContext(
-                    SolverDisplayNames.Capture(combat),
+                SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
+                BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
+                SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
                     settings,
-                    BattleDamageTracker.Observe(combat),
-                    SolverController.CaptureSearchPolicy(
-                        settings,
-                        includeTurnSetup: true,
-                        theftPolicy: SolverController.ResolveTheftPolicy(combat)),
-                    CombatRootSnapshot.Capture(combat));
+                    includeTurnSetup: true,
+                    theftPolicy: SolverController.ResolveTheftPolicy(combat));
+                long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+                CombatRootSnapshot rootSnapshot;
+                try
+                {
+                    rootSnapshot = CombatRootSnapshot.Capture(combat);
+                }
+                finally
+                {
+                    SearchGcPolicy.ReportCombatLifecycleAllocation(
+                        Math.Max(
+                            0,
+                            GC.GetTotalAllocatedBytes(precise: false) - rootCaptureAllocatedAtStart),
+                        "turn_setup_root_snapshot");
+                }
+                initialSearch = new InitialSearchContext(
+                    displayNames,
+                    settings,
+                    battleDamage,
+                    searchPolicy,
+                    rootSnapshot);
             }
             catch
             {
@@ -350,6 +559,7 @@ internal static class PlayerTurnSetupCoordinator
         }
         LogSetupPowers(player, "before_original");
         Task originalSetup = InvokeOriginalSetupAsync(manager, turnState, player, choiceContext);
+        bool keepActiveForAutoPrePlay = false;
         try
         {
             if (initialSearch != null)
@@ -357,21 +567,51 @@ internal static class PlayerTurnSetupCoordinator
             else
                 await PrepareReplayChoiceSurfaceAsync(active, host, originalSetup, "setup");
             await active.Choices.AwaitPhaseAsync(originalSetup);
+            keepActiveForAutoPrePlay = true;
         }
         catch (OperationCanceledException) when (
-            SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
+            active.Token.IsCancellationRequested
+            || SolverController.SolverDisabled
+            || SolverController.AutomaticSearchPaused)
         {
-            active.Choices.ReleaseVisibleSurface();
-            await originalSetup;
+            if (ReferenceEquals(_active, active)
+                && SolverController.IsCurrentCombatLifecycle(
+                    active.Combat,
+                    active.LifecycleGeneration))
+            {
+                active.Choices.ReleaseVisibleSurface();
+            }
+            await originalSetup.ConfigureAwait(
+                ConfigureAwaitOptions.ContinueOnCapturedContext
+                | ConfigureAwaitOptions.SuppressThrowing);
+            DisposeActive(active);
             return;
         }
         catch (Exception ex)
         {
+            if (!CanPublishForPlan(active))
+            {
+                await originalSetup.ConfigureAwait(
+                    ConfigureAwaitOptions.ContinueOnCapturedContext
+                    | ConfigureAwaitOptions.SuppressThrowing);
+                DisposeActive(active);
+                return;
+            }
             SolverController.RecordTurnSetupFailure(
+                active.Combat,
+                active.LifecycleGeneration,
                 ex,
                 initialSearch?.SearchPolicy.MaxDegreeOfParallelism > 1);
-            DisposeActive();
+            DisposeActive(active);
             throw;
+        }
+        finally
+        {
+            await originalSetup.ConfigureAwait(
+                ConfigureAwaitOptions.ContinueOnCapturedContext
+                | ConfigureAwaitOptions.SuppressThrowing);
+            if (!keepActiveForAutoPrePlay)
+                DisposeActive(active);
         }
     }
 
@@ -405,10 +645,11 @@ internal static class PlayerTurnSetupCoordinator
         Player player,
         ActivePlan active)
     {
+        Task original = Task.CompletedTask;
         try
         {
             _invokingOriginalAutoPrePlay = true;
-            Task original = (Task)(RunAutoPrePlayPhaseMethod.Invoke(
+            original = (Task)(RunAutoPrePlayPhaseMethod.Invoke(
                 manager,
                 [turnState, choiceContext, setupTask, player])
                 ?? throw new InvalidOperationException("RunAutoPrePlayPhase 没有返回任务。"));
@@ -420,7 +661,11 @@ internal static class PlayerTurnSetupCoordinator
             else
                 await PrepareReplayChoiceSurfaceAsync(active, host, original, "auto_pre_play");
             await active.Choices.AwaitPhaseAsync(original);
+            if (!IsCurrentActivePlan(active))
+                return;
             await active.Choices.CompleteAsync();
+            if (!IsCurrentActivePlan(active))
+                return;
             LogSetupPowers(player, "after_original");
 
             if (active.ReplayChoices != null)
@@ -432,10 +677,11 @@ internal static class PlayerTurnSetupCoordinator
                       $"choices={active.ReplayChoices.Count} search=false"
                     : $"[CombatSolver/Test] TURN_SETUP_PLAYER_CHOICE_COMPLETED turn={player.PlayerCombatState!.TurnNumber} " +
                       "search=false");
-                DisposeActive();
+                DisposeActive(active);
                 await SolverController.ResumeAfterTurnSetupAsync(
                     host,
                     active.Combat,
+                    active.LifecycleGeneration,
                     player.PlayerCombatState.TurnNumber,
                     deployWhenReady: deployAfterSetup,
                     waitForDeploymentDelay: solverDriven
@@ -447,28 +693,35 @@ internal static class PlayerTurnSetupCoordinator
             {
                 Entry.Logger.Info(
                     $"[CombatSolver/Test] TURN_SETUP_NO_VISIBLE_CHOICE turn={player.PlayerCombatState!.TurnNumber}");
-                DisposeActive();
+                DisposeActive(active);
                 await SolverController.ResumeAfterTurnSetupAsync(
                     host,
                     active.Combat,
+                    active.LifecycleGeneration,
                     player.PlayerCombatState.TurnNumber,
                     waitForDeploymentDelay: SolverController.FullAutoEnabled);
                 return;
             }
 
+            if (!IsCurrentActivePlan(active))
+                return;
             ContinuationStamp actual = ContinuationStamp.CaptureLive(active.Combat);
             ContinuationStamp expected = active.Result.TurnSetupPlayState
                 ?? throw new InvalidOperationException("回合准备选牌搜索缺少 Play 阶段状态戳。");
             if (expected != actual)
             {
-                SolverController.RecordTurnSetupStateMismatch(expected.DescribeFirstDifference(actual));
+                SolverController.RecordTurnSetupStateMismatch(
+                    active.Combat,
+                    active.LifecycleGeneration,
+                    expected.DescribeFirstDifference(actual));
                 Entry.Logger.Warn(
                     $"[CombatSolver/Test] TURN_SETUP_STATE_MISMATCH turn={player.PlayerCombatState!.TurnNumber} " +
                     expected.DescribeFirstDifference(actual));
-                DisposeActive();
+                DisposeActive(active);
                 await SolverController.ResumeAfterTurnSetupAsync(
                     host,
                     active.Combat,
+                    active.LifecycleGeneration,
                     player.PlayerCombatState.TurnNumber);
                 return;
             }
@@ -476,23 +729,39 @@ internal static class PlayerTurnSetupCoordinator
                 $"[CombatSolver/Test] TURN_SETUP_STATE_MATCH turn={player.PlayerCombatState!.TurnNumber} " +
                 "validation=exact_state_text");
             bool deployInitialResult = active.DeployAfterSetup;
-            DisposeActive();
-            if (!SolverController.ActivateTurnSetupResult(host, active.Combat, active.Result))
+            DisposeActive(active);
+            if (!SolverController.ActivateTurnSetupResult(
+                    host,
+                    active.Combat,
+                    active.LifecycleGeneration,
+                    active.Result))
                 throw new InvalidOperationException("回合准备搜索结果在精确状态匹配后仍无法激活。");
             if (deployInitialResult && !SolverController.FullAutoEnabled)
                 SolverController.StartDeploymentAfterTurnSetup(host, active.Combat, active.Result);
         }
+        catch (OperationCanceledException) when (
+            active.Token.IsCancellationRequested || !CanPublishForPlan(active))
+        {
+            return;
+        }
         catch (Exception ex)
         {
+            if (!CanPublishForPlan(active))
+                return;
             SolverController.RecordTurnSetupFailure(
+                active.Combat,
+                active.LifecycleGeneration,
                 ex,
                 active.InitialSearch?.SearchPolicy.MaxDegreeOfParallelism > 1);
             throw;
         }
         finally
         {
+            await original.ConfigureAwait(
+                ConfigureAwaitOptions.ContinueOnCapturedContext
+                | ConfigureAwaitOptions.SuppressThrowing);
             _invokingOriginalAutoPrePlay = false;
-            DisposeActive();
+            DisposeActive(active);
         }
     }
 
@@ -507,6 +776,8 @@ internal static class PlayerTurnSetupCoordinator
         InitialSearchContext initialSearch = active.InitialSearch
             ?? throw new InvalidOperationException("已有路线的回合准备不得启动新搜索。");
         if (!await active.Choices.WaitForFirstVisibleSurfaceAsync(host, phaseTask, active.Token))
+            return;
+        if (!IsCurrentActivePlan(active))
             return;
         if (Interlocked.CompareExchange(ref active.SearchState, 1, 0) != 0)
         {
@@ -549,7 +820,9 @@ internal static class PlayerTurnSetupCoordinator
             while (!solveTask.IsCompleted)
             {
                 SolverProgress? progress = Volatile.Read(ref active.Progress);
-                if (progress != null && !ReferenceEquals(progress, active.RenderedProgress))
+                if (progress != null
+                    && IsCurrentActivePlan(active)
+                    && !ReferenceEquals(progress, active.RenderedProgress))
                 {
                     active.RenderedProgress = progress;
                     SolverOverlay.ShowProgress(progress, deployWhenReady: false);
@@ -561,8 +834,17 @@ internal static class PlayerTurnSetupCoordinator
         }
         catch (OperationCanceledException)
         {
-            if (active.SearchState != 2 && ReferenceEquals(_active, active))
+            bool ownsCurrentLifecycle = ReferenceEquals(_active, active)
+                && SolverController.IsCurrentCombatLifecycle(
+                    active.Combat,
+                    active.LifecycleGeneration);
+            if (active.SearchState != 2 && ownsCurrentLifecycle)
                 SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
+            if (!ownsCurrentLifecycle)
+            {
+                active.PlanReady.TrySetResult();
+                return;
+            }
             if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
             {
                 active.Choices.ReleaseVisibleSurface();
@@ -574,12 +856,21 @@ internal static class PlayerTurnSetupCoordinator
         }
         catch (Exception ex)
         {
-            if (ReferenceEquals(_active, active))
-                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
+            if (!IsCurrentActivePlan(active))
+            {
+                active.PlanReady.TrySetResult();
+                return;
+            }
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
             active.PlanReady.TrySetException(ex);
             throw;
         }
 
+        if (!IsCurrentActivePlan(active))
+        {
+            active.PlanReady.TrySetResult();
+            return;
+        }
         if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
         {
             if (active.SearchState != 2 && ReferenceEquals(_active, active))
@@ -615,7 +906,7 @@ internal static class PlayerTurnSetupCoordinator
             return;
         if (!await active.Choices.WaitForFirstVisibleSurfaceAsync(host, phaseTask, active.Token))
             return;
-        if (active.ReplaySurfacePrepared)
+        if (!IsCurrentActivePlan(active) || active.ReplaySurfacePrepared)
             return;
 
         active.ReplaySurfacePrepared = true;
@@ -690,10 +981,14 @@ internal static class PlayerTurnSetupCoordinator
         active.Choices.SetPlanAndStartDriving(host, replayChoices, active.Token);
     }
 
-    private static void DisposeActive()
+    private static void DisposeActive(ActivePlan? expected = null)
     {
-        ActivePlan? active = _active;
-        _active = null;
-        active?.Choices.Dispose();
+        ActivePlan? active = expected ?? _active;
+        if (active == null)
+            return;
+        if (ReferenceEquals(_active, active))
+            _active = null;
+        if (Interlocked.Exchange(ref active.DisposeState, 1) == 0)
+            active.Choices.Dispose();
     }
 }
