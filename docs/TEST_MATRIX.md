@@ -19,6 +19,7 @@
 | `STRATEGY-REPLAY-FDDD-MEDIUM` | 通过（headless） | 严格组合永世沙漏报告同检查点的 `run-state` 与 `replay-state`，完整 `ContinuationStamp` 一致；Medium `24/60` Beam、Smart、DOP4、8GB No-GC 下首动独门技术，第 `4` 回合无药击杀，预计战损 `3`，追平并优于玩家 `6` 战损上界。当前源码回归 runId `3e1f05195228471bbea6cafaabcab1d7`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-0F7F-VERYHIGH-RETAIN-ROUTING` | 通过（headless） | 严格恢复蜂群术士报告首回合根及完整 RNG；VeryHigh、禁用药水、DOP4、8GB No-GC 下完整路线第 `13` 回合无药击杀，预计整场战损 `0`，从报告原求解器 `57` 追平人工 `0`。runId `34d0742df3c74ee6a9a5006eabf0ece2`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-9E8B-HIGH-ORB-LINEAGE` | 通过（headless） | 严格恢复胧光怪报告第二回合、寄生惧魔召唤物、球槽和球队列；High、Smart、DOP4、12GB No-GC 下首步电击，随后飞跃、防御+、防御，完整路线第 `9` 回合无药击杀，预计整场战损 `0`，从报告原求解器 `29` 追平人工 `0`。runId `d7c41a3e64d24fb792d2b45504222e25`。 | 2026-08-31 |
+| `STRATEGY-REPLAY-394B-HIGH-SHORT` | 通过（headless） | 严格恢复虔诚雕塑家报告第二回合根；High、禁用药水、DOP4 在 Short 阶段得到第 `4` 回合结束的 `0` 战损路线，从报告原求解器 `22` 追平人工 `0`。runId `75e243420b5b4f5ca48bc850a5e91ff2`。 | 2026-08-31 |
 
 ## 0.23.0
 
