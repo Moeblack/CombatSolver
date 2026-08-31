@@ -1,5 +1,7 @@
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Potions;
+using MegaCrit.Sts2.Core.Models.Relics;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 
@@ -50,10 +52,12 @@ internal sealed partial class SimulatedCombatState
         PotionModel potion = GetPotionAtSlot(player, slot)
             ?? throw new InvalidOperationException($"药水槽位 {slot} 已不可用。");
         (_potionSlots ??= [])[(player, slot)] = null;
+        bool renewablePotionShapedRock = potion is PotionShapedRock
+            && RelicsOf(player).OfType<PetrifiedToad>().Any(static relic => !relic.IsMelted);
         (_potionUses ??= []).Add(new PredictedPotionUse(
             slot,
             potion.Id.Entry,
-            PotionUsePolicy.StrategicHpCost(potion),
+            PotionUsePolicy.StrategicHpCost(potion, renewablePotionShapedRock),
             automatic));
         InvalidateBaseHookListeners();
     }

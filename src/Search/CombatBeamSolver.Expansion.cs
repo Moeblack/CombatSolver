@@ -115,8 +115,11 @@ internal sealed partial class CombatBeamSolver
     }
 
     internal IReadOnlyList<PlanAction> BuildOpeningPotionActions()
+        => BuildPotionActionsAfterPrefix([]);
+
+    internal IReadOnlyList<PlanAction> BuildPotionActionsAfterPrefix(IReadOnlyList<PlanAction> prefix)
     {
-        SimulationSnapshot rootSnapshot = Replay([]);
+        SimulationSnapshot rootSnapshot = Replay(prefix);
         List<SearchNode> children = [];
         try
         {
@@ -125,7 +128,7 @@ internal sealed partial class CombatBeamSolver
                 0,
                 rootSnapshot.PotionUseCount,
                 rootSnapshot.PotionStrategicCost,
-                _startTurnNumber,
+                rootSnapshot.Turn,
                 SearchRouteTraits.None,
                 0,
                 rootSnapshot.Score,
@@ -139,6 +142,7 @@ internal sealed partial class CombatBeamSolver
             children.AddRange(Expand(seed));
             return children
                 .Where(node => node.Action?.Kind == PlanActionKind.UsePotion)
+                .OrderByDescending(node => node.Score)
                 .Select(node => node.Action!)
                 .ToArray();
         }
@@ -148,6 +152,29 @@ internal sealed partial class CombatBeamSolver
                 child.Snapshot.ReleaseSimulator();
             rootSnapshot.ReleaseSimulator();
         }
+    }
+
+    internal IReadOnlyList<PlanAction> BuildPreferredOpeningPotionActions()
+        => BuildPreferredPotionActionsAfterPrefix([]);
+
+    internal IReadOnlyList<PlanAction> BuildPreferredPotionActionsAfterPrefix(
+        IReadOnlyList<PlanAction> prefix)
+    {
+        HashSet<uint> setupTargetIds = (_forecast.Rounds.FirstOrDefault() ?? [])
+            .Where(move => move.AttackHits.Count == 0 && move.Owner.CombatId.HasValue)
+            .Select(move => move.Owner.CombatId!.Value)
+            .ToHashSet();
+        List<PlanAction> selected = [];
+        foreach (IGrouping<int, PlanAction> slotActions in BuildPotionActionsAfterPrefix(prefix)
+                     .GroupBy(action => action.PotionSlot))
+        {
+            selected.Add(slotActions.First());
+            PlanAction? setupTargetAction = slotActions.FirstOrDefault(action =>
+                action.TargetCombatId is uint targetId && setupTargetIds.Contains(targetId));
+            if (setupTargetAction != null && !selected.Contains(setupTargetAction))
+                selected.Add(setupTargetAction);
+        }
+        return selected;
     }
 
     internal PlanAction? BuildOpeningPowerOffensiveFollowUp(PlanAction openingPower)
@@ -217,7 +244,7 @@ internal sealed partial class CombatBeamSolver
         {
             SearchNode seed = new(
                 null,
-                prefix.Count,
+                0,
                 prefixSnapshot.PotionUseCount,
                 prefixSnapshot.PotionStrategicCost,
                 prefixSnapshot.Turn,

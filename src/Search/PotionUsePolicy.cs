@@ -14,8 +14,11 @@ internal static class PotionUsePolicy
     public static int AdditionalRequiredUseStrategicHpCost(int strategicHpCost)
         => Math.Max(0, strategicHpCost - SolverWeights.PotionMinimumHpSaved);
 
-    public static int StrategicHpCost(PotionModel potion)
-        => potion.Rarity == PotionRarity.Token ? 0 : SolverWeights.PotionMinimumHpSaved;
+    public static int StrategicHpCost(PotionModel potion, bool renewablePotionShapedRock = false)
+        => potion.Rarity == PotionRarity.Token
+            || renewablePotionShapedRock && potion is PotionShapedRock
+                ? 0
+                : SolverWeights.PotionMinimumHpSaved;
 
     public static bool RequiresOpeningUse(PotionModel potion)
         => potion is DexterityPotion
@@ -27,11 +30,11 @@ internal static class PotionUsePolicy
             or SoldiersStew
             or StrengthPotion;
 
-    public static int StrategicHpCost(string potionId)
+    public static int StrategicHpCost(string potionId, bool renewablePotionShapedRock = false)
     {
         PotionModel potion = ModelDb.AllPotions.Single(candidate =>
             candidate.Id.Entry.Equals(potionId, StringComparison.Ordinal));
-        return StrategicHpCost(potion);
+        return StrategicHpCost(potion, renewablePotionShapedRock);
     }
 
     public static int HpSaved(int potionFreeHpDeficit, int potionRouteHpDeficit)
