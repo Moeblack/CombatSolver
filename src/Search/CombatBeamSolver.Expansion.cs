@@ -1764,13 +1764,20 @@ internal sealed partial class CombatBeamSolver
             baseline.Add(candidate.Node);
         _run.ActionAdmissionRepresentativesProtected += selected.Count(candidate =>
             !baseline.Contains(candidate.Node));
-        if (_detailedDiagnostics && parent.ActionCount == 0)
+        if (_detailedDiagnostics && parent.ActionCount <= 1)
         {
             policy.Diagnostics.Info(
-                $"[CombatSolver/Debug] ACTION_ADMISSION candidates={candidates.Count} " +
+                $"[CombatSolver/Debug] ACTION_ADMISSION prefix=" +
+                $"{string.Join('>', parent.Actions.Select(PolicyActionToken))} " +
+                $"candidates={candidates.Count} " +
                 $"limit={_profile.MaxCardBranchesPerNode} selected={selected.Count} " +
                 $"protected={selected.Count(candidate => !baseline.Contains(candidate.Node))} " +
-                $"families={string.Join(',', selected.Select(candidate => candidate.OptionFamilies))}");
+                $"portfolio={string.Join(',', selected.Select(candidate =>
+                    $"{candidate.Node.Action?.CardId ?? "-"}:{candidate.OptionFamilies}:" +
+                    $"{candidate.Node.Score:F0}/{candidate.NormalizedValue:F1}"))} " +
+                $"admissible={string.Join(',', candidates.Select(candidate =>
+                    $"{candidate.Node.Action?.CardId ?? "-"}:{candidate.OptionFamilies}:" +
+                    $"{candidate.Node.Score:F0}/{candidate.NormalizedValue:F1}"))}");
         }
         return selected;
     }
@@ -1799,6 +1806,8 @@ internal sealed partial class CombatBeamSolver
         if (after.Energy > before.Energy
             || after.Stars > before.Stars
             || after.HandCount >= before.HandCount
+            || after.ReachableHandValue > before.ReachableHandValue
+            || after.ZeroCostPlayableCount > before.ZeroCostPlayableCount
             || after.FutureResourceValue > before.FutureResourceValue
             || after.StrategicEffects.ResourcePotential > before.StrategicEffects.ResourcePotential
             || after.StrategicEffects.CardAccessPotential > before.StrategicEffects.CardAccessPotential
@@ -1872,6 +1881,8 @@ internal sealed partial class CombatBeamSolver
         if (after.Energy > before.Energy
             || after.Stars > before.Stars
             || after.HandCount >= before.HandCount
+            || after.ReachableHandValue > before.ReachableHandValue
+            || after.ZeroCostPlayableCount > before.ZeroCostPlayableCount
             || after.FutureResourceValue > before.FutureResourceValue)
         {
             traits |= SearchRouteTraits.Resource;
@@ -2027,6 +2038,16 @@ internal sealed partial class CombatBeamSolver
         if (frontier.TryAccept(next))
             return true;
         _run.TranspositionBranchesPruned++;
+        if (_detailedDiagnostics && candidate.ActionCount <= 2)
+        {
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Debug] TRANSPOSITION_REJECT route=" +
+                $"{string.Join('>', candidate.Actions.Select(PolicyActionToken))} " +
+                $"score={candidate.Score:F0} hp={candidate.Snapshot.ProjectedPlayerHp} " +
+                $"enemy={candidate.Snapshot.EnemyHp} hand=" +
+                $"{candidate.Snapshot.HandCount}/{candidate.Snapshot.ReachableHandValue}/" +
+                $"{candidate.Snapshot.ZeroCostPlayableCount}");
+        }
         return false;
     }
 

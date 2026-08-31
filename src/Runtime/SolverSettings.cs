@@ -106,19 +106,19 @@ internal static class SolverSettings
     private static readonly SolverPerformanceValues LowPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
-            BeamWidth: 12,
+            BeamWidth: 18,
             MaxExpandedNodes: 1_200,
-            MaxCardBranchesPerNode: 10,
-            MaxPileChoiceBranchesPerAction: 4,
-            MaxHandChoiceBranchesPerAction: 6,
+            MaxCardBranchesPerNode: 14,
+            MaxPileChoiceBranchesPerAction: 6,
+            MaxHandChoiceBranchesPerAction: 8,
             SoftTimeBudgetMilliseconds: 5_000),
         new SolverSearchProfile(
             SolverSearchPhase.Deep,
-            BeamWidth: 30,
+            BeamWidth: 45,
             MaxExpandedNodes: 6_000,
-            MaxCardBranchesPerNode: 16,
-            MaxPileChoiceBranchesPerAction: 8,
-            MaxHandChoiceBranchesPerAction: 10,
+            MaxCardBranchesPerNode: 24,
+            MaxPileChoiceBranchesPerAction: 12,
+            MaxHandChoiceBranchesPerAction: 16,
             SoftTimeBudgetMilliseconds: 60_000),
         NoGcRegionBudgetGigabytes: 6d);
     private static readonly SolverPerformanceValues MediumPerformance = new(
@@ -128,37 +128,37 @@ internal static class SolverSettings
     private static readonly SolverPerformanceValues HighPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
-            BeamWidth: 24,
+            BeamWidth: 36,
             MaxExpandedNodes: 5_000,
-            MaxCardBranchesPerNode: 20,
-            MaxPileChoiceBranchesPerAction: 10,
-            MaxHandChoiceBranchesPerAction: 12,
+            MaxCardBranchesPerNode: 30,
+            MaxPileChoiceBranchesPerAction: 16,
+            MaxHandChoiceBranchesPerAction: 20,
             SoftTimeBudgetMilliseconds: 12_000),
         new SolverSearchProfile(
             SolverSearchPhase.Deep,
-            BeamWidth: 60,
+            BeamWidth: 90,
             MaxExpandedNodes: 25_000,
-            MaxCardBranchesPerNode: 32,
-            MaxPileChoiceBranchesPerAction: 18,
-            MaxHandChoiceBranchesPerAction: 24,
+            MaxCardBranchesPerNode: 48,
+            MaxPileChoiceBranchesPerAction: 28,
+            MaxHandChoiceBranchesPerAction: 36,
             SoftTimeBudgetMilliseconds: 180_000),
         NoGcRegionBudgetGigabytes: 12d);
     private static readonly SolverPerformanceValues VeryHighPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
-            BeamWidth: 36,
+            BeamWidth: 54,
             MaxExpandedNodes: 10_000,
-            MaxCardBranchesPerNode: 30,
-            MaxPileChoiceBranchesPerAction: 16,
-            MaxHandChoiceBranchesPerAction: 20,
+            MaxCardBranchesPerNode: 45,
+            MaxPileChoiceBranchesPerAction: 24,
+            MaxHandChoiceBranchesPerAction: 30,
             SoftTimeBudgetMilliseconds: 20_000),
         new SolverSearchProfile(
             SolverSearchPhase.Deep,
-            BeamWidth: 90,
+            BeamWidth: 135,
             MaxExpandedNodes: 50_000,
-            MaxCardBranchesPerNode: 48,
-            MaxPileChoiceBranchesPerAction: 28,
-            MaxHandChoiceBranchesPerAction: 36,
+            MaxCardBranchesPerNode: 72,
+            MaxPileChoiceBranchesPerAction: 42,
+            MaxHandChoiceBranchesPerAction: 54,
             SoftTimeBudgetMilliseconds: 300_000),
         NoGcRegionBudgetGigabytes: 16d);
     private const string SettingsUri = "user://combat_solver_settings.json";

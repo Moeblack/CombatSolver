@@ -278,6 +278,8 @@ internal sealed partial class CombatBeamSolver
         int potionUseCount = combat.PotionUses.Count;
         int potionStrategicCost = combat.PotionUses.Sum(use => use.StrategicHpCost);
         int automaticPotionUseCount = combat.PotionUses.Count(use => use.Automatic);
+        (int reachableHandValue, int zeroCostPlayableCount) =
+            CalculateReachableHandPotential(simulator, combat, playerState);
 
         return new SimulationSnapshot(
             score,
@@ -331,6 +333,8 @@ internal sealed partial class CombatBeamSolver
             playerState.Stars,
             simulator.History.Entries.Count,
             playerState.Hand.Cards.Count,
+            reachableHandValue,
+            zeroCostPlayableCount,
             combat.CanTriggerArtOfWarNextTurn(_player),
             pocketwatchCardsPlayedThisTurn,
             pocketwatchCardsPlayedLastTurn,
@@ -344,6 +348,54 @@ internal sealed partial class CombatBeamSolver
             boundary,
             predictionGaps,
             simulator);
+    }
+
+    private static (int Value, int ZeroCostPlayableCount) CalculateReachableHandPotential(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        SimPlayerCombatState playerState)
+    {
+        List<(int Energy, int Stars, int Value)> playable = [];
+        int totalEnergyCost = 0;
+        int totalStarCost = 0;
+        int zeroCostPlayableCount = 0;
+        foreach (PredictedCard card in playerState.Hand.Cards)
+        {
+            if (!combat.CanPlayCard(simulator, card))
+                continue;
+            int energyCost = card.Preview.EnergyCost.CostsX
+                ? Math.Max(0, playerState.Energy)
+                : Math.Max(0, card.GetEnergyCostWithModifiers(simulator, playerState));
+            int starCost = card.Preview.HasStarCostX
+                ? Math.Max(0, playerState.Stars)
+                : Math.Max(0, card.GetStarCostWithModifiers(simulator, playerState));
+            int value = Math.Max(1, (int)Math.Ceiling(CardChoiceSupport.CardValue(card.Preview)));
+            playable.Add((energyCost, starCost, value));
+            totalEnergyCost += energyCost;
+            totalStarCost += starCost;
+            if (energyCost == 0
+                && starCost == 0
+                && !card.Preview.EnergyCost.CostsX
+                && !card.Preview.HasStarCostX)
+            {
+                zeroCostPlayableCount++;
+            }
+        }
+
+        int energyCapacity = Math.Min(Math.Max(0, playerState.Energy), totalEnergyCost);
+        int starCapacity = Math.Min(Math.Max(0, playerState.Stars), totalStarCost);
+        int[,] best = new int[energyCapacity + 1, starCapacity + 1];
+        foreach ((int energyCost, int starCost, int value) in playable)
+        {
+            for (int energy = energyCapacity; energy >= energyCost; energy--)
+            for (int stars = starCapacity; stars >= starCost; stars--)
+            {
+                best[energy, stars] = Math.Max(
+                    best[energy, stars],
+                    best[energy - energyCost, stars - starCost] + value);
+            }
+        }
+        return (best[energyCapacity, starCapacity], zeroCostPlayableCount);
     }
 
     private StateFingerprint BuildUnorderedPileKey(SimPlayerCombatState playerState)

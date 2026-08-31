@@ -322,6 +322,8 @@ internal sealed class SimulationSnapshot(
     int stars,
     int historyEntryCount,
     int handCount,
+    int reachableHandValue,
+    int zeroCostPlayableCount,
     bool canTriggerArtOfWarNextTurn,
     int pocketwatchCardsPlayedThisTurn,
     int pocketwatchCardsPlayedLastTurn,
@@ -393,6 +395,8 @@ internal sealed class SimulationSnapshot(
     public int Stars { get; } = stars;
     public int HistoryEntryCount { get; } = historyEntryCount;
     public int HandCount { get; } = handCount;
+    public int ReachableHandValue { get; } = reachableHandValue;
+    public int ZeroCostPlayableCount { get; } = zeroCostPlayableCount;
     public bool CanTriggerArtOfWarNextTurn { get; } = canTriggerArtOfWarNextTurn;
     public int PocketwatchCardsPlayedThisTurn { get; } = pocketwatchCardsPlayedThisTurn;
     public int PocketwatchCardsPlayedLastTurn { get; } = pocketwatchCardsPlayedLastTurn;

@@ -42,7 +42,7 @@
   --exit-on-complete
 ```
 
-Runner 同时断言 VeryHigh 的 Beam `36/90`、节点 `10000/50000`、出牌分支 `30/48` 和 No-GC `16,000,000,000 B` 均保持原设置。
+Runner 同时断言 VeryHigh 的 Beam `54/135`、节点 `10000/50000`、出牌分支 `45/72` 和 No-GC `16,000,000,000 B` 均保持原设置。
 
 ## Necrobinder 药水/高分支压力
 

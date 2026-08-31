@@ -131,6 +131,21 @@ internal sealed partial class CombatBeamSolver
         return string.IsNullOrEmpty(summary) ? "-" : summary;
     }
 
+    private static string SummarizeDiagnosticRoutes(
+        IEnumerable<SearchNode> nodes,
+        int limit)
+    {
+        string summary = string.Join(';', nodes
+            .Take(limit)
+            .Select(node =>
+                $"{string.Join('>', node.Actions.Select(PolicyActionToken))}:" +
+                $"score{node.Score:F0}:hp{node.Snapshot.ProjectedPlayerHp}:" +
+                $"enemy{node.Snapshot.EnemyHp}:hand{node.Snapshot.HandCount}/" +
+                $"{node.Snapshot.ReachableHandValue}/{node.Snapshot.ZeroCostPlayableCount}:" +
+                $"traits{node.Traits}"));
+        return string.IsNullOrEmpty(summary) ? "-" : summary;
+    }
+
     private static string SummarizePotionChoiceTargets(
         IEnumerable<SearchNode> nodes,
         string potionId)

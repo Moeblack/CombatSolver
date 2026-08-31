@@ -8,6 +8,7 @@ param(
     [string]$Sts2GameRoot = "D:\Steam\steamapps\common\Slay the Spire 2",
     [string]$RitsuWorkshopRoot = "D:\Steam\steamapps\workshop\content\2868840\3747602295",
     [string]$RunSnapshotPath = "",
+    [string]$ReplayStatePath = "",
     [string]$ProgressSnapshotPath = "",
     [ValidateRange(0, 10)]
     [int]$Ascension = 0,
@@ -449,7 +450,7 @@ function Test-ProcessMatchesHeadlessIdentity(
     if ($TestProcess.HasExited -or $TestProcess.ProcessName -ne "SlayTheSpire2") {
         return $false
     }
-    $actualExecutable = [IO.Path]::GetFullPath($TestProcess.Path)
+    $actualExecutable = Get-ProcessExecutablePath $TestProcess
     if (-not [string]::Equals(
             $actualExecutable,
             $ExpectedExecutable,
@@ -555,6 +556,19 @@ $resolvedRunSnapshotPath = if ([string]::IsNullOrWhiteSpace($RunSnapshotPath)) {
 } else {
     (Resolve-Path -LiteralPath $RunSnapshotPath).Path
 }
+
+function Get-ProcessExecutablePath([Diagnostics.Process]$TestProcess) {
+    $executable = $TestProcess.MainModule.FileName
+    if ([string]::IsNullOrWhiteSpace($executable)) {
+        throw "Process $($TestProcess.Id) did not expose its executable path."
+    }
+    return [IO.Path]::GetFullPath($executable)
+}
+$resolvedReplayStatePath = if ([string]::IsNullOrWhiteSpace($ReplayStatePath)) {
+    $null
+} else {
+    (Resolve-Path -LiteralPath $ReplayStatePath).Path
+}
 $runId = [Guid]::NewGuid().ToString("N")
 $replayStateCards = $null
 if (-not [string]::IsNullOrWhiteSpace($ReplayStateCardsPath)) {
@@ -606,6 +620,7 @@ $request = [ordered]@{
     characterId = $CharacterId
     encounterId = $EncounterId
     runSnapshotPath = $resolvedRunSnapshotPath
+    replayStatePath = $resolvedReplayStatePath
     ascension = $Ascension
     actIndexForTest = $ActIndexForTest
     markEncounterAsSecondBossForTest = $MarkEncounterAsSecondBossForTest.IsPresent
@@ -1044,7 +1059,7 @@ if (-not $reusedProcess) {
         if ($process.HasExited -or $process.ProcessName -ne "SlayTheSpire2") {
             throw "Started process exited or did not expose the expected game process."
         }
-        $processActualExecutable = [IO.Path]::GetFullPath($process.Path)
+        $processActualExecutable = Get-ProcessExecutablePath $process
     } catch {
         $launchError = $_
         if ($startedHere) {

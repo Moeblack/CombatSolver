@@ -28,10 +28,10 @@ internal sealed partial class UnattendedTestRunner
         (int ShortMs, int DeepMs, int ShortBeam, int DeepBeam, int ShortNodes, int DeepNodes,
             int ShortBranches, int DeepBranches, long NoGcBytes) expected = preset switch
         {
-            SolverPerformancePreset.Low => (5_000, 60_000, 12, 30, 1_200, 6_000, 10, 16, 6_000_000_000L),
-            SolverPerformancePreset.Medium => (8_000, 120_000, 18, 45, 2_400, 12_000, 14, 24, 8_000_000_000L),
-            SolverPerformancePreset.High => (12_000, 180_000, 24, 60, 5_000, 25_000, 20, 32, 12_000_000_000L),
-            SolverPerformancePreset.VeryHigh => (20_000, 300_000, 36, 90, 10_000, 50_000, 30, 48, 16_000_000_000L),
+            SolverPerformancePreset.Low => (5_000, 60_000, 18, 45, 1_200, 6_000, 14, 24, 6_000_000_000L),
+            SolverPerformancePreset.Medium => (8_000, 120_000, 24, 60, 2_400, 12_000, 20, 32, 8_000_000_000L),
+            SolverPerformancePreset.High => (12_000, 180_000, 36, 90, 5_000, 25_000, 30, 48, 12_000_000_000L),
+            SolverPerformancePreset.VeryHigh => (20_000, 300_000, 54, 135, 10_000, 50_000, 45, 72, 16_000_000_000L),
             _ => throw new ArgumentOutOfRangeException(nameof(preset)),
         };
         if (snapshot.ShortProfile.SoftTimeBudgetMilliseconds != expected.ShortMs

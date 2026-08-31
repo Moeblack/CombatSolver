@@ -383,7 +383,8 @@ internal sealed partial class CombatBeamSolver
                 {
                     policy.Diagnostics.Info(
                         $"[CombatSolver/Debug] ROOT_DEPTH_POTIONS depth={playDepth + 1} " +
-                        $"frontier={SummarizePotionCandidates(active)}");
+                        $"frontier={SummarizePotionCandidates(active)} " +
+                        $"routes={SummarizeDiagnosticRoutes(active, 24)}");
                 }
                 PublishProgress(_startTurnNumber + searchedTurnLayers, searchedTurnLayers, playDepth,
                     active.Count, ended.Count, "剪枝候选", force: true);
@@ -422,6 +423,7 @@ internal sealed partial class CombatBeamSolver
                     $"[CombatSolver/Debug] TURN_LAYER_POTIONS completed_turns={searchedTurnLayers} " +
                     $"frontier={SummarizePotionCandidates(frontier)} " +
                     $"completed={SummarizePotionCandidates(completed)} " +
+                    $"frontier_routes={SummarizeDiagnosticRoutes(frontier, 24)} " +
                     $"touch_choices={SummarizePotionChoiceTargets(frontier, "TOUCH_OF_INSANITY")}");
                 if (searchedTurnLayers == 2)
                 {

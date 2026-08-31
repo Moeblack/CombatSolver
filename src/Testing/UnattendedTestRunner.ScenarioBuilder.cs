@@ -99,6 +99,25 @@ internal sealed partial class UnattendedTestRunner
             IReadOnlyList<UnattendedOrbCheck> orbChecks = request.OrbChecks;
             IReadOnlyList<UnattendedPotionCheck> potionChecks = runner.GetPotionChecks();
             IReadOnlyList<UnattendedMonsterMoveCheck> monsterMoveChecks = runner.GetMonsterMoveChecks();
+            if (!string.IsNullOrWhiteSpace(request.ReplayStatePath))
+            {
+                await ApplyReplayStateAsync(
+                    CombatState,
+                    player,
+                    request.ReplayStatePath,
+                    request.RunSnapshotPath);
+                StartedTurn = player.PlayerCombatState!.TurnNumber;
+                await runner.NextFrameAsync();
+                return new ScenarioContext(
+                    character,
+                    encounter,
+                    CombatState,
+                    player,
+                    StartedTurn,
+                    orbChecks,
+                    potionChecks,
+                    monsterMoveChecks);
+            }
             foreach (string monsterId in request.AdditionalMonsterIds
                          .Where(static id => !string.IsNullOrWhiteSpace(id))
                          .Distinct(StringComparer.OrdinalIgnoreCase))
@@ -209,7 +228,7 @@ internal sealed partial class UnattendedTestRunner
             {
                 if (string.IsNullOrWhiteSpace(request.RunSnapshotPath))
                     throw new InvalidOperationException("战斗状态注入后回载 RNG 需要跑局快照。");
-                ReloadRunSnapshotRng(runState, request.RunSnapshotPath);
+                ReloadRunSnapshotRng(runState, player, request.RunSnapshotPath);
             }
             StartedTurn = player.PlayerCombatState!.TurnNumber;
             await runner.NextFrameAsync();

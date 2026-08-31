@@ -17,19 +17,19 @@ internal sealed record SolverSearchProfile(
 {
     public static SolverSearchProfile Short { get; } = new(
         SolverSearchPhase.Short,
-        BeamWidth: 18,
+        BeamWidth: 24,
         MaxExpandedNodes: 2_400,
-        MaxCardBranchesPerNode: 14,
-        MaxPileChoiceBranchesPerAction: 6,
-        MaxHandChoiceBranchesPerAction: 8,
+        MaxCardBranchesPerNode: 20,
+        MaxPileChoiceBranchesPerAction: 10,
+        MaxHandChoiceBranchesPerAction: 12,
         SoftTimeBudgetMilliseconds: 8_000);
 
     public static SolverSearchProfile Deep { get; } = new(
         SolverSearchPhase.Deep,
-        BeamWidth: 45,
+        BeamWidth: 60,
         MaxExpandedNodes: 12_000,
-        MaxCardBranchesPerNode: 24,
-        MaxPileChoiceBranchesPerAction: 12,
-        MaxHandChoiceBranchesPerAction: 16,
+        MaxCardBranchesPerNode: 32,
+        MaxPileChoiceBranchesPerAction: 18,
+        MaxHandChoiceBranchesPerAction: 24,
         SoftTimeBudgetMilliseconds: 120_000);
 }

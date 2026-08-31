@@ -682,6 +682,26 @@ internal sealed partial class CombatBeamSolver
                     (best, node) => IsBetterOffensive(node, best) ? node : best), limit);
                 AddRequired(required, FindBestSetup(declinedExtraTurn), limit);
             }
+            if (_potionPolicy != SolverPotionPolicy.Disabled)
+            {
+                int potionLineageLimit = Math.Clamp(limit / 6, 2, 6);
+                foreach (IGrouping<int, SearchNode> potionCountGroup in ranked
+                             .Where(UsesPotion)
+                             .GroupBy(node => node.PotionCount)
+                             .OrderBy(group => group.Key))
+                {
+                    foreach (IGrouping<string, SearchNode> potionLineage in potionCountGroup
+                                 .GroupBy(PotionUseLineageKey, StringComparer.Ordinal)
+                                 .OrderByDescending(group => group.Max(BeamRankScore))
+                                 .Take(potionLineageLimit))
+                    {
+                        AddRequired(
+                            required,
+                            FindBestPotionLineage(potionLineage),
+                            limit);
+                    }
+                }
+            }
             foreach (IGrouping<int, SearchNode> potionCountGroup in ranked
                          .GroupBy(node => node.PotionCount)
                          .OrderBy(group => group.Key))
@@ -698,6 +718,7 @@ internal sealed partial class CombatBeamSolver
                 AddRequired(required, FindBestEnemyWeakControl(group), limit);
                 AddRequired(required, FindBestDeckCuration(group), limit);
                 AddRequired(required, FindMostCompressedDeck(group), limit);
+                AddRequired(required, FindBestTacticalEnabler(group), limit);
                 AddRequired(required, FindBestSetup(group), limit);
                 if (_theftPolicy == SolverTheftPolicy.PreserveResources)
                 {
@@ -1390,6 +1411,47 @@ internal sealed partial class CombatBeamSolver
             return best;
         }
 
+        private static string PotionUseLineageKey(SearchNode node)
+            => string.Join(',', node.Actions
+                .Where(action => action.Kind == PlanActionKind.UsePotion)
+                .Select(action => action.PotionId
+                    ?? throw new InvalidOperationException("用药动作缺少药水 ID。"))
+                .OrderBy(static id => id, StringComparer.Ordinal));
+
+        private static SearchNode? FindBestPotionLineage(IEnumerable<SearchNode> nodes)
+            => nodes.Aggregate(
+                (SearchNode?)null,
+                (best, node) => best == null
+                    || node.Snapshot.AllEnemiesDead && !best.Snapshot.AllEnemiesDead
+                    || node.Snapshot.AllEnemiesDead == best.Snapshot.AllEnemiesDead
+                        && (node.Snapshot.ProjectedPlayerHp > best.Snapshot.ProjectedPlayerHp
+                            || node.Snapshot.ProjectedPlayerHp == best.Snapshot.ProjectedPlayerHp
+                                && (node.Snapshot.EnemyHp < best.Snapshot.EnemyHp
+                                    || node.Snapshot.EnemyHp == best.Snapshot.EnemyHp
+                                        && node.Score > best.Score))
+                        ? node
+                        : best);
+
+        private static SearchNode? FindBestTacticalEnabler(IReadOnlyList<SearchNode> nodes)
+        {
+            SearchNode? best = null;
+            foreach (SearchNode node in nodes)
+            {
+                if (best == null
+                    || node.Snapshot.ZeroCostPlayableCount > best.Snapshot.ZeroCostPlayableCount
+                    || node.Snapshot.ZeroCostPlayableCount == best.Snapshot.ZeroCostPlayableCount
+                        && (node.Snapshot.ReachableHandValue > best.Snapshot.ReachableHandValue
+                            || node.Snapshot.ReachableHandValue == best.Snapshot.ReachableHandValue
+                                && (node.Snapshot.HandCount > best.Snapshot.HandCount
+                                    || node.Snapshot.HandCount == best.Snapshot.HandCount
+                                        && IsBetterSearchNode(node, best))))
+                {
+                    best = node;
+                }
+            }
+            return best;
+        }
+
         private SearchNode? FindBestCompressionAttackGrowth(IReadOnlyList<SearchNode> nodes)
         {
             SearchNode? best = null;
@@ -1516,6 +1578,7 @@ internal sealed partial class CombatBeamSolver
                 SearchRouteTraits.Resource => snapshot.Energy * 16
                     + snapshot.Stars * 8
                     + snapshot.HandCount
+                    + snapshot.ReachableHandValue
                     + snapshot.FutureResourceValue,
                 SearchRouteTraits.LongTermResource => snapshot.LongTermResourceValue,
                 SearchRouteTraits.Control => snapshot.SandpitRemaining * 32

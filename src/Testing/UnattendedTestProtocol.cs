@@ -20,6 +20,7 @@ internal sealed class UnattendedTestRequest
     public string[] ModifierIds { get; init; } = [];
     public string Seed { get; init; } = "COMBATSOLVER";
     public string? RunSnapshotPath { get; init; }
+    public string? ReplayStatePath { get; init; }
     public int Ascension { get; init; }
     public int ActIndexForTest { get; init; }
     public bool MarkEncounterAsSecondBossForTest { get; init; }

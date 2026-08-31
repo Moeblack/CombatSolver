@@ -35,6 +35,22 @@ internal sealed partial class UnattendedTestRunner
         if (root.TryGetProperty("rng", out _))
             LoadRunRng(runState, root);
         JsonElement savedPlayer = root.GetProperty("players")[0];
+        if (savedPlayer.TryGetProperty("rng", out JsonElement savedPlayerRng))
+            player.PlayerRng.LoadFromSerializable(ParsePlayerRng(savedPlayerRng));
+        if (savedPlayer.TryGetProperty("odds", out JsonElement savedPlayerOdds))
+        {
+            player.PlayerOdds.LoadFromSerializable(new SerializablePlayerOddsSet
+            {
+                CardRarityOddsValue = savedPlayerOdds
+                    .GetProperty("card_rarity_odds_value")
+                    .GetSingle(),
+                PotionRewardOddsValue = savedPlayerOdds
+                    .GetProperty("potion_reward_odds_value")
+                    .GetSingle(),
+            });
+        }
+        if (savedPlayer.TryGetProperty("gold", out JsonElement savedGold))
+            player.Gold = savedGold.GetInt32();
 
         CardModel[] startingDeck = player.Deck.Cards.ToArray();
         player.Deck.Clear(silent: true);
@@ -88,10 +104,29 @@ internal sealed partial class UnattendedTestRunner
         }
     }
 
-    private static void ReloadRunSnapshotRng(RunState runState, string snapshotPath)
+    private static void ReloadRunSnapshotRng(
+        RunState runState,
+        Player player,
+        string snapshotPath)
     {
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(snapshotPath));
-        LoadRunRng(runState, document.RootElement);
+        JsonElement root = document.RootElement;
+        LoadRunRng(runState, root);
+        JsonElement savedPlayer = root.GetProperty("players")[0];
+        if (savedPlayer.TryGetProperty("rng", out JsonElement savedPlayerRng))
+            player.PlayerRng.LoadFromSerializable(ParsePlayerRng(savedPlayerRng));
+        if (savedPlayer.TryGetProperty("odds", out JsonElement savedPlayerOdds))
+        {
+            player.PlayerOdds.LoadFromSerializable(new SerializablePlayerOddsSet
+            {
+                CardRarityOddsValue = savedPlayerOdds
+                    .GetProperty("card_rarity_odds_value")
+                    .GetSingle(),
+                PotionRewardOddsValue = savedPlayerOdds
+                    .GetProperty("potion_reward_odds_value")
+                    .GetSingle(),
+            });
+        }
     }
 
     private static void LoadRunRng(RunState runState, JsonElement root)
@@ -124,6 +159,34 @@ internal sealed partial class UnattendedTestRunner
                 "combat_orbs" => RunRngType.CombatOrbs,
                 "treasure_room_relics" => RunRngType.TreasureRoomRelics,
                 _ => throw new InvalidOperationException($"跑局快照包含未知 RNG {property.Name}。"),
+            };
+            JsonElement value = property.Value;
+            result.Rngs[type] = new SerializableRng
+            {
+                counter = value.GetProperty("counter").GetInt32(),
+                state0 = value.GetProperty("s0").GetUInt64(),
+                state1 = value.GetProperty("s1").GetUInt64(),
+                state2 = value.GetProperty("s2").GetUInt64(),
+                state3 = value.GetProperty("s3").GetUInt64(),
+            };
+        }
+        return result;
+    }
+
+    private static SerializablePlayerRngSet ParsePlayerRng(JsonElement element)
+    {
+        SerializablePlayerRngSet result = new()
+        {
+            Seed = element.GetProperty("seed").GetUInt64(),
+        };
+        foreach (JsonProperty property in element.GetProperty("rngs").EnumerateObject())
+        {
+            PlayerRngType type = property.Name switch
+            {
+                "rewards" => PlayerRngType.Rewards,
+                "shops" => PlayerRngType.Shops,
+                "transformations" => PlayerRngType.Transformations,
+                _ => throw new InvalidOperationException($"跑局快照包含未知玩家 RNG {property.Name}。"),
             };
             JsonElement value = property.Value;
             result.Rngs[type] = new SerializableRng

@@ -49,6 +49,7 @@ add_option encounter-id "FUZZY_WURM_CRAWLER_WEAK" string raw_string
 add_option sts2-game-root "$steam_root/steamapps/common/Slay the Spire 2" string none
 add_option ritsu-workshop-root "$steam_root/steamapps/workshop/content/2868840/3747602295" string none
 add_option run-snapshot-path "" string none
+add_option replay-state-path "" string none
 add_option progress-snapshot-path "" string none
 add_option ascension 0 int raw_int
 add_option act-index-for-test 0 int raw_int
