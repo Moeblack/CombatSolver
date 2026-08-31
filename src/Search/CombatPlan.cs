@@ -132,7 +132,8 @@ internal sealed record PlanAction(
     IReadOnlyList<PlanRelicEffect>? RelicEffects = null,
     int ReplayCount = 0,
     string CardStateKey = "",
-    int CardStateOccurrence = 0)
+    int CardStateOccurrence = 0,
+    bool EndsPlayerTurn = false)
 {
     public bool IsExecutable => Kind is PlanActionKind.PlayCard or PlanActionKind.UsePotion;
     public string ActionTitle => Kind == PlanActionKind.UsePotion ? PotionTitle : CardTitle;

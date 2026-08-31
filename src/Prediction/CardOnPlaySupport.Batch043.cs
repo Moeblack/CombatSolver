@@ -71,6 +71,7 @@ internal static partial class CardOnPlaySupport
                     card.Owner.Creature,
                     card.DynamicVars["VoidFormPower"].IntValue,
                     card.Owner.Creature);
+                combat.RequestPlayerTurnEnd();
                 break;
         }
     }

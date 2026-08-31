@@ -530,7 +530,8 @@ internal sealed partial class CombatBeamSolver
                             requiredEmptyChoice);
                 foreach ((PlanAction finalAction, SimulationSnapshot finalSnapshot) in resolvedBranches)
                 {
-                    bool forcedTurnEnd = card.Preview is VoidForm;
+                    bool forcedTurnEnd = finalSnapshot.Turn > node.Turn;
+                    PlanAction nodeAction = finalAction with { EndsPlayerTurn = forcedTurnEnd };
                     bool terminal = finalSnapshot.PlayerDead
                         || finalSnapshot.AllEnemiesDead
                         || finalSnapshot.BoundaryReason != SearchBoundaryReason.None;
@@ -545,7 +546,7 @@ internal sealed partial class CombatBeamSolver
                             : 1
                         : 0;
                     SearchNode child = new(
-                        finalAction,
+                        nodeAction,
                         node.ActionCount + 1,
                         finalSnapshot.PotionUseCount,
                         finalSnapshot.PotionStrategicCost,
@@ -615,14 +616,17 @@ internal sealed partial class CombatBeamSolver
                     PotionSlot: potionSlot,
                     PotionId: potion.Id.Entry,
                     PotionTitle: displayNames.Potion(potion));
-                SimulationSnapshot probeSnapshot = ReplayAction(node, baseAction);
-
+                SimulationSnapshot? probeSnapshot = null;
                 IReadOnlyList<PlanCardChoice?> choices;
                 if (PotionChoiceSupport.RequiresChoice(potion))
                 {
-                    CombatPredictionSimulator probeSimulator =
-                        (CombatPredictionSimulator)probeSnapshot.Simulator;
-                    CardChoiceSpec spec = PotionChoiceSupport.GetSpec(probeSimulator, potion);
+                    CombatPredictionSimulator choiceSimulator = simulator;
+                    if (PotionChoiceSupport.GeneratesCardChoice(potion))
+                    {
+                        probeSnapshot = ReplayAction(node, baseAction);
+                        choiceSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;
+                    }
+                    CardChoiceSpec spec = PotionChoiceSupport.GetSpec(choiceSimulator, potion);
                     choices = CardChoiceSupport.BuildChoices(
                             spec,
                             displayNames,
@@ -632,10 +636,11 @@ internal sealed partial class CombatBeamSolver
                         .Cast<PlanCardChoice?>()
                         .ToList();
                     _run.ChoiceBranchesEvaluated += choices.Count;
-                    probeSnapshot.ReleaseSimulator();
+                    probeSnapshot?.ReleaseSimulator();
                 }
                 else
                 {
+                    probeSnapshot = ReplayAction(node, baseAction);
                     choices = [null];
                 }
 
@@ -645,7 +650,8 @@ internal sealed partial class CombatBeamSolver
                     SimulationSnapshot childSnapshot;
                     if (choice == null)
                     {
-                        childSnapshot = probeSnapshot;
+                        childSnapshot = probeSnapshot
+                            ?? throw new InvalidOperationException("无选牌药水缺少动作快照。");
                     }
                     else
                     {

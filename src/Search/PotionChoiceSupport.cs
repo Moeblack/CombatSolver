@@ -160,7 +160,7 @@ internal static class PotionChoiceSupport
         return new CardChoiceSpec(effect, pile, minCount, maxCount, optionList, source, 0d);
     }
 
-    private static bool GeneratesCardChoice(PotionModel potion)
+    internal static bool GeneratesCardChoice(PotionModel potion)
         => potion is AttackPotion or SkillPotion or PowerPotion or ColorlessPotion;
 
     private static PredictedCard Find(IReadOnlyList<PredictedCard> cards, PlanCardToken token)
@@ -176,7 +176,7 @@ internal static class PotionChoiceSupport
             matchingOccurrence++;
         }
 
-        throw new InvalidOperationException(
+        throw new InvalidPlannedChoiceBranchException(
             $"药水选牌回放时找不到 {token.CardId}+{token.UpgradeLevel}#{token.SourceOccurrence}。");
     }
 }

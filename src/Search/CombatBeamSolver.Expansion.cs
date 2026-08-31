@@ -129,7 +129,8 @@ internal sealed partial class CombatBeamSolver
                             requiredEmptyChoice);
                 foreach ((PlanAction finalAction, SimulationSnapshot finalSnapshot) in resolvedBranches)
                 {
-                    bool forcedTurnEnd = card.Preview is VoidForm;
+                    bool forcedTurnEnd = finalSnapshot.Turn > node.Turn;
+                    PlanAction nodeAction = finalAction with { EndsPlayerTurn = forcedTurnEnd };
                     bool terminal = finalSnapshot.PlayerDead
                         || finalSnapshot.AllEnemiesDead
                         || finalSnapshot.BoundaryReason != SearchBoundaryReason.None;
@@ -152,7 +153,7 @@ internal sealed partial class CombatBeamSolver
                             : 1
                         : 0;
                     SearchNode child = new(
-                        finalAction,
+                        nodeAction,
                         node.ActionCount + 1,
                         finalSnapshot.PotionUseCount,
                         finalSnapshot.PotionStrategicCost,
@@ -279,14 +280,17 @@ internal sealed partial class CombatBeamSolver
                     PotionSlot: potionSlot,
                     PotionId: potion.Id.Entry,
                     PotionTitle: displayNames.Potion(potion));
-                SimulationSnapshot probeSnapshot = ReplayAction(node, baseAction);
-
+                SimulationSnapshot? probeSnapshot = null;
                 IReadOnlyList<PlanCardChoice?> choices;
                 if (PotionChoiceSupport.RequiresChoice(potion))
                 {
-                    CombatPredictionSimulator probeSimulator =
-                        (CombatPredictionSimulator)probeSnapshot.Simulator;
-                    CardChoiceSpec spec = PotionChoiceSupport.GetSpec(probeSimulator, potion);
+                    CombatPredictionSimulator choiceSimulator = simulator;
+                    if (PotionChoiceSupport.GeneratesCardChoice(potion))
+                    {
+                        probeSnapshot = ReplayAction(node, baseAction);
+                        choiceSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;
+                    }
+                    CardChoiceSpec spec = PotionChoiceSupport.GetSpec(choiceSimulator, potion);
                     choices = CardChoiceSupport.BuildChoices(
                             spec,
                             displayNames,
@@ -296,10 +300,11 @@ internal sealed partial class CombatBeamSolver
                         .Cast<PlanCardChoice?>()
                         .ToList();
                     _run.ChoiceBranchesEvaluated += choices.Count;
-                    probeSnapshot.ReleaseSimulator();
+                    probeSnapshot?.ReleaseSimulator();
                 }
                 else
                 {
+                    probeSnapshot = ReplayAction(node, baseAction);
                     choices = [null];
                 }
                 if (_detailedDiagnostics && node.ActionCount == 0)
@@ -318,7 +323,8 @@ internal sealed partial class CombatBeamSolver
                     SimulationSnapshot childSnapshot;
                     if (choice == null)
                     {
-                        childSnapshot = probeSnapshot;
+                        childSnapshot = probeSnapshot
+                            ?? throw new InvalidOperationException("无选牌药水缺少动作快照。");
                     }
                     else
                     {
@@ -659,7 +665,7 @@ internal sealed partial class CombatBeamSolver
             foreach (PlanCardChoice branch in branches)
             {
                 bool turnResolution = action.Kind == PlanActionKind.EndTurn
-                    || action.CardId == "VOID_FORM";
+                    || snapshot.Turn > node.Turn;
                 bool primaryChoice = !turnResolution
                     && action.Choice == null
                     && MatchesPrimaryChoice(request, unresolvedPrimaryChoice);
@@ -992,6 +998,7 @@ internal sealed partial class CombatBeamSolver
                 {
                     _run.Performance.End(SearchMetricPhase.RoundAdvance, roundMeasurement);
                 }
+                _ = simulatedCombat.ConsumePlayerTurnEndRequest();
                 if (boundary == SearchBoundaryReason.None)
                     SettleReplayActionBoundary(simulator, simulatedCombat);
                 turn++;
@@ -1110,7 +1117,8 @@ internal sealed partial class CombatBeamSolver
             {
                 shufflesCrossed++;
             }
-            if (card.Preview is VoidForm)
+            bool forcedTurnEnd = simulatedCombat.ConsumePlayerTurnEndRequest();
+            if (forcedTurnEnd)
             {
                 boundary = AdvanceRound(
                     simulator,
@@ -1121,6 +1129,7 @@ internal sealed partial class CombatBeamSolver
                     action.TurnStartChoices);
                 if (boundary == SearchBoundaryReason.None)
                     SettleReplayActionBoundary(simulator, simulatedCombat);
+                _ = simulatedCombat.ConsumePlayerTurnEndRequest();
                 turn++;
             }
             LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn);
@@ -1931,7 +1940,7 @@ internal sealed partial class CombatBeamSolver
     private static IReadOnlyList<PlanCardChoice>? ActionChoicesForReplay(PlanAction action)
     {
         List<PlanCardChoice> choices = [.. action.GetActionChoicesInExecutionOrder()];
-        if (action.CardId == "VOID_FORM" && action.TurnStartChoices is { Count: > 0 })
+        if (action.Kind == PlanActionKind.PlayCard && action.TurnStartChoices is { Count: > 0 })
             choices.AddRange(action.TurnStartChoices);
         return choices.Count == 0 ? null : choices;
     }

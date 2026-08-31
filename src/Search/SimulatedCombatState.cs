@@ -1473,32 +1473,77 @@ internal sealed partial class SimulatedCombatState
         List<AbstractModel> listeners = new(baseListeners.Count
             + (_powers?.Count ?? 0)
             + (_addedPowerInstances?.Count ?? 0));
+        HashSet<PowerModel> emittedPowers = new(ReferenceEqualityComparer.Instance);
         foreach (AbstractModel listener in baseListeners)
         {
-            if (listener is PowerModel power
-                && (_powers?.ContainsKey((power.Owner, power.GetType())) == true
-                    || _rootMultiInstancePowerClones?.ContainsKey(power) == true))
+            if (listener is not PowerModel power)
+            {
+                listeners.Add(listener);
                 continue;
-            listeners.Add(listener);
+            }
+
+            PowerModel effective = _rootMultiInstancePowerClones?.GetValueOrDefault(power)
+                ?? _powers?.GetValueOrDefault((power.Owner, power.GetType()))
+                ?? power;
+            if (effective.Amount != 0)
+            {
+                listeners.Add(effective);
+                emittedPowers.Add(effective);
+            }
         }
         if (_powers != null)
         {
             foreach ((Creature Owner, Type Type) key in _powerListenerOrder ?? [])
             {
-                if (_powers.TryGetValue(key, out PowerModel? power) && power.Amount != 0)
-                    listeners.Add(power);
+                if (_powers.TryGetValue(key, out PowerModel? power)
+                    && power.Amount != 0
+                    && emittedPowers.Add(power))
+                {
+                    InsertPowerAtOwnerPosition(listeners, power);
+                }
             }
         }
         if (_addedPowerInstances != null)
         {
             foreach (PowerModel power in _addedPowerInstances)
             {
-                if (power.Amount != 0)
-                    listeners.Add(power);
+                if (power.Amount != 0 && emittedPowers.Add(power))
+                    InsertPowerAtOwnerPosition(listeners, power);
             }
         }
         _effectiveHookListeners = listeners;
         return _effectiveHookListeners;
+    }
+
+    private void InsertPowerAtOwnerPosition(List<AbstractModel> listeners, PowerModel power)
+    {
+        int insertionIndex = -1;
+        for (int index = 0; index < listeners.Count; index++)
+        {
+            AbstractModel listener = listeners[index];
+            if (listener is PowerModel existingPower && ReferenceEquals(existingPower.Owner, power.Owner))
+            {
+                insertionIndex = index + 1;
+                continue;
+            }
+            if (insertionIndex < 0 && IsOwnerHookAnchor(listener, power.Owner))
+            {
+                insertionIndex = index;
+                break;
+            }
+        }
+        listeners.Insert(insertionIndex < 0 ? listeners.Count : insertionIndex, power);
+    }
+
+    private bool IsOwnerHookAnchor(AbstractModel listener, Creature owner)
+    {
+        if (owner.Player is { } player)
+        {
+            return listener is RelicModel relic && RelicsOf(player).Contains(relic)
+                || listener is PotionModel potion && ReferenceEquals(potion.Owner, player)
+                || listener is CardModel card && ReferenceEquals(card.Owner, player);
+        }
+        return listener is MonsterModel monster && ReferenceEquals(monster.Creature, owner);
     }
 
     private void InvalidateHookListeners()

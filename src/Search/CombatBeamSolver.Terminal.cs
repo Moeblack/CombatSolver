@@ -230,7 +230,7 @@ internal sealed partial class CombatBeamSolver
             SearchNode node = path[pathIndex];
             PlanAction action = node.Action
                 ?? throw new InvalidOperationException("续用路径节点缺少动作。");
-            if (action.Kind != PlanActionKind.EndTurn
+            if (action.Kind != PlanActionKind.EndTurn && !action.EndsPlayerTurn
                 || node.Snapshot.PlayerDead
                 || node.Snapshot.AllEnemiesDead
                 || node.Snapshot.BoundaryReason != SearchBoundaryReason.None)

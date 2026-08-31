@@ -25,6 +25,7 @@ internal sealed partial class SimulatedCombatState
     private ForkableSet<CardModel>? _fetchCardsPlayedThisTurn;
     private ISet<uint>? _activeCardExecutionDeaths;
     private int _cardExecutionScopeDepth;
+    private bool _playerTurnEndRequested;
 
     private sealed class CardExecutionScope(SimulatedCombatState owner) : IDisposable
     {
@@ -255,6 +256,18 @@ internal sealed partial class SimulatedCombatState
         _cardExecutionScopeDepth--;
         if (_cardExecutionScopeDepth == 0)
             _activeCardExecutionDeaths = null;
+    }
+
+    public bool PlayerTurnEndRequested => _playerTurnEndRequested;
+
+    public void RequestPlayerTurnEnd()
+        => _playerTurnEndRequested = true;
+
+    public bool ConsumePlayerTurnEndRequest()
+    {
+        bool requested = _playerTurnEndRequested;
+        _playerTurnEndRequested = false;
+        return requested;
     }
 
     public MonologuePower[] CapturePendingMonologues(Creature owner)

@@ -5,6 +5,8 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
 using STS2RitsuLib.Models.Capabilities;
@@ -36,6 +38,9 @@ internal sealed partial class UnattendedTestRunner
         AssertMonsterAiUsesCapturedMachine(combat);
         AssertCardCompletionSettlesPowerAmountChanges(combat, player);
         AssertBeforeCardPlayedPowerConsumptionCommits(combat, player);
+        AssertPlayerPowerHooksPrecedeCombatCards(combat, player);
+        AssertNestedVoidFormRequestsTurnEnd(combat, player);
+        AssertExistingPilePotionChoiceReplaysAcrossFork(combat, player);
         AssertGeneratedCardCreatorDrivesSupermassive(combat, player);
         AssertLiveOriginalRemovalDoesNotAffectSnapshot(combat, player, card);
         AssertReplayCardIdentityDistinguishesGeneratedCopies(simulator, player);
@@ -237,6 +242,94 @@ internal sealed partial class UnattendedTestRunner
         if (simulatedCombat.GetAmount<FreePowerPower>(player.Creature) != 1)
             throw new InvalidOperationException("免费能力层数没有在卡牌效果开始前提交消耗。");
         _ = simulator.Fork();
+    }
+
+    private static void AssertPlayerPowerHooksPrecedeCombatCards(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        PredictedCard howl = PredictedCard.Create(ModelDb.Card<HowlFromBeyond>(), player);
+        simulator.AddGeneratedCardToCombat(
+            howl,
+            PileType.Exhaust,
+            player,
+            resultKind: CardGenerationResultKind.Fixed);
+        simulatedCombat.Apply<StampedePower>(player.Creature, 1, player.Creature);
+
+        IReadOnlyList<AbstractModel> listeners = simulatedCombat.IterateHookListeners().ToArray();
+        int powerIndex = listeners.ToList().FindIndex(listener => listener is StampedePower);
+        int cardIndex = listeners.ToList().FindIndex(listener => ReferenceEquals(listener, howl.Preview));
+        if (powerIndex < 0 || cardIndex < 0 || powerIndex >= cardIndex)
+        {
+            throw new InvalidOperationException(
+                $"玩家能力与战斗卡牌 Hook 顺序错误：power={powerIndex} card={cardIndex}。");
+        }
+    }
+
+    private static void AssertNestedVoidFormRequestsTurnEnd(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        simulator.RemoveFromCombat(playerState.DrawPile.Cards.ToArray());
+
+        PredictedCard catastrophe = PredictedCard.Create(ModelDb.Card<Catastrophe>(), player);
+        PredictedCard voidForm = PredictedCard.Create(ModelDb.Card<VoidForm>(), player);
+        simulator.AddGeneratedCardToCombat(
+            catastrophe,
+            PileType.Hand,
+            player,
+            resultKind: CardGenerationResultKind.Fixed);
+        simulator.AddGeneratedCardToCombat(
+            voidForm,
+            PileType.Draw,
+            player,
+            resultKind: CardGenerationResultKind.Fixed);
+        simulator.ManualPlay(catastrophe, target: null, out _);
+
+        if (!simulatedCombat.PlayerTurnEndRequested
+            || !simulatedCombat.ConsumePlayerTurnEndRequest()
+            || simulatedCombat.PlayerTurnEndRequested)
+        {
+            throw new InvalidOperationException("横祸自动打出虚空形态后没有产生一次性结束回合请求。");
+        }
+        _ = simulator.Fork();
+    }
+
+    private static void AssertExistingPilePotionChoiceReplaysAcrossFork(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState parentCombat = new(combat);
+        CombatPredictionSimulator parent = new(parentCombat);
+        for (int index = 0; index < 3; index++)
+        {
+            PredictedCard pommel = PredictedCard.Create(ModelDb.Card<PommelStrike>(), player);
+            pommel.Upgrade();
+            parent.AddGeneratedCardToCombat(
+                pommel,
+                PileType.Draw,
+                player,
+                resultKind: CardGenerationResultKind.Fixed);
+        }
+
+        DropletOfPrecognition potion = (DropletOfPrecognition)ModelDb.Potion<DropletOfPrecognition>().ToMutable();
+        potion.Owner = player;
+        CombatPredictionSimulator probe = parent.Fork();
+        PlanCardChoice choice = CardChoiceSupport.BuildRequestedChoice(
+            PotionChoiceSupport.GetSpec(probe, potion),
+            ["POMMEL_STRIKE"]);
+        CombatPredictionSimulator replay = parent.Fork();
+        PotionChoiceSupport.Apply(replay, potion, choice);
+        if (!replay.State.GetPlayerCombatState(player).Hand.Cards.Any(card =>
+                card.Preview is PommelStrike && card.Preview.IsUpgraded))
+        {
+            throw new InvalidOperationException("预知水滴的重复牌候选没有在同父节点 Fork 上稳定回放。");
+        }
     }
 
     private static void AssertGeneratedCardCreatorDrivesSupermassive(

@@ -72,7 +72,8 @@ internal sealed partial class CombatBeamSolver
 
     private void CaptureContinuation(SearchNode node)
     {
-        if (node.Action?.Kind != PlanActionKind.EndTurn
+        if (node.Action is not { } action
+            || action.Kind != PlanActionKind.EndTurn && !action.EndsPlayerTurn
             || node.Snapshot.Continuation != null
             || node.Snapshot.PlayerDead
             || node.Snapshot.AllEnemiesDead

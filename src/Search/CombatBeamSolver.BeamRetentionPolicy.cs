@@ -460,7 +460,9 @@ internal sealed partial class CombatBeamSolver
             }
 
             List<SearchNode> required = [];
-            bool endTurnFrontier = ranked.All(node => node.Action?.Kind == PlanActionKind.EndTurn);
+            bool endTurnFrontier = ranked.All(node =>
+                node.Action is { } action
+                && (action.Kind == PlanActionKind.EndTurn || action.EndsPlayerTurn));
             int orderedPileQuota = orderedPileCohorts.Count == 0
                 ? 0
                 : endTurnFrontier

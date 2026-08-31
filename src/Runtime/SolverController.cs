@@ -318,7 +318,8 @@ internal static class SolverController
         }
 
         PlanAction? previousEndTurn = source.BestNode.Actions.FirstOrDefault(action =>
-            action.Kind == PlanActionKind.EndTurn && action.Turn == turn - 1);
+            action.Turn == turn - 1
+            && (action.Kind == PlanActionKind.EndTurn || action.EndsPlayerTurn));
         PlanCardChoice[] planned = previousEndTurn?.TurnStartChoices?
             .Where(choice => choice.Timing == PlanChoiceTiming.PlayerTurnStart)
             .ToArray() ?? [];
@@ -1381,9 +1382,9 @@ internal static class SolverController
                 Creature? target = state.GetCreature(action.TargetCombatId);
                 SolverOverlay.ShowDeploymentStep(actionIndex, actions.Count, action.ActionTitle);
                 List<PlanCardChoice> actionChoices = [.. action.GetActionChoicesInExecutionOrder()];
-                // Void Form advances the turn inside its own action, so its next-turn choices
-                // belong to this native UI session rather than a later explicit EndTurn action.
-                if (action.CardId == "VOID_FORM" && action.TurnStartChoices is { Count: > 0 })
+                // A card can advance the turn directly or through a nested auto-play, so its
+                // next-turn choices belong to this native UI session.
+                if (action.EndsPlayerTurn && action.TurnStartChoices is { Count: > 0 })
                     actionChoices.AddRange(action.TurnStartChoices);
                 if (actionChoices.Count > 0)
                 {

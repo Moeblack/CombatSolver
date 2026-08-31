@@ -200,6 +200,8 @@ internal sealed partial class SimulatedCombatState
             throw new InvalidOperationException("Cannot fork during action choice resolution.");
         if (_cardExecutionScopeDepth != 0 || _activeCardExecutionDeaths is not null)
             throw new InvalidOperationException("Cannot fork during card execution.");
+        if (_playerTurnEndRequested)
+            throw new InvalidOperationException("Cannot fork before a requested player turn end is resolved.");
         if (_powerCardSources is { Count: > 0 })
             throw new InvalidOperationException("Cannot fork during card Power application.");
         if (PendingTurnStartChoice is not null)
