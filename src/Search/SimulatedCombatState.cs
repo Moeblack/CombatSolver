@@ -1001,12 +1001,10 @@ internal sealed partial class SimulatedCombatState
         SetPowerAmount(source, source.Amount + 1);
     }
 
-    public bool TriggerPlayerTurnStart(
+    public bool TriggerAfterPlayerTurnStart(
         CombatPredictionSimulator simulator,
         Creature owner,
-        TurnStartChoiceCursor choices,
-        bool isExtraTurn = false,
-        bool sideTurnStartAlreadyTriggered = false)
+        TurnStartChoiceCursor choices)
     {
         Player player = owner.Player
             ?? throw new InvalidOperationException("玩家回合开始钩子的持有者没有 Player。");
@@ -1014,30 +1012,7 @@ internal sealed partial class SimulatedCombatState
             return true;
         if (TurnStartPowerSupport.TriggerAfterPlayerTurnStart(simulator, this, player, choices))
             return true;
-        if (!sideTurnStartAlreadyTriggered)
-        {
-            TriggerSideTurnStart(
-                simulator,
-                CombatSide.Player,
-                [owner],
-                decrementPlating: GetPlayerTurnNumber(player) != 1,
-                isExtraTurn);
-        }
         return false;
-    }
-
-    public bool TriggerPlayerTurnStart(
-        CombatPredictionSimulator simulator,
-        Creature owner,
-        IReadOnlyList<PlanCardChoice>? turnStartChoices,
-        bool isExtraTurn = false)
-    {
-        ClearPendingTurnStartChoice();
-        return TriggerPlayerTurnStart(
-            simulator,
-            owner,
-            new TurnStartChoiceCursor(turnStartChoices),
-            isExtraTurn);
     }
 
     public bool ShouldClearBlock(Creature owner)

@@ -152,12 +152,19 @@ internal sealed partial class UnattendedTestRunner
             int historyEntryStart = simulator.History.Entries.Count;
             simulator.Draw(player, drawCount, fromHandDraw: true);
             TriggeredPowerSupport.CompensateHistorySince(simulator, combat, historyEntryStart);
-            if (combat.TriggerPlayerTurnStart(
+            if (combat.TriggerAfterPlayerTurnStart(
                     simulator,
                     player.Creature,
-                    choices,
-                    sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
+                    choices))
                 throw new InvalidOperationException("模拟玩家回合准备遇到动态抽牌后结算。");
+            if (!sideTurnStartTriggeredEarly)
+            {
+                combat.TriggerSideTurnStart(
+                    simulator,
+                    CombatSide.Player,
+                    [player.Creature],
+                    decrementPlating: combat.GetPlayerTurnNumber(player) != 1);
+            }
         }
         choices.AssertConsumed();
     }

@@ -819,7 +819,14 @@ internal sealed partial class UnattendedTestRunner
             }
             CorePowerSupport.TriggerAfterBlockCleared(simulator, simulatedCombat, player.Creature);
             CorePowerSupport.TriggerPoison(simulator, simulatedCombat, [player.Creature]);
-            simulatedCombat.TriggerPlayerTurnStart(simulator, player.Creature, turnStartChoices: null);
+            TurnStartChoiceCursor choices = new(null);
+            if (simulatedCombat.TriggerAfterPlayerTurnStart(simulator, player.Creature, choices))
+                throw new InvalidOperationException("模拟玩家回合开始遇到未计划选择。");
+            simulatedCombat.TriggerSideTurnStart(
+                simulator,
+                CombatSide.Player,
+                [player.Creature],
+                decrementPlating: simulatedCombat.GetPlayerTurnNumber(player) != 1);
             EnchantmentLifecycleSupport.TriggerAfterTurnStartOrbs(simulator, player);
         }
         if (check.TriggerEnemySideTurnStartAfterMove)

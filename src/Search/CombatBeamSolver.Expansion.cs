@@ -897,12 +897,19 @@ internal sealed partial class CombatBeamSolver
                     simulator,
                     simulatedCombat,
                     historyEntryStart);
-                if (simulatedCombat.TriggerPlayerTurnStart(
+                if (simulatedCombat.TriggerAfterPlayerTurnStart(
                         simulator,
                         _player.Creature,
-                        choices,
-                        sideTurnStartAlreadyTriggered: sideTurnStartTriggeredEarly))
+                        choices))
                     return SearchBoundaryReason.PendingChoice;
+                if (!sideTurnStartTriggeredEarly)
+                {
+                    simulatedCombat.TriggerSideTurnStart(
+                        simulator,
+                        CombatSide.Player,
+                        [_player.Creature],
+                        decrementPlating: _startTurnNumber != 1);
+                }
             }
         CorePowerSupport.ApplyEnemyDeathPowers(
             simulator,
@@ -1604,13 +1611,20 @@ internal sealed partial class CombatBeamSolver
                 if (simulatedCombat.HasPendingChoice)
                     return SearchBoundaryReason.PendingChoice;
                 TriggeredPowerSupport.CompensateHistorySince(simulator, simulatedCombat, historyEntryStart);
-                if (simulatedCombat.TriggerPlayerTurnStart(
+                if (simulatedCombat.TriggerAfterPlayerTurnStart(
                         simulator,
                         _player.Creature,
-                        roundChoices,
-                        takingExtraTurn,
-                        sideTurnStartTriggeredEarly))
+                        roundChoices))
                     return SearchBoundaryReason.PendingChoice;
+                if (!sideTurnStartTriggeredEarly)
+                {
+                    simulatedCombat.TriggerSideTurnStart(
+                        simulator,
+                        CombatSide.Player,
+                        [_player.Creature],
+                        decrementPlating: simulatedCombat.GetPlayerTurnNumber(_player) != 1,
+                        takingExtraTurn);
+                }
             }
             CorePowerSupport.ApplyEnemyDeathPowers(
                 simulator, simulatedCombat, simulatedCombat.KnownEnemies, processedEnemyDeaths);

@@ -1,4 +1,12 @@
 {
+  "FIX-141700-TURN-START-CHOICE-ONCE": {
+    "status": "Passed",
+    "level": "HeadlessTurnStartChoiceContinuationRegression",
+    "procedure": "第 2 回合由熵触发回合开始选牌，选择打击后检查路线复用与计划外重算。",
+    "expected": "玩家专属回合开始与通用阵营回合开始按原版顺序各执行一次，选牌完成后直接复用既有路线。",
+    "observed": "修复前 runId 632b60e264064d149ec0e95f45e8a15a 出现一次计划外重算；修复后 runId cf5c0c5b057e4e0a80409e87124c7535 Passed，第 2 回合复用且计划外重算为 0。",
+    "evidence": "coverage/unattended/turn-start-choice-once-141700-*.json；上述两个 runId；验证日期 2026-08-31。"
+  },
   "NEXT-SEARCH-COMPLETION-NOTIFICATION": {
     "status": "Passed",
     "level": "HeadlessRuntimeSettingsLifecycleAndNativePlatformGuard",
