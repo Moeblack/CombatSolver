@@ -346,6 +346,7 @@ internal static class CombatSearchCoordinator
                 && selected.Snapshot.ProjectedPlayerHp > 0;
             int jointDeficit = StrategicHpDeficit(root, jointPosterior);
             int selectedDeficit = StrategicHpDeficit(root, selected);
+            int comparisonDeficit = selectedDeficit;
             if (jointWon
                 && (!selectedWon
                     || jointDeficit < selectedDeficit
@@ -361,6 +362,81 @@ internal static class CombatSearchCoordinator
                 $"potion={openingPotion.PotionId} power={postPotionPower.CardId} " +
                 $"won={jointWon} hp_deficit={jointDeficit} " +
                 $"selected={ReferenceEquals(selected, jointPosterior)}");
+
+            if (!jointWon
+                || jointDeficit == 0
+                || jointDeficit > comparisonDeficit + 1)
+            {
+                continue;
+            }
+
+            PlanAction? defensiveFollowUp = new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                    maximumPotionUses: Math.Max(1, primary.PotionCount))
+                .BuildOpeningDefensiveFollowUp(jointPrefix);
+            if (defensiveFollowUp == null)
+                continue;
+
+            SolverResult defensivePosterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: Math.Max(1, primary.PotionCount),
+                fixedPrefixActions: [openingPotion, postPotionPower, defensiveFollowUp]).Solve();
+            bool defensiveDeepTriggered = shortCheckpointMilliseconds is { } defensiveCheckpoint
+                && defensivePosterior.Elapsed.TotalMilliseconds > defensiveCheckpoint;
+            defensivePosterior.SearchPhase = defensiveDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            defensivePosterior.DeepSearchTriggered = defensiveDeepTriggered;
+            defensivePosterior.DeepSearchImprovedResult = false;
+            defensivePosterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                defensivePosterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                defensiveDeepTriggered);
+            searches.Add(defensivePosterior);
+
+            bool defensiveWon = defensivePosterior.Snapshot.AllEnemiesDead
+                && !defensivePosterior.Snapshot.PlayerDead
+                && defensivePosterior.Snapshot.ProjectedPlayerHp > 0;
+            selectedWon = selected.Snapshot.AllEnemiesDead
+                && !selected.Snapshot.PlayerDead
+                && selected.Snapshot.ProjectedPlayerHp > 0;
+            int defensiveDeficit = StrategicHpDeficit(root, defensivePosterior);
+            selectedDeficit = StrategicHpDeficit(root, selected);
+            if (defensiveWon
+                && (!selectedWon
+                    || defensiveDeficit < selectedDeficit
+                    || defensiveDeficit == selectedDeficit
+                        && (defensivePosterior.PotionCount < selected.PotionCount
+                            || defensivePosterior.PotionCount == selected.PotionCount
+                                && defensivePosterior.BestNode.Score > selected.BestNode.Score)))
+            {
+                selected = defensivePosterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] POTION_POWER_DEFENSIVE_POSTERIOR " +
+                $"potion={openingPotion.PotionId} power={postPotionPower.CardId} " +
+                $"follow_up={defensiveFollowUp.CardId} won={defensiveWon} " +
+                $"hp_deficit={defensiveDeficit} selected={ReferenceEquals(selected, defensivePosterior)}");
+
+            if (defensiveDeficit == 0)
+                break;
         }
 
         MergeAuditTotals(selected, searches.ToArray());

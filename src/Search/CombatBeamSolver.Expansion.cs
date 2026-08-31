@@ -209,6 +209,46 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
+    internal PlanAction? BuildOpeningDefensiveFollowUp(IReadOnlyList<PlanAction> prefix)
+    {
+        SimulationSnapshot prefixSnapshot = Replay(prefix);
+        List<SearchNode> followUps = [];
+        try
+        {
+            SearchNode seed = new(
+                null,
+                prefix.Count,
+                prefixSnapshot.PotionUseCount,
+                prefixSnapshot.PotionStrategicCost,
+                prefixSnapshot.Turn,
+                SearchRouteTraits.Scaling,
+                0,
+                prefixSnapshot.Score,
+                prefixSnapshot.StateKey,
+                prefixSnapshot.HasRisk,
+                prefixSnapshot.BoundaryReason,
+                false,
+                null,
+                prefixSnapshot,
+                CombatProgressState.Capture(prefixSnapshot));
+            followUps.AddRange(Expand(seed).Where(node =>
+                node.Action is { Kind: PlanActionKind.PlayCard, Turn: var turn }
+                && turn == prefixSnapshot.Turn));
+            SearchNode? best = followUps
+                .Where(node => node.Snapshot.PlayerBlock > prefixSnapshot.PlayerBlock)
+                .OrderByDescending(node => node.Snapshot.PlayerBlock)
+                .ThenByDescending(node => node.Score)
+                .FirstOrDefault();
+            return best?.Action;
+        }
+        finally
+        {
+            foreach (SearchNode followUp in followUps)
+                followUp.Snapshot.ReleaseSimulator();
+            prefixSnapshot.ReleaseSimulator();
+        }
+    }
+
     internal PlanAction? BuildOpeningFullRedrawPotionAction(PlanAction selectedPotionAction)
     {
         SimulationSnapshot rootSnapshot = Replay([]);
