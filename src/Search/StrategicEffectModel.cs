@@ -61,7 +61,8 @@ internal readonly record struct StrategicEffectContext(
     int PowerEnergySpend,
     int AverageCardValue,
     int BestCardValue,
-    int AverageAttackValue)
+    int AverageAttackValue,
+    int StatusDrawTriggers)
 {
     public static StrategicEffectContext Build(
         IReadOnlyList<PredictedCard> liveCards,
@@ -76,6 +77,7 @@ internal readonly record struct StrategicEffectContext(
         int exhaustCount = 0;
         int shivCount = 0;
         int debuffCount = 0;
+        int statusCount = 0;
         int skillEnergy = 0;
         int powerEnergy = 0;
         int totalCardValue = 0;
@@ -105,6 +107,9 @@ internal readonly record struct StrategicEffectContext(
                 case CardType.Power:
                     powerCount++;
                     powerEnergy += energyCost;
+                    break;
+                case CardType.Status:
+                    statusCount++;
                     break;
             }
             if (card.Keywords.Contains(CardKeyword.Exhaust))
@@ -151,7 +156,8 @@ internal readonly record struct StrategicEffectContext(
             powerEnergy,
             Math.Max(1, totalCardValue / deckSize),
             Math.Max(1, bestCardValue),
-            attackCount == 0 ? 0 : Math.Max(1, totalAttackValue / attackCount));
+            attackCount == 0 ? 0 : Math.Max(1, totalAttackValue / attackCount),
+            Math.Min(remainingTurns, ReachablePlays(statusCount, deckSize, reachableCards)));
     }
 
     private static int ReachablePlays(int matchingCards, int deckSize, int reachableCards)
@@ -217,6 +223,8 @@ internal static class StrategicEffectModel
             CorruptionPower => Resource(context.SkillEnergySpend * energyUnit),
             CreativeAiPower => CardAccess(
                 amount * context.RemainingTurns * cardAccessUnit),
+            IterationPower => CardAccess(
+                amount * context.StatusDrawTriggers * cardAccessUnit),
             MasterPlannerPower => CardAccess(context.SkillPlays * cardAccessUnit),
             FocusPower => Scaling(amount * context.RemainingTurns * 2),
             FurnacePower => Scaling(amount * context.RemainingTurns * 2),
