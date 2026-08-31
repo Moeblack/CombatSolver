@@ -10,6 +10,7 @@ using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
+using MegaCrit.Sts2.Core.Models.Orbs;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Relics;
@@ -19,6 +20,7 @@ using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Mirrors;
+using CombatSolver.Engine.InCombat.Mirrors.Orbs;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Death;
 using CombatSolver.Engine.InCombat.Simulation;
 using BufferCard = MegaCrit.Sts2.Core.Models.Cards.Buffer;
@@ -181,6 +183,14 @@ internal sealed partial class CombatBeamSolver
             persistentSetupTraits |= PersistentPowerSetupTrait(power);
         }
         int persistentBuffValue = strategicEffects.RetentionValue;
+        if (playerState.OrbQueue.Orbs.Count > 0)
+        {
+            persistentSetupTraits |= PersistentSetupTraits.OrbEngine;
+            persistentBuffValue += OrbRetentionValue(
+                simulator,
+                playerState.OrbQueue.Orbs,
+                aliveEnemyCount);
+        }
         int latentSetupValue = 0;
         PersistentSetupTraits latentSetupTraits = PersistentSetupTraits.None;
         foreach (PredictedCard latentCard in liveCards)
@@ -500,6 +510,25 @@ internal sealed partial class CombatBeamSolver
             DemonFormPower or CreativeAiPower => PersistentSetupTraits.RecurringScaling,
             _ => PersistentSetupTraits.None,
         };
+
+    private static int OrbRetentionValue(
+        CombatPredictionSimulator simulator,
+        IReadOnlyList<OrbModel> orbs,
+        int aliveEnemyCount)
+    {
+        decimal value = 0m;
+        foreach (OrbModel orb in orbs)
+        {
+            decimal passive = Math.Max(0m, OrbMirrors.GetPassiveValue(simulator, orb));
+            value += orb switch
+            {
+                GlassOrb => passive * aliveEnemyCount,
+                LightningOrb or FrostOrb or DarkOrb or PlasmaOrb => passive,
+                _ => passive,
+            };
+        }
+        return checked((int)Math.Ceiling(value));
+    }
 
     private static int LatentCardSetupValue(CardModel card)
         => card switch

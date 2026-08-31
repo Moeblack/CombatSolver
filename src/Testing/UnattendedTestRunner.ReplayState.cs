@@ -85,6 +85,7 @@ internal sealed partial class UnattendedTestRunner
         player.Gold = savedPlayer.GetProperty("gold").GetInt32();
 
         RestoreReplayInventory(player, savedPlayer);
+        await RestoreReplayOrbsAsync(player, savedPlayer.GetProperty("orbs"));
         await ClearPlayerPilesAsync(player);
         await RestoreReplayPilesAsync(combatState, player, savedPlayer.GetProperty("piles"));
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
@@ -260,6 +261,49 @@ internal sealed partial class UnattendedTestRunner
                     $"遗物[{index}] 为 {relic.Id.Entry}，replay-state 为 {expected}。");
             }
             RestoreReplayPrimitiveState(relic, typeof(RelicModel), savedRelic.GetProperty("fields"));
+        }
+    }
+
+    private static async Task RestoreReplayOrbsAsync(Player player, JsonElement savedOrbs)
+    {
+        PlayerCombatState playerState = player.PlayerCombatState
+            ?? throw new InvalidOperationException("replay-state 导入充能球时玩家没有战斗状态。");
+        int capacity = savedOrbs.GetProperty("capacity").GetInt32();
+        if (capacity is < 0 or > 10)
+            throw new InvalidOperationException($"replay-state 充能球槽位超出范围：{capacity}。");
+
+        playerState.OrbQueue.Clear();
+        playerState.OrbQueue.AddCapacity(capacity);
+        JsonElement[] savedItems = savedOrbs.GetProperty("items").EnumerateArray().ToArray();
+        if (savedItems.Length > capacity)
+        {
+            throw new InvalidOperationException(
+                $"replay-state 充能球数量 {savedItems.Length} 超过槽位 {capacity}。");
+        }
+
+        for (int index = 0; index < savedItems.Length; index++)
+        {
+            JsonElement saved = savedItems[index];
+            int savedIndex = saved.GetProperty("index").GetInt32();
+            if (savedIndex != index)
+            {
+                throw new InvalidOperationException(
+                    $"replay-state 充能球顺序不连续：位置 {index} 记录为 {savedIndex}。");
+            }
+
+            OrbModel orb = ResolveOrbForTest(RequiredString(saved, "id")).ToMutable();
+            orb.Owner = player;
+            RestoreReplayPrimitiveState(orb, typeof(OrbModel), saved.GetProperty("fields"));
+            int expectedPassive = saved.GetProperty("passive").GetInt32();
+            int expectedEvoke = saved.GetProperty("evoke").GetInt32();
+            if (orb.PassiveVal != expectedPassive || orb.EvokeVal != expectedEvoke)
+            {
+                throw new InvalidOperationException(
+                    $"replay-state 充能球 {orb.Id.Entry} 数值为 " +
+                    $"{orb.PassiveVal}/{orb.EvokeVal}，记录为 {expectedPassive}/{expectedEvoke}。");
+            }
+            if (!await playerState.OrbQueue.TryEnqueue(orb))
+                throw new InvalidOperationException($"replay-state 无法恢复充能球 {orb.Id.Entry}。");
         }
     }
 

@@ -72,7 +72,7 @@ internal sealed partial class UnattendedTestRunner
                 SolverPerformancePreset.VeryHigh => 16_000_000_000L,
                 _ => SolverSettings.Capture().NoGcRegionBudgetBytes,
             };
-        long actual = SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting;
+        long actual = SearchGcPolicy.LastEstablishedNoGcRegionBudgetBytesForTesting;
         if (actual != expected)
         {
             throw new InvalidOperationException(

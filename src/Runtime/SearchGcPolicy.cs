@@ -28,6 +28,7 @@ internal static class SearchGcPolicy
     private static int _rolloverCountForTesting;
     private static int _budgetChangeRebuildCountForTesting;
     private static int _budgetChangeWaitCountForTesting;
+    private static long _lastEstablishedNoGcRegionBudgetBytesForTesting;
     internal static int RolloverCountForTesting
     {
         get
@@ -60,6 +61,14 @@ internal static class SearchGcPolicy
                 return _noGcRegionBudgetBytes;
         }
     }
+    internal static long LastEstablishedNoGcRegionBudgetBytesForTesting
+    {
+        get
+        {
+            lock (Gate)
+                return _lastEstablishedNoGcRegionBudgetBytesForTesting;
+        }
+    }
 
     private enum NoGcRegionStartOutcome
     {
@@ -75,6 +84,7 @@ internal static class SearchGcPolicy
             _rolloverCountForTesting = 0;
             _budgetChangeRebuildCountForTesting = 0;
             _budgetChangeWaitCountForTesting = 0;
+            _lastEstablishedNoGcRegionBudgetBytesForTesting = 0;
         }
     }
 
@@ -156,6 +166,8 @@ internal static class SearchGcPolicy
                                             remaining,
                                             _noGcRegionBudgetBytes,
                                             _noGcRegionLohBudgetBytes);
+                                        _lastEstablishedNoGcRegionBudgetBytesForTesting =
+                                            _noGcRegionBudgetBytes;
                                         _activeSearches++;
                                         Entry.Logger.Info(
                                             "[CombatSolver/Test] GC_LATENCY policy=combat_scoped_no_gc_region_reuse");
@@ -191,6 +203,8 @@ internal static class SearchGcPolicy
                             if (_noGcRegionActive)
                             {
                                 _noGcRegionAllocatedBytesAtStart = GC.GetTotalAllocatedBytes(precise: false);
+                                _lastEstablishedNoGcRegionBudgetBytesForTesting =
+                                    noGcRegionBudgetBytes;
                                 Entry.Logger.Info(
                                     $"[CombatSolver/Test] GC_LATENCY policy=combat_scoped_no_gc_region " +
                                     $"budget={noGcRegionBudgetBytes} loh_budget={noGcRegionLohBudgetBytes} " +
@@ -540,6 +554,8 @@ internal static class SearchGcPolicy
                     regionBudgetBytes,
                     lohBudgetBytes);
                 _noGcRegionActive = restartOutcome == NoGcRegionStartOutcome.Started;
+                if (_noGcRegionActive)
+                    _lastEstablishedNoGcRegionBudgetBytesForTesting = regionBudgetBytes;
                 _noGcRegionAllocatedBytesAtStart = GC.GetTotalAllocatedBytes(precise: false);
                 _noGcRegionBudgetBytes = regionBudgetBytes;
                 _noGcRegionLohBudgetBytes = lohBudgetBytes;

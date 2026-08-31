@@ -52,6 +52,11 @@ internal sealed partial class CombatBeamSolver
         SearchNode ChoiceNode,
         SearchNode Parent,
         RoutingChoiceSignature Signature);
+    private readonly record struct RootActionLineageSignature(
+        PlanActionKind Kind,
+        string CardId,
+        string PotionId,
+        uint? TargetCombatId);
 
     private sealed class BeamRetentionPolicy(
         SolverSearchProfile _profile,
@@ -481,6 +486,25 @@ internal sealed partial class CombatBeamSolver
                     AddRequired(required, FindBestStandPat(group, SearchRouteTraits.Resource), limit);
                     AddRequired(required, FindBestStandPat(group, SearchRouteTraits.Control), limit);
                 }
+
+                int rootLineageLimit = Math.Clamp(limit / 8, 4, 16);
+                foreach (IGrouping<RootActionLineageSignature, SearchNode> lineage in ranked
+                             .Where(node => node.Action != null)
+                             .GroupBy(BuildRootActionLineageSignature)
+                             .OrderBy(group => RootActionLineageNode(group.First()).RetentionRank)
+                             .ThenByDescending(group => group.Max(BeamRankScore))
+                             .Take(rootLineageLimit))
+                {
+                    IReadOnlyList<SearchNode> candidates = lineage.ToList();
+                    AddRequired(required, candidates.MaxBy(BeamRankScore), limit);
+                    AddRequired(required, candidates.Aggregate(
+                        (SearchNode?)null,
+                        (best, node) => IsBetterDefensive(node, best) ? node : best), limit);
+                    AddRequired(required, candidates.Aggregate(
+                        (SearchNode?)null,
+                        (best, node) => IsBetterOffensive(node, best) ? node : best), limit);
+                    AddRequired(required, FindBestSetup(candidates), limit);
+                }
             }
             bool endTurnFrontier = ranked.All(node =>
                 node.Action is { } action
@@ -907,6 +931,25 @@ internal sealed partial class CombatBeamSolver
             key.Add(snapshot.UnorderedPileKey.First);
             key.Add(snapshot.UnorderedPileKey.Second);
             return key.Finish();
+        }
+
+        private static RootActionLineageSignature BuildRootActionLineageSignature(SearchNode node)
+        {
+            PlanAction action = RootActionLineageNode(node).Action
+                ?? throw new InvalidOperationException("搜索首步谱系缺少动作。");
+            return new RootActionLineageSignature(
+                action.Kind,
+                action.CardId,
+                action.PotionId,
+                action.TargetCombatId);
+        }
+
+        private static SearchNode RootActionLineageNode(SearchNode node)
+        {
+            SearchNode cursor = node;
+            while (cursor.Parent?.Action != null)
+                cursor = cursor.Parent;
+            return cursor;
         }
 
         private PocketwatchCadenceSignature BuildPocketwatchCadenceSignature(SearchNode node)

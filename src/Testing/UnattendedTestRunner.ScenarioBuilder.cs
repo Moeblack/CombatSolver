@@ -99,6 +99,12 @@ internal sealed partial class UnattendedTestRunner
             IReadOnlyList<UnattendedOrbCheck> orbChecks = request.OrbChecks;
             IReadOnlyList<UnattendedPotionCheck> potionChecks = runner.GetPotionChecks();
             IReadOnlyList<UnattendedMonsterMoveCheck> monsterMoveChecks = runner.GetMonsterMoveChecks();
+            foreach (string monsterId in request.AdditionalMonsterIds
+                         .Where(static id => !string.IsNullOrWhiteSpace(id))
+                         .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                await EnsureMonsterExistsAsync(CombatState, monsterId, null);
+            }
             if (!string.IsNullOrWhiteSpace(request.ReplayStatePath))
             {
                 await ApplyReplayStateAsync(
@@ -118,10 +124,6 @@ internal sealed partial class UnattendedTestRunner
                     potionChecks,
                     monsterMoveChecks);
             }
-            foreach (string monsterId in request.AdditionalMonsterIds
-                         .Where(static id => !string.IsNullOrWhiteSpace(id))
-                         .Distinct(StringComparer.OrdinalIgnoreCase))
-                await EnsureMonsterExistsAsync(CombatState, monsterId, null);
             foreach (IGrouping<string, UnattendedMonsterMoveCheck> group in monsterMoveChecks
                          .Where(static check => !string.IsNullOrWhiteSpace(check.MonsterId))
                          .GroupBy(static check => check.MonsterId, StringComparer.OrdinalIgnoreCase))
