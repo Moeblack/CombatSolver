@@ -21,6 +21,7 @@
 | `STRATEGY-REPLAY-9E8B-HIGH-ORB-LINEAGE` | 通过（headless） | 严格恢复胧光怪报告第二回合、寄生惧魔召唤物、球槽和球队列；High、Smart、DOP4、12GB No-GC 下首步电击，随后飞跃、防御+、防御，完整路线第 `9` 回合无药击杀，预计整场战损 `0`，从报告原求解器 `29` 追平人工 `0`。runId `d7c41a3e64d24fb792d2b45504222e25`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-394B-HIGH-SHORT` | 通过（headless） | 严格恢复虔诚雕塑家报告第二回合根；High、禁用药水、DOP4 在 Short 阶段得到第 `4` 回合结束的 `0` 战损路线，从报告原求解器 `22` 追平人工 `0`。runId `75e243420b5b4f5ca48bc850a5e91ff2`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-EF3E-HIGH-POTION-COUNTERFACTUAL` | 通过（headless） | 严格恢复寄生蛙报告第三回合根；High、Smart、DOP4 在 Short 阶段找到 `1` 战损无药路线，评估并拒绝 `120` 条药水分支，从报告原求解器 `13` 改善并优于人工爆炸药路线 `2`。runId `a967a8dbce494fa2948f6d4d94211a4d`。 | 2026-08-31 |
+| `STRATEGY-REPLAY-99DC-HIGH-CALCULATED-GAMBLE` | 通过（headless） | 严格恢复构装兽群报告首回合根；High、禁用药水、DOP4 在 Short 阶段得到第 `4` 回合结束的 `0` 战损路线，从报告原求解器 `10` 追平人工 `0`。runId `10f27aef7c9941a8820de637ce28c2ab`。 | 2026-08-31 |
 
 ## 0.23.0
 
