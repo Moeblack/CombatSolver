@@ -46,6 +46,16 @@ internal static class CombatSearchCoordinator
                 shortProfile,
                 shortCheckpointMilliseconds: null,
                 primary: shortResult);
+            shortResult = AuditOpeningPowerUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                shortProfile,
+                shortCheckpointMilliseconds: null,
+                primary: shortResult);
             if (policy.MeasurePhasePerformance)
                 policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(shortResult));
             return shortResult;
@@ -101,11 +111,166 @@ internal static class CombatSearchCoordinator
             deepProfile,
             shortProfile.SoftTimeBudgetMilliseconds,
             result);
+        result = AuditOpeningPowerUse(
+            root,
+            displayNames,
+            battleDamage,
+            policy,
+            cancellationToken,
+            progressCallback,
+            deepProfile,
+            shortProfile.SoftTimeBudgetMilliseconds,
+            result);
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SEARCH_SESSION mode=single_anytime " +
             $"short_checkpoint_ms={shortProfile.SoftTimeBudgetMilliseconds} " +
             $"total_budget_ms={deepProfile.SoftTimeBudgetMilliseconds}");
         return result;
+    }
+
+    private static SolverResult AuditOpeningPowerUse(
+        CombatRootSnapshot root,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot policy,
+        CancellationToken cancellationToken,
+        Action<SolverProgress>? progressCallback,
+        SolverSearchProfile profile,
+        int? shortCheckpointMilliseconds,
+        SolverResult primary)
+    {
+        int primaryDeficit = StrategicHpDeficit(root, primary);
+        if (primaryDeficit == 0)
+            return primary;
+
+        IReadOnlyList<PlanAction> openingPowers = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds)
+            .BuildOpeningPowerActions();
+        if (openingPowers.Count == 0)
+            return primary;
+
+        List<SolverResult> searches = [primary];
+        SolverResult selected = primary;
+        foreach (PlanAction openingPower in openingPowers)
+        {
+            SolverResult posterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                fixedPrefixActions: [openingPower]).Solve();
+            bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
+                && posterior.Elapsed.TotalMilliseconds > checkpoint;
+            posterior.SearchPhase = posteriorDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            posterior.DeepSearchTriggered = posteriorDeepTriggered;
+            posterior.DeepSearchImprovedResult = false;
+            posterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                posterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                posteriorDeepTriggered);
+            searches.Add(posterior);
+
+            bool posteriorWon = posterior.Snapshot.AllEnemiesDead
+                && !posterior.Snapshot.PlayerDead
+                && posterior.Snapshot.ProjectedPlayerHp > 0;
+            bool selectedWon = selected.Snapshot.AllEnemiesDead
+                && !selected.Snapshot.PlayerDead
+                && selected.Snapshot.ProjectedPlayerHp > 0;
+            int posteriorDeficit = StrategicHpDeficit(root, posterior);
+            int selectedDeficit = StrategicHpDeficit(root, selected);
+            if (posteriorWon
+                && (!selectedWon
+                    || posteriorDeficit < selectedDeficit
+                    || posteriorDeficit == selectedDeficit
+                        && (posterior.PotionCount < selected.PotionCount
+                            || posterior.PotionCount == selected.PotionCount
+                                && posterior.BestNode.Score > selected.BestNode.Score)))
+            {
+                selected = posterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] OPENING_POWER_POSTERIOR card={openingPower.CardId} " +
+                $"won={posteriorWon} hp_deficit={posteriorDeficit} " +
+                $"selected={ReferenceEquals(selected, posterior)}");
+
+            PlanAction? offensiveFollowUp = new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds)
+                .BuildOpeningPowerOffensiveFollowUp(openingPower);
+            if (offensiveFollowUp == null)
+                continue;
+
+            SolverResult linkedPosterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                fixedPrefixActions: [openingPower, offensiveFollowUp]).Solve();
+            bool linkedDeepTriggered = shortCheckpointMilliseconds is { } linkedCheckpoint
+                && linkedPosterior.Elapsed.TotalMilliseconds > linkedCheckpoint;
+            linkedPosterior.SearchPhase = linkedDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            linkedPosterior.DeepSearchTriggered = linkedDeepTriggered;
+            linkedPosterior.DeepSearchImprovedResult = false;
+            linkedPosterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                linkedPosterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                linkedDeepTriggered);
+            searches.Add(linkedPosterior);
+
+            bool linkedWon = linkedPosterior.Snapshot.AllEnemiesDead
+                && !linkedPosterior.Snapshot.PlayerDead
+                && linkedPosterior.Snapshot.ProjectedPlayerHp > 0;
+            selectedWon = selected.Snapshot.AllEnemiesDead
+                && !selected.Snapshot.PlayerDead
+                && selected.Snapshot.ProjectedPlayerHp > 0;
+            int linkedDeficit = StrategicHpDeficit(root, linkedPosterior);
+            selectedDeficit = StrategicHpDeficit(root, selected);
+            if (linkedWon
+                && (!selectedWon
+                    || linkedDeficit < selectedDeficit
+                    || linkedDeficit == selectedDeficit
+                        && (linkedPosterior.PotionCount < selected.PotionCount
+                            || linkedPosterior.PotionCount == selected.PotionCount
+                                && linkedPosterior.BestNode.Score > selected.BestNode.Score)))
+            {
+                selected = linkedPosterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] OPENING_POWER_LINK_POSTERIOR " +
+                $"cards={openingPower.CardId}+{offensiveFollowUp.CardId} " +
+                $"won={linkedWon} hp_deficit={linkedDeficit} " +
+                $"selected={ReferenceEquals(selected, linkedPosterior)}");
+        }
+
+        MergeAuditTotals(selected, searches.ToArray());
+        return selected;
     }
 
     private static SolverResult AuditRequiredPotionUse(

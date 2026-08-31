@@ -25,6 +25,151 @@ namespace CombatSolver;
 
 internal sealed partial class CombatBeamSolver
 {
+    internal IReadOnlyList<PlanAction> BuildOpeningPowerActions()
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        try
+        {
+            CombatPredictionSimulator simulator = (CombatPredictionSimulator)rootSnapshot.Simulator;
+            SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+            SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
+            IReadOnlyList<PredictedCard> hand = playerState.Hand.Cards;
+            List<PlanAction> actions = [];
+            HashSet<string> seenCardStates = [];
+            SearchNode seed = new(
+                null,
+                0,
+                rootSnapshot.PotionUseCount,
+                rootSnapshot.PotionStrategicCost,
+                _startTurnNumber,
+                SearchRouteTraits.None,
+                0,
+                rootSnapshot.Score,
+                rootSnapshot.StateKey,
+                rootSnapshot.HasRisk,
+                rootSnapshot.BoundaryReason,
+                false,
+                null,
+                rootSnapshot,
+                CombatProgressState.Capture(rootSnapshot));
+
+            for (int handIndex = 0; handIndex < hand.Count; handIndex++)
+            {
+                PredictedCard card = hand[handIndex];
+                if (card.Preview.Type != CardType.Power || !combat.CanPlayCard(simulator, card))
+                    continue;
+
+                string cardStateKey = CardChoiceSupport.ChoiceCardKey(card);
+                if (!seenCardStates.Add(cardStateKey))
+                    continue;
+                int occurrence = hand.Take(handIndex).Count(candidate =>
+                    string.Equals(candidate.Preview.Id.Entry, card.Preview.Id.Entry, StringComparison.Ordinal));
+                int cardStateOccurrence = hand.Take(handIndex).Count(candidate =>
+                    string.Equals(
+                        CardChoiceSupport.ChoiceCardKey(candidate),
+                        cardStateKey,
+                        StringComparison.Ordinal));
+                foreach ((int targetIndex, Creature? target) in TargetsFor(card, simulator))
+                {
+                    if (!card.Original.CanPlayTargeting(target))
+                        continue;
+                    PlanAction action = new(
+                        PlanActionKind.PlayCard,
+                        _startTurnNumber,
+                        card.Preview.Id.Entry,
+                        occurrence,
+                        targetIndex,
+                        target?.CombatId,
+                        displayNames.Card(card.Preview),
+                        displayNames.Creature(target),
+                        ReplayCount: Math.Max(0, card.Preview.GetEnchantedReplayCount()),
+                        CardStateKey: cardStateKey,
+                        CardStateOccurrence: cardStateOccurrence);
+                    SimulationSnapshot probe = ReplayAction(seed, action);
+                    try
+                    {
+                        if (probe.BoundaryReason == SearchBoundaryReason.None
+                            && probe.Turn == _startTurnNumber
+                            && CardChoiceSupport.GetSpec(
+                                (CombatPredictionSimulator)probe.Simulator,
+                                card) == null)
+                        {
+                            actions.Add(action);
+                        }
+                    }
+                    finally
+                    {
+                        probe.ReleaseSimulator();
+                    }
+                }
+            }
+            return actions;
+        }
+        finally
+        {
+            rootSnapshot.ReleaseSimulator();
+        }
+    }
+
+    internal PlanAction? BuildOpeningPowerOffensiveFollowUp(PlanAction openingPower)
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        SimulationSnapshot? powerSnapshot = null;
+        List<SearchNode> followUps = [];
+        try
+        {
+            SearchNode seed = new(
+                null,
+                0,
+                rootSnapshot.PotionUseCount,
+                rootSnapshot.PotionStrategicCost,
+                _startTurnNumber,
+                SearchRouteTraits.None,
+                0,
+                rootSnapshot.Score,
+                rootSnapshot.StateKey,
+                rootSnapshot.HasRisk,
+                rootSnapshot.BoundaryReason,
+                false,
+                null,
+                rootSnapshot,
+                CombatProgressState.Capture(rootSnapshot));
+            powerSnapshot = ReplayAction(seed, openingPower);
+            SearchNode powerNode = new(
+                openingPower,
+                1,
+                powerSnapshot.PotionUseCount,
+                powerSnapshot.PotionStrategicCost,
+                _startTurnNumber,
+                SearchRouteTraits.Scaling,
+                0,
+                powerSnapshot.Score,
+                powerSnapshot.StateKey,
+                powerSnapshot.HasRisk,
+                powerSnapshot.BoundaryReason,
+                false,
+                seed,
+                powerSnapshot,
+                CombatProgressState.Capture(powerSnapshot));
+            followUps.AddRange(Expand(powerNode).Where(node =>
+                node.Action is { Kind: PlanActionKind.PlayCard, Turn: var turn }
+                && turn == _startTurnNumber));
+            SearchNode? best = followUps
+                .Where(node => node.Snapshot.EnemyHp < powerSnapshot.EnemyHp)
+                .OrderBy(node => node.Snapshot.EnemyHp)
+                .ThenByDescending(node => node.Score)
+                .FirstOrDefault();
+            return best?.Action;
+        }
+        finally
+        {
+            foreach (SearchNode followUp in followUps)
+                followUp.Snapshot.ReleaseSimulator();
+            powerSnapshot?.ReleaseSimulator();
+            rootSnapshot.ReleaseSimulator();
+        }
+    }
+
     internal PlanAction? BuildOpeningFullRedrawPotionAction(PlanAction selectedPotionAction)
     {
         SimulationSnapshot rootSnapshot = Replay([]);

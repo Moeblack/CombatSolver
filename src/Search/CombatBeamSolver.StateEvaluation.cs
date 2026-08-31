@@ -205,12 +205,18 @@ internal sealed partial class CombatBeamSolver
             }
         }
         int replayPotentialValue = ReplayPotentialValue(liveCards);
+        int retainedHandValue = playerState.Hand.Cards
+            .Where(card => card.Preview.ShouldRetainThisTurn)
+            .Sum(card => Math.Max(
+                1,
+                (int)Math.Ceiling(CardChoiceSupport.CardValue(card.Preview) * 2d)));
         int futureResourceValue = combat.GetAmount<EnergyNextTurnPower>(_player.Creature) * 16
             + combat.GetAmount<DrawCardsNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<StarNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<RetainHandPower>(_player.Creature) * 4
             + combat.GetAmount<SummonNextTurnPower>(_player.Creature)
-                * (4 + Math.Min(12, liveCards.Count(card => card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2));
+                * (4 + Math.Min(12, liveCards.Count(card => card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2))
+            + retainedHandValue;
         Creature? currentOsty = combat.GetOsty(_player);
         int ostyHp = currentOsty == null
             ? 0
