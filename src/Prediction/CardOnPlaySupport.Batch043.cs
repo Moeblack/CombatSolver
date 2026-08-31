@@ -4,7 +4,6 @@ using MegaCrit.Sts2.Core.Hooks;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Powers;
-using MegaCrit.Sts2.Core.ValueProps;
 using CombatSolver.Engine.Common;
 using CombatSolver.Engine.InCombat.Simulation;
 
@@ -16,7 +15,6 @@ internal static partial class CardOnPlaySupport
         CombatPredictionSimulator simulator,
         SimulatedCombatState combat,
         PredictedCard playedCard,
-        CardPlay cardPlay,
         Creature? target,
         ISet<uint> processedEnemyDeaths)
     {
@@ -55,21 +53,6 @@ internal static partial class CardOnPlaySupport
                 combat.SummonOsty(simulator, card.Owner, card.DynamicVars.Summon.IntValue);
                 combat.HealOsty(simulator, card.Owner, card.DynamicVars.Heal.IntValue);
                 break;
-            case Snap when target != null:
-            {
-                Creature? osty = simulator.State.GetOsty(card.Owner);
-                if (osty != null && simulator.State.GetCreature(osty).IsAlive)
-                {
-                    simulator.Damage(
-                        [target],
-                        card.DynamicVars.OstyDamage.BaseValue,
-                        ValueProp.Move,
-                        osty,
-                        playedCard,
-                        cardPlay);
-                }
-                break;
-            }
             case TheBomb:
             {
                 TheBombPower power = combat.AddPowerInstance<TheBombPower>(
