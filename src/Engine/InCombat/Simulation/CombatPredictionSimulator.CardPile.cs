@@ -262,8 +262,7 @@ internal sealed partial class CombatPredictionSimulator
         SimCardPile? oldPile = card.GetPile(playerCombatState);
         PileType oldPileType = oldPile?.Type ?? PileType.None;
         SimCardPileAddResult result = new(true, card, oldPileType, newPile.Type);
-        if (card.Original.HasBeenRemovedFromState
-            || card.Preview.HasBeenRemovedFromState
+        if (card.Preview.HasBeenRemovedFromState
             || State.GetCreature(owner.Creature).IsDead
             || oldPileType != PileType.None && !oldPileType.IsCombatPile())
         {
@@ -343,8 +342,7 @@ internal sealed partial class CombatPredictionSimulator
             var oldPile = card.GetPile(playerCombatState);
             var oldPileType = oldPile?.Type ?? PileType.None;
 
-            if (card.Original.HasBeenRemovedFromState ||
-                card.Preview.HasBeenRemovedFromState ||
+            if (card.Preview.HasBeenRemovedFromState ||
                 State.GetCreature(owner.Creature).IsDead ||
                 (oldPileType != PileType.None && !oldPileType.IsCombatPile()))
             {

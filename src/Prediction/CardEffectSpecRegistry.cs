@@ -132,14 +132,14 @@ internal static class CardEffectSpecRegistry
         Creature? target)
     {
         CardModel card = playedCard.Preview;
-        Creature originalOwner = playedCard.Original.Owner.Creature;
+        Creature ownerCreature = playedCard.Preview.Owner.Creature;
         bool applied = false;
         if (PowerEffects.TryGetValue(card.GetType(), out CardPowerEffect[]? effects))
         {
             foreach (CardPowerEffect effect in effects)
             {
                 int amount = effect.Amount(card);
-                Creature owner = originalOwner;
+                Creature owner = ownerCreature;
                 switch (effect.Target)
                 {
                     case CardEffectTarget.Owner:
@@ -160,7 +160,7 @@ internal static class CardEffectSpecRegistry
                         {
                             ((StringVar)knockdown.DynamicVars["Applier"]).StringValue = PlatformUtil.GetPlayerName(
                                 RunManager.Instance.NetService.Platform,
-                                playedCard.Original.Owner.NetId);
+                                playedCard.Preview.Owner.NetId);
                         }
                         break;
                     }
@@ -283,13 +283,13 @@ internal static class CardEffectSpecRegistry
                 applied = true;
                 break;
             }
-            case DeathsDoor when combat.WasDoomAppliedThisTurn(originalOwner):
+            case DeathsDoor when combat.WasDoomAppliedThisTurn(ownerCreature):
                 for (int index = 0; index < card.DynamicVars.Repeat.IntValue; index++)
-                    simulator.GainBlock(originalOwner, card.DynamicVars.Block, playedCard, null);
+                    simulator.GainBlock(ownerCreature, card.DynamicVars.Block, playedCard, null);
                 applied = true;
                 break;
-            case EvilEye when combat.WasCardExhaustedThisTurn(originalOwner):
-                simulator.GainBlock(originalOwner, card.DynamicVars.Block, playedCard, null);
+            case EvilEye when combat.WasCardExhaustedThisTurn(ownerCreature):
+                simulator.GainBlock(ownerCreature, card.DynamicVars.Block, playedCard, null);
                 applied = true;
                 break;
             case GeneticAlgorithm geneticAlgorithm:
@@ -306,18 +306,18 @@ internal static class CardEffectSpecRegistry
                 BlockVar nextTurn = (BlockVar)card.DynamicVars["BlockNextTurn"];
                 decimal amount = HookMirrors.ModifyBlock(
                     simulator,
-                    originalOwner,
+                    ownerCreature,
                     nextTurn.BaseValue,
                     nextTurn.Props,
                     playedCard,
                     null,
                     out _);
-                combat.Apply<BlockNextTurnPower>(originalOwner, (int)amount, originalOwner);
+                combat.Apply<BlockNextTurnPower>(ownerCreature, (int)amount, ownerCreature);
                 applied = true;
                 break;
             }
             case GoForTheEyes when target != null && combat.IsEnemyIntendingToAttack(target):
-                combat.Apply<WeakPower>(target, card.DynamicVars.Weak.IntValue, originalOwner);
+                combat.Apply<WeakPower>(target, card.DynamicVars.Weak.IntValue, ownerCreature);
                 applied = true;
                 break;
             case Misery when target != null:
@@ -333,7 +333,7 @@ internal static class CardEffectSpecRegistry
             {
                 int vulnerable = combat.GetAmount<VulnerablePower>(target);
                 if (vulnerable > 0)
-                    combat.Apply<VulnerablePower>(target, vulnerable, originalOwner);
+                    combat.Apply<VulnerablePower>(target, vulnerable, ownerCreature);
                 applied = true;
                 break;
             }

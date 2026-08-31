@@ -28,7 +28,7 @@ internal static class CorePowerSupport
         ISet<uint> processedEnemyDeaths)
     {
         CardModel card = playedCard.Preview;
-        Creature owner = playedCard.Original.Owner.Creature;
+        Creature owner = playedCard.Preview.Owner.Creature;
         MonologuePower[] pendingMonologues = combat.CapturePendingMonologues(owner);
         combat.BeginCardPowerApplication(card);
         CardOnPlaySupport.Apply(

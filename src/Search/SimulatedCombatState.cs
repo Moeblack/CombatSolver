@@ -304,13 +304,11 @@ internal sealed partial class SimulatedCombatState
             }
         }
         AbstractModel[] liveCombatHookListeners = inner.IterateHookListeners().ToArray();
-        AbstractModel[] liveRunHookListeners = inner.RunState.IterateHookListeners(inner).ToArray();
         RunState concreteRunState = inner.RunState as RunState
             ?? throw new InvalidOperationException("Combat prediction requires a concrete RunState.");
         _modHookSubscribers = PredictionModHookSubscriberCapture.Capture(
             concreteRunState,
-            inner,
-            liveRunHookListeners);
+            inner);
         _rootMaxHandSizes = _modHookSubscribers.MaxHandSizes;
         int standardCombatListenerCount =
             liveCombatHookListeners.Length - _modHookSubscribers.CombatSubscribers.Length;
@@ -333,46 +331,31 @@ internal sealed partial class SimulatedCombatState
                 and not EnchantmentModel
                 and not OrbModel)
             .ToArray();
-        int runOnlyListenerCount = liveRunHookListeners.Length - liveCombatHookListeners.Length;
-        if (runOnlyListenerCount < 0)
-            throw new InvalidOperationException("Run hook listener snapshot is shorter than its combat suffix.");
-        for (int index = 0; index < liveCombatHookListeners.Length; index++)
-        {
-            if (!ReferenceEquals(liveRunHookListeners[runOnlyListenerCount + index], liveCombatHookListeners[index]))
-                throw new InvalidOperationException("Run hook listener snapshot does not end with the combat listeners.");
-        }
-        int standardRunListenerCount = runOnlyListenerCount - _modHookSubscribers.RunSubscribers.Length;
-        if (standardRunListenerCount < 0)
-            throw new InvalidOperationException("Run hook listener prefix is shorter than its mod subscriber suffix.");
-        for (int index = 0; index < _modHookSubscribers.RunSubscribers.Length; index++)
-        {
-            if (!ReferenceEquals(
-                    liveRunHookListeners[standardRunListenerCount + index],
-                    _modHookSubscribers.RunSubscribers[index]))
-            {
-                throw new InvalidOperationException("Run hook listener prefix does not end with mod subscribers.");
-            }
-        }
         List<AbstractModel> rootRunHookListeners = [];
-        foreach (AbstractModel listener in liveRunHookListeners.Take(standardRunListenerCount))
+        foreach (Player player in concreteRunState.Players.Where(player => player.IsActiveForHooks))
         {
-            if (!rootModelClones.TryGetValue(listener, out AbstractModel? captured))
+            foreach (CardModel card in player.Deck.Cards)
             {
-                if (listener is CardModel card)
+                if (!MegaCrit.Sts2.Core.Runs.RunState.Contains(card))
+                    continue;
+                if (!rootModelClones.TryGetValue(card, out AbstractModel? capturedCard))
                 {
                     CardModel clone = PredictionUtils.CloneCardStateForSimulation(card);
                     rootModelClones.Add(card, clone);
                     if (card.Enchantment != null && clone.Enchantment != null)
                         rootModelClones.TryAdd(card.Enchantment, clone.Enchantment);
-                    captured = clone;
+                    capturedCard = clone;
                 }
-                else
+                rootRunHookListeners.Add(capturedCard);
+                if (card.Enchantment != null
+                    && MegaCrit.Sts2.Core.Runs.RunState.Contains(card.Enchantment))
                 {
-                    throw new InvalidOperationException(
-                        $"Unexpected standard run hook listener {listener.GetType().FullName}.");
+                    rootRunHookListeners.Add(rootModelClones.TryGetValue(card.Enchantment, out AbstractModel? captured)
+                        ? captured
+                        : throw new InvalidOperationException(
+                            $"Deck enchantment {card.Enchantment.Id.Entry} was not cloned with its card."));
                 }
             }
-            rootRunHookListeners.Add(captured);
         }
         _rootRunHookListeners = rootRunHookListeners.ToArray();
         _allies = new ForkableList<Creature>(inner.Allies);
@@ -1008,25 +991,14 @@ internal sealed partial class SimulatedCombatState
 
     public void IncrementSandpitTargeting(Creature target)
     {
-        Creature owner = Enemies.FirstOrDefault(enemy => GetPower<SandpitPower>(enemy)?.Target == target)
-            ?? throw new InvalidOperationException("挣扎没有找到以玩家为目标的流沙坑状态。");
-        (Creature, Type) key = (owner, typeof(SandpitPower));
-        if (_powers?.TryGetValue(key, out PowerModel? existing) == true)
-        {
-            existing._amount++;
-            InvalidateHookListeners();
+        SandpitPower? source = EffectivePowers()
+            .OfType<SandpitPower>()
+            .FirstOrDefault(power => power.Amount > 0
+                && ReferenceEquals(power.Target, target)
+                && ContainsCreature(power.Owner));
+        if (source == null)
             return;
-        }
-
-        SandpitPower source = GetPower<SandpitPower>(owner)
-            ?? throw new InvalidOperationException("挣扎找到沙坑所有者但未找到对应状态。");
-        SandpitPower mutable = PredictionUtils.CloneModelForSimulation(source);
-        mutable._owner = owner;
-        mutable._applier = source.Applier;
-        mutable._target = target;
-        mutable._amount = source.Amount + 1;
-        (_powers ??= []).Add(key, mutable);
-        InvalidateHookListeners();
+        SetPowerAmount(source, source.Amount + 1);
     }
 
     public bool TriggerPlayerTurnStart(

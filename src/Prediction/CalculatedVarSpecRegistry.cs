@@ -67,7 +67,7 @@ internal static class CalculatedVarSpecRegistry
         CardModel model = card.Preview;
         SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(model.Owner);
         SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
-        Creature owner = card.Original.Owner.Creature;
+        Creature owner = card.Preview.Owner.Creature;
         multiplier = model switch
         {
             PreciseCut => -playerState.Hand.Cards.Count,

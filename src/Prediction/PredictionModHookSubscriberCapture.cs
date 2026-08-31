@@ -45,8 +45,7 @@ internal sealed class PredictionModHookSubscriberCapture
 
     public static PredictionModHookSubscriberCapture Capture(
         RunState runState,
-        CombatState combat,
-        IReadOnlyList<AbstractModel> runHookListeners)
+        CombatState combat)
     {
         AbstractModel[] runSubscribers = ModHelper.IterateAllRunStateSubscribers(runState).ToArray();
         AbstractModel[] combatSubscribers = ModHelper.IterateAllCombatStateSubscribers(combat).ToArray();

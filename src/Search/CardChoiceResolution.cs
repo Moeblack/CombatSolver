@@ -169,7 +169,6 @@ internal static partial class CardChoiceSupport
             throw new InvalidOperationException($"变换时找不到 {original.Preview.Id.Entry} 的牌堆位置。");
 
         simulator.RemoveFromCombat(original);
-        replacement.Original.HasBeenRemovedFromState = false;
         replacement.MutablePreview.HasBeenRemovedFromState = false;
         pile.Insert(Math.Min(index, pile.Cards.Count), replacement);
         var generation = simulator.History.CardGenerated(

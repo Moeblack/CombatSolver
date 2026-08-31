@@ -31,6 +31,7 @@ internal static class IntentForecaster
     {
         public MonsterModel Monster { get; } = monster;
         public MoveState Current { get; set; } = monster.NextMove;
+        public bool Active { get; set; } = true;
         public List<string> Log { get; } = monster.MoveStateMachine?.StateLog.Select(state => state.Id).ToList() ?? [];
         public int KnowledgeDemonCurseCounter { get; set; } = monster.GetType().Name == "KnowledgeDemon"
             ? MonsterValueReader.ReadInt(monster, "_curseOfKnowledgeCounter")
@@ -54,6 +55,8 @@ internal static class IntentForecaster
             List<ForecastMove> moves = [];
             foreach (Cursor cursor in cursors)
             {
+                if (!cursor.Active)
+                    continue;
                 IReadOnlyList<ForecastAttackHit> hits = GetAttackHits(cursor.Monster, cursor.Current, state,
                     ref unsupported, ref exact, unsupportedDetails, approximationDetails);
                 moves.Add(new ForecastMove(cursor.Monster.Creature, cursor.Current, hits));
@@ -64,7 +67,16 @@ internal static class IntentForecaster
                 continue;
 
             foreach (Cursor cursor in cursors)
+            {
+                if (!cursor.Active)
+                    continue;
+                if (MonsterMoveEffects.RemovesOwner(cursor.Monster, cursor.Current.Id))
+                {
+                    cursor.Active = false;
+                    continue;
+                }
                 cursor.Current = RollNext(cursor, rng, ref exact, approximationDetails);
+            }
             monsterAiCounters.Add(rng.ToSerializable().counter);
         }
 

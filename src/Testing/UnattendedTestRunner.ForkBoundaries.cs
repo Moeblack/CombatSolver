@@ -37,6 +37,10 @@ internal sealed partial class UnattendedTestRunner
         AssertCardCompletionSettlesPowerAmountChanges(combat, player);
         AssertBeforeCardPlayedPowerConsumptionCommits(combat, player);
         AssertGeneratedCardCreatorDrivesSupermassive(combat, player);
+        AssertLiveOriginalRemovalDoesNotAffectSnapshot(combat, player, card);
+        AssertReplayCardIdentityDistinguishesGeneratedCopies(simulator, player);
+        AssertMissingSandpitIsACompletedFranticEscape(combat, player);
+        AssertTerminalMonsterMovesStopForecasting();
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -262,6 +266,77 @@ internal sealed partial class UnattendedTestRunner
         decimal expected = baseline + supermassive.Preview.DynamicVars.ExtraDamage.BaseValue;
         if (CalculateSupermassive(simulator, supermassive) != expected)
             throw new InvalidOperationException("玩家创建的生成牌没有被超质量体计入。");
+    }
+
+    private static void AssertLiveOriginalRemovalDoesNotAffectSnapshot(
+        CombatState combat,
+        Player player,
+        CardModel liveCard)
+    {
+        CombatPredictionSimulator simulator = new(new SimulatedCombatState(combat));
+        PredictedCard predicted = simulator.State.GetPlayerCombatState(player).FindCard(liveCard)
+            ?? throw new InvalidOperationException("实机原牌隔离测试找不到预测卡牌。");
+        predicted.MaterializePreview();
+        bool removed = liveCard.HasBeenRemovedFromState;
+        try
+        {
+            liveCard.HasBeenRemovedFromState = true;
+            SimCardPileAddResult result = simulator.AddToPile(predicted, PileType.Discard);
+            if (!result.Success
+                || predicted.GetPile(simulator.State)?.Type != PileType.Discard)
+            {
+                throw new InvalidOperationException("实机原牌移出战斗污染了预测快照移牌。");
+            }
+        }
+        finally
+        {
+            liveCard.HasBeenRemovedFromState = removed;
+        }
+    }
+
+    private static void AssertReplayCardIdentityDistinguishesGeneratedCopies(
+        CombatPredictionSimulator simulator,
+        Player player)
+    {
+        PredictedCard deckCard = simulator.State.GetPlayerCombatState(player).AllCards
+            .FirstOrDefault(card => card.Preview.DeckVersion != null)
+            ?? throw new InvalidOperationException("回放卡牌身份测试找不到带牌组版本的卡牌。");
+        deckCard.MaterializePreview();
+        PredictedCard generatedCopy = deckCard.CreateClone();
+        string deckKey = CardChoiceSupport.ChoiceCardKey(deckCard);
+        string generatedKey = CardChoiceSupport.ChoiceCardKey(generatedCopy);
+        if (string.Equals(deckKey, generatedKey, StringComparison.Ordinal))
+            throw new InvalidOperationException("回放卡牌身份没有区分牌组原牌与生成复制。");
+        PlanAction action = new(
+            PlanActionKind.PlayCard,
+            1,
+            generatedCopy.Preview.Id.Entry,
+            CardStateKey: generatedKey);
+        if (!ReferenceEquals(
+                CombatBeamSolver.FindCardForReplay([deckCard, generatedCopy], action),
+                generatedCopy))
+        {
+            throw new InvalidOperationException("回放卡牌身份没有选中计划中的生成复制。");
+        }
+    }
+
+    private static void AssertMissingSandpitIsACompletedFranticEscape(
+        CombatState combat,
+        Player player)
+    {
+        CombatPredictionSimulator simulator = new(new SimulatedCombatState(combat));
+        SimulatedCombatState simulatedCombat = (SimulatedCombatState)simulator.State.CombatState;
+        simulatedCombat.IncrementSandpitTargeting(player.Creature);
+    }
+
+    private static void AssertTerminalMonsterMovesStopForecasting()
+    {
+        MonsterModel gasBomb = ModelDb.Monster<MegaCrit.Sts2.Core.Models.Monsters.GasBomb>();
+        if (!MonsterMoveEffects.RemovesOwner(gasBomb, "EXPLODE_MOVE")
+            || MonsterMoveEffects.RemovesOwner(gasBomb, "STUNNED"))
+        {
+            throw new InvalidOperationException("终止型怪物行动分类不正确。");
+        }
     }
 
     private static decimal CalculateSupermassive(

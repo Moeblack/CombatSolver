@@ -27,14 +27,16 @@ internal sealed partial class UnattendedTestRunner
         var capturedCardConstraint = combat.RunState.CardMultiplayerConstraint;
         int capturedShuffleCounter = combat.RunState.Rng.Shuffle.Counter();
         AbstractModel[] liveCombatListeners = combat.IterateHookListeners().ToArray();
-        AbstractModel[] liveRunListeners = combat.RunState.IterateHookListeners(combat).ToArray();
-        int liveRunOnlyListenerCount = liveRunListeners.Length - liveCombatListeners.Length;
         RunState concreteRunState = combat.RunState as RunState
             ?? throw new InvalidOperationException("根快照测试要求具体 RunState。");
-        int liveRunSubscriberCount = ModHelper.IterateAllRunStateSubscribers(concreteRunState).Count();
-        int liveStandardRunOnlyListenerCount = liveRunOnlyListenerCount - liveRunSubscriberCount;
-        if (liveStandardRunOnlyListenerCount < 0)
-            throw new InvalidOperationException("运行级监听器前缀短于 ModHelper subscriber 后缀。");
+        AbstractModel[] liveStandardRunListeners = concreteRunState.Players
+            .Where(candidate => candidate.IsActiveForHooks)
+            .SelectMany(candidate => candidate.Deck.Cards)
+            .SelectMany(card => card.Enchantment == null
+                ? [card]
+                : new AbstractModel[] { card, card.Enchantment })
+            .Where(RunState.Contains)
+            .ToArray();
         AbstractModel? loadoutEveryCardFreeHook = liveCombatListeners.SingleOrDefault(listener =>
             listener.GetType().FullName == "Loadout.Services.TildeKey.LoadoutEveryCardFreeCombatHook");
         bool liveEveryCardFree = false;
@@ -143,17 +145,17 @@ internal sealed partial class UnattendedTestRunner
             {
                 throw new InvalidOperationException("根快照没有保留捕获时的运行级标量或 RNG 状态。");
             }
-            if (predictedCombat.RootRunHookListenerCount != liveStandardRunOnlyListenerCount)
+            if (predictedCombat.RootRunHookListenerCount != liveStandardRunListeners.Length)
             {
                 throw new InvalidOperationException(
                     $"运行级监听器前缀数量不一致：captured={predictedCombat.RootRunHookListenerCount} " +
-                    $"live={liveStandardRunOnlyListenerCount}。");
+                    $"live={liveStandardRunListeners.Length}。");
             }
             IReadOnlyList<AbstractModel> predictedRunListeners =
                 ((ICombatPredictionHookListenerSource)predictedCombat).RunHookListeners;
-            for (int index = 0; index < liveStandardRunOnlyListenerCount; index++)
+            for (int index = 0; index < liveStandardRunListeners.Length; index++)
             {
-                AbstractModel liveListener = liveRunListeners[index];
+                AbstractModel liveListener = liveStandardRunListeners[index];
                 if (liveListener is not (CardModel or EnchantmentModel))
                     continue;
                 if (ReferenceEquals(predictedRunListeners[index], liveListener))

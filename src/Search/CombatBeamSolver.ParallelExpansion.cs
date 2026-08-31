@@ -479,6 +479,18 @@ internal sealed partial class CombatBeamSolver
                 continue;
             }
             seenCards[seenCardCount++] = playableKey;
+            string cardStateKey = CardChoiceSupport.ChoiceCardKey(card);
+            int cardStateOccurrence = 0;
+            for (int priorIndex = 0; priorIndex < handIndex; priorIndex++)
+            {
+                if (string.Equals(
+                        CardChoiceSupport.ChoiceCardKey(hand[priorIndex]),
+                        cardStateKey,
+                        StringComparison.Ordinal))
+                {
+                    cardStateOccurrence++;
+                }
+            }
             foreach ((int targetIndex, Creature? target) in TargetsFor(card, simulator))
             {
                 if (node.ActionCount == 0 && !card.Original.CanPlayTargeting(target))
@@ -492,7 +504,9 @@ internal sealed partial class CombatBeamSolver
                     target?.CombatId,
                     displayNames.Card(card.Preview),
                     displayNames.Creature(target),
-                    ReplayCount: Math.Max(0, card.Preview.GetEnchantedReplayCount()));
+                    ReplayCount: Math.Max(0, card.Preview.GetEnchantedReplayCount()),
+                    CardStateKey: cardStateKey,
+                    CardStateOccurrence: cardStateOccurrence);
                 SimulationSnapshot probeSnapshot = ReplayAction(node, action);
 
                 CombatPredictionSimulator probeSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;

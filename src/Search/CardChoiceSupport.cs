@@ -462,6 +462,7 @@ internal static partial class CardChoiceSupport
                $"energy={card.EnergyCost.CostsX}:{card.EnergyCost.GetWithModifiers(CostModifiers.Local)}|" +
                $"stars={card.HasStarCostX}:{card.CurrentStarCost}|replay={card.BaseReplayCount}|" +
                $"exhaust={card.ExhaustOnNextPlay}|sly={card.IsSlyThisTurn}|retain={card.ShouldRetainThisTurn}|" +
+               $"deck={card.DeckVersion != null}|" +
                $"keywords={keywords}|vars={vars}|" +
                $"{(card.Enchantment == null ? "-" : EnchantmentStateSupport.Describe(card.Enchantment))}|" +
                $"{card.Affliction?.Id.Entry}:{card.Affliction?.Amount ?? 0}";

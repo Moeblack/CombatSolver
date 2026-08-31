@@ -357,12 +357,16 @@ internal sealed partial class CombatPredictionSimulator
 
             // OnPlay can suspend on a triggered choice before the card's own selector opens.
             if (State.CombatState is ICombatPredictionPendingChoiceState { HasPendingChoice: true })
+            {
+                HookMirrors.AbortCardPlayed(this, cardPlay);
                 return;
+            }
 
             if (!isAutoPlay
                 && State.CombatState is ICombatPredictionManualCardChoiceSink choiceSink
                 && !choiceSink.ResolveManualCardChoice(this, card))
             {
+                HookMirrors.AbortCardPlayed(this, cardPlay);
                 return;
             }
 
@@ -372,6 +376,7 @@ internal sealed partial class CombatPredictionSimulator
                 && nestedChoiceSourceId != null
                 && !ResolveNestedAutoPlayChoice(card, nestedChoiceSourceId))
             {
+                HookMirrors.AbortCardPlayed(this, cardPlay);
                 return;
             }
 

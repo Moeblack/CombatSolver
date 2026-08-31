@@ -76,10 +76,21 @@ internal sealed partial class CombatBeamSolver
                 continue;
             }
             seenCards[seenCardCount++] = playableKey;
+            string cardStateKey = CardChoiceSupport.ChoiceCardKey(card);
+            int cardStateOccurrence = 0;
+            for (int priorIndex = 0; priorIndex < handIndex; priorIndex++)
+            {
+                if (string.Equals(
+                        CardChoiceSupport.ChoiceCardKey(hand[priorIndex]),
+                        cardStateKey,
+                        StringComparison.Ordinal))
+                {
+                    cardStateOccurrence++;
+                }
+            }
             foreach ((int targetIndex, Creature? target) in TargetsFor(card, simulator))
             {
-                // A search restarted after a partially executed route must respect the exact live
-                // card/target gate at its new root. Deeper nodes continue to use the forked mirror.
+                // The first action after a partial-route restart still observes the live target gate.
                 if (node.ActionCount == 0 && !card.Original.CanPlayTargeting(target))
                     continue;
                 string targetName = displayNames.Creature(target);
@@ -92,7 +103,9 @@ internal sealed partial class CombatBeamSolver
                     target?.CombatId,
                     displayNames.Card(card.Preview),
                     targetName,
-                    ReplayCount: Math.Max(0, card.Preview.GetEnchantedReplayCount()));
+                    ReplayCount: Math.Max(0, card.Preview.GetEnchantedReplayCount()),
+                    CardStateKey: cardStateKey,
+                    CardStateOccurrence: cardStateOccurrence);
                 SimulationSnapshot probeSnapshot = ReplayAction(node, action);
 
                 CombatPredictionSimulator probeSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;
@@ -803,6 +816,8 @@ internal sealed partial class CombatBeamSolver
         {
             simulatedCombat.EndActionChoices();
         }
+        if (boundary == SearchBoundaryReason.None)
+            SettleReplayActionBoundary(simulator, simulatedCombat);
         return Snapshot(
             simulator,
             _startTurnNumber,
@@ -977,6 +992,8 @@ internal sealed partial class CombatBeamSolver
                 {
                     _run.Performance.End(SearchMetricPhase.RoundAdvance, roundMeasurement);
                 }
+                if (boundary == SearchBoundaryReason.None)
+                    SettleReplayActionBoundary(simulator, simulatedCombat);
                 turn++;
                 LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn);
                 continue;
@@ -1020,8 +1037,7 @@ internal sealed partial class CombatBeamSolver
                         boundary = SearchBoundaryReason.PendingChoice;
                         break;
                     }
-                    simulatedCombat.NormalizeAeonglassWithers(simulator);
-                    simulatedCombat.NormalizeCardAfflictions(simulator);
+                    SettleReplayActionBoundary(simulator, simulatedCombat);
                 }
                 finally
                 {
@@ -1037,10 +1053,7 @@ internal sealed partial class CombatBeamSolver
             }
 
             SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
-            PredictedCard? card = FindCardOccurrence(
-                playerState.Hand.Cards,
-                action.CardId,
-                action.CardOccurrence)
+            PredictedCard? card = FindCardForReplay(playerState.Hand.Cards, action)
                 ?? throw new InvalidOperationException($"回放时找不到手牌 {action.CardId}#{action.CardOccurrence}。");
             Creature? target = simulatedCombat.GetCreature(action.TargetCombatId);
             if (!simulatedCombat.CanPlayCard(simulator, card))
@@ -1086,8 +1099,7 @@ internal sealed partial class CombatBeamSolver
                     boundary = SearchBoundaryReason.PendingChoice;
                     break;
                 }
-                simulatedCombat.NormalizeAeonglassWithers(simulator);
-                simulatedCombat.NormalizeCardAfflictions(simulator);
+                SettleReplayActionBoundary(simulator, simulatedCombat);
             }
             finally
             {
@@ -1107,6 +1119,8 @@ internal sealed partial class CombatBeamSolver
                     processedEnemyDeaths,
                     ref shufflesCrossed,
                     action.TurnStartChoices);
+                if (boundary == SearchBoundaryReason.None)
+                    SettleReplayActionBoundary(simulator, simulatedCombat);
                 turn++;
             }
             LogAnnotatedReplayState(simulator, action, priorActionCount + actionOffset, turn);
@@ -1123,6 +1137,16 @@ internal sealed partial class CombatBeamSolver
             processedEnemyDeaths);
         _run.Performance.End(SearchMetricPhase.Snapshot, snapshotMeasurement);
         return snapshot;
+    }
+
+    private static void SettleReplayActionBoundary(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat)
+    {
+        simulator.SynchronizePowerAmountPredictionStates();
+        PowerLifecycleSupport.ResolvePowerAmountChanges(simulator, combat);
+        combat.NormalizeAeonglassWithers(simulator);
+        combat.NormalizeCardAfflictions(simulator);
     }
 
     private void LogAnnotatedReplayState(
@@ -1256,6 +1280,30 @@ internal sealed partial class CombatBeamSolver
             $"state_diffs={stateDifferences} " +
             $"incremental_boundary={incremental.BoundaryReason} replayed_boundary={replayed.BoundaryReason} " +
             $"incremental_key={incremental.StateKey} replayed_key={replayed.StateKey}");
+    }
+
+    internal static PredictedCard? FindCardForReplay(
+        IReadOnlyList<PredictedCard> cards,
+        PlanAction action)
+    {
+        if (!string.IsNullOrEmpty(action.CardStateKey))
+        {
+            int occurrence = action.CardStateOccurrence;
+            foreach (PredictedCard card in cards)
+            {
+                if (!string.Equals(
+                        CardChoiceSupport.ChoiceCardKey(card),
+                        action.CardStateKey,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (occurrence-- == 0)
+                    return card;
+            }
+            return null;
+        }
+        return FindCardOccurrence(cards, action.CardId, action.CardOccurrence);
     }
 
     private static PredictedCard? FindCardOccurrence(

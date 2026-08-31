@@ -13,6 +13,13 @@ namespace CombatSolver;
 
 internal static partial class MonsterMoveEffects
 {
+    public static bool RemovesOwner(MonsterModel monster, string moveId)
+        => (monster.GetType().Name, moveId) is
+            ("GasBomb", "EXPLODE_MOVE") or
+            ("WaterfallGiant", "EXPLODE_MOVE") or
+            ("FatGremlin", "FLEE_MOVE") or
+            ("ThievingHopper", "ESCAPE_MOVE");
+
     public static bool Supports(MonsterModel monster, string moveId)
     {
         return (monster.GetType().Name, moveId) is
