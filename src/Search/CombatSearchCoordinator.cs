@@ -821,7 +821,14 @@ internal static class CombatSearchCoordinator
         IReadOnlyList<PlanAction> actions = result.BestNode.Actions;
         for (int index = 0; index < actions.Count; index++)
         {
-            if (actions[index].Kind == PlanActionKind.UsePotion)
+            PlanAction action = actions[index];
+            if (action.Turn != result.StartTurnNumber
+                || action.Kind == PlanActionKind.EndTurn
+                || action.EndsPlayerTurn)
+            {
+                return [];
+            }
+            if (action.Kind == PlanActionKind.UsePotion)
                 return actions.Take(index + 1).ToArray();
         }
         return [];
