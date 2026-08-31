@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Helpers;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
@@ -55,6 +56,15 @@ internal static class SolverController
     public static bool IsSearching => _search != null || PlayerTurnSetupCoordinator.IsSearching;
     public static bool IsDeploying => _deployment != null;
     public static bool SolverDisabled => _solverDisabled;
+
+    /// <summary>
+    /// True whenever the current run is a networked multiplayer session (host or client).
+    /// The solver must stay fully inert in this case: the game's own multiplayer turn
+    /// synchronization has no concept of a client silently auto-planning another player's turn.
+    /// </summary>
+    public static bool IsMultiplayerSession
+        => RunManager.Instance.IsInProgress && RunManager.Instance.NetService.Type.IsMultiplayer();
+
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
     public static bool AutomaticSearchPaused => _combat.AutomaticSearchPaused;
     public static bool StopFullAutoOnCombatEnd => _stopFullAutoOnCombatEnd;

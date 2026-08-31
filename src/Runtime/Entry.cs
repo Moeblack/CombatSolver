@@ -72,7 +72,8 @@ public static class Entry
     {
         if (!Enabled
             || state.CurrentSide != CombatSide.Player
-            || NGame.Instance == null)
+            || NGame.Instance == null
+            || SolverController.IsMultiplayerSession)
             return;
         if (SolverController.SolverDisabled)
         {
@@ -115,6 +116,7 @@ public static class Entry
 
         if (!Enabled
             || SolverController.SolverDisabled
+            || SolverController.IsMultiplayerSession
             || !UnattendedTestRunner.AutomaticTurnSearchEnabled
             || !CombatManager.Instance.IsInProgress
             || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
