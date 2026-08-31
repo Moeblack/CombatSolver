@@ -340,6 +340,13 @@ internal static class SearchGcPolicy
                 long privateBefore = processBefore.PrivateMemorySize64;
                 TimeSpan pauseBefore = GC.GetTotalPauseDuration();
                 Stopwatch stopwatch = Stopwatch.StartNew();
+
+                bool isCombatEnd = reason is not ("no_gc_region_rollover"
+                    or "no_gc_region_exhausted"
+                    or "before_next_search");
+                if (isCombatEnd)
+                    await Task.Delay(System.Random.Shared.Next(4_000, 7_001));
+                // No-GC 区域撑过击杀瞬间；大清理延迟到击杀后 4-7s 才触发，不再卡击杀帧。
                 if (endNoGcRegion)
                     GC.EndNoGCRegion();
                 if (restoreLatencyMode)
