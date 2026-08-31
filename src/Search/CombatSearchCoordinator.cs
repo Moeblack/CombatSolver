@@ -155,7 +155,45 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds)
             .BuildOpeningPowerActions();
-        if (openingPowers.Count == 0)
+        IReadOnlyList<PlanAction> openingPotions = policy.PotionPolicy == SolverPotionPolicy.Disabled
+            ? []
+            : new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                    maximumPotionUses: 1)
+                .BuildOpeningPotionActions();
+        List<(PlanAction Potion, PlanAction Power)> potionPowerPairs = [];
+        foreach (PlanAction openingPotion in openingPotions)
+        {
+            IReadOnlyList<PlanAction> powers = new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                    maximumPotionUses: 1)
+                .BuildPowerActionsAfterPrefix([openingPotion]);
+            foreach (PlanAction power in powers)
+            {
+                potionPowerPairs.Add((openingPotion, power));
+                if (potionPowerPairs.Count == 4)
+                    break;
+            }
+            if (potionPowerPairs.Count == 4)
+                break;
+        }
+        if (openingPowers.Count == 0 && potionPowerPairs.Count == 0)
             return primary;
 
         List<SolverResult> searches = [primary];
@@ -269,6 +307,60 @@ internal static class CombatSearchCoordinator
                 $"cards={openingPower.CardId}+{offensiveFollowUp.CardId} " +
                 $"won={linkedWon} hp_deficit={linkedDeficit} " +
                 $"selected={ReferenceEquals(selected, linkedPosterior)}");
+        }
+
+        foreach ((PlanAction openingPotion, PlanAction postPotionPower) in potionPowerPairs)
+        {
+            PlanAction[] jointPrefix = [openingPotion, postPotionPower];
+            SolverResult jointPosterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: Math.Max(1, primary.PotionCount),
+                fixedPrefixActions: jointPrefix).Solve();
+            bool jointDeepTriggered = shortCheckpointMilliseconds is { } jointCheckpoint
+                && jointPosterior.Elapsed.TotalMilliseconds > jointCheckpoint;
+            jointPosterior.SearchPhase = jointDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            jointPosterior.DeepSearchTriggered = jointDeepTriggered;
+            jointPosterior.DeepSearchImprovedResult = false;
+            jointPosterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                jointPosterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                jointDeepTriggered);
+            searches.Add(jointPosterior);
+
+            bool jointWon = jointPosterior.Snapshot.AllEnemiesDead
+                && !jointPosterior.Snapshot.PlayerDead
+                && jointPosterior.Snapshot.ProjectedPlayerHp > 0;
+            bool selectedWon = selected.Snapshot.AllEnemiesDead
+                && !selected.Snapshot.PlayerDead
+                && selected.Snapshot.ProjectedPlayerHp > 0;
+            int jointDeficit = StrategicHpDeficit(root, jointPosterior);
+            int selectedDeficit = StrategicHpDeficit(root, selected);
+            if (jointWon
+                && (!selectedWon
+                    || jointDeficit < selectedDeficit
+                    || jointDeficit == selectedDeficit
+                        && (jointPosterior.PotionCount < selected.PotionCount
+                            || jointPosterior.PotionCount == selected.PotionCount
+                                && jointPosterior.BestNode.Score > selected.BestNode.Score)))
+            {
+                selected = jointPosterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] POTION_POWER_POSTERIOR " +
+                $"potion={openingPotion.PotionId} power={postPotionPower.CardId} " +
+                $"won={jointWon} hp_deficit={jointDeficit} " +
+                $"selected={ReferenceEquals(selected, jointPosterior)}");
         }
 
         MergeAuditTotals(selected, searches.ToArray());

@@ -26,11 +26,14 @@ namespace CombatSolver;
 internal sealed partial class CombatBeamSolver
 {
     internal IReadOnlyList<PlanAction> BuildOpeningPowerActions()
+        => BuildPowerActionsAfterPrefix([]);
+
+    internal IReadOnlyList<PlanAction> BuildPowerActionsAfterPrefix(IReadOnlyList<PlanAction> prefix)
     {
-        SimulationSnapshot rootSnapshot = Replay([]);
+        SimulationSnapshot prefixSnapshot = Replay(prefix);
         try
         {
-            CombatPredictionSimulator simulator = (CombatPredictionSimulator)rootSnapshot.Simulator;
+            CombatPredictionSimulator simulator = (CombatPredictionSimulator)prefixSnapshot.Simulator;
             SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
             SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(_player);
             IReadOnlyList<PredictedCard> hand = playerState.Hand.Cards;
@@ -39,19 +42,19 @@ internal sealed partial class CombatBeamSolver
             SearchNode seed = new(
                 null,
                 0,
-                rootSnapshot.PotionUseCount,
-                rootSnapshot.PotionStrategicCost,
-                _startTurnNumber,
+                prefixSnapshot.PotionUseCount,
+                prefixSnapshot.PotionStrategicCost,
+                prefixSnapshot.Turn,
                 SearchRouteTraits.None,
                 0,
-                rootSnapshot.Score,
-                rootSnapshot.StateKey,
-                rootSnapshot.HasRisk,
-                rootSnapshot.BoundaryReason,
+                prefixSnapshot.Score,
+                prefixSnapshot.StateKey,
+                prefixSnapshot.HasRisk,
+                prefixSnapshot.BoundaryReason,
                 false,
                 null,
-                rootSnapshot,
-                CombatProgressState.Capture(rootSnapshot));
+                prefixSnapshot,
+                CombatProgressState.Capture(prefixSnapshot));
 
             for (int handIndex = 0; handIndex < hand.Count; handIndex++)
             {
@@ -75,7 +78,7 @@ internal sealed partial class CombatBeamSolver
                         continue;
                     PlanAction action = new(
                         PlanActionKind.PlayCard,
-                        _startTurnNumber,
+                        prefixSnapshot.Turn,
                         card.Preview.Id.Entry,
                         occurrence,
                         targetIndex,
@@ -89,7 +92,7 @@ internal sealed partial class CombatBeamSolver
                     try
                     {
                         if (probe.BoundaryReason == SearchBoundaryReason.None
-                            && probe.Turn == _startTurnNumber
+                            && probe.Turn == prefixSnapshot.Turn
                             && CardChoiceSupport.GetSpec(
                                 (CombatPredictionSimulator)probe.Simulator,
                                 card) == null)
@@ -107,6 +110,42 @@ internal sealed partial class CombatBeamSolver
         }
         finally
         {
+            prefixSnapshot.ReleaseSimulator();
+        }
+    }
+
+    internal IReadOnlyList<PlanAction> BuildOpeningPotionActions()
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        List<SearchNode> children = [];
+        try
+        {
+            SearchNode seed = new(
+                null,
+                0,
+                rootSnapshot.PotionUseCount,
+                rootSnapshot.PotionStrategicCost,
+                _startTurnNumber,
+                SearchRouteTraits.None,
+                0,
+                rootSnapshot.Score,
+                rootSnapshot.StateKey,
+                rootSnapshot.HasRisk,
+                rootSnapshot.BoundaryReason,
+                false,
+                null,
+                rootSnapshot,
+                CombatProgressState.Capture(rootSnapshot));
+            children.AddRange(Expand(seed));
+            return children
+                .Where(node => node.Action?.Kind == PlanActionKind.UsePotion)
+                .Select(node => node.Action!)
+                .ToArray();
+        }
+        finally
+        {
+            foreach (SearchNode child in children)
+                child.Snapshot.ReleaseSimulator();
             rootSnapshot.ReleaseSimulator();
         }
     }
