@@ -66,7 +66,9 @@ internal sealed partial class CombatBeamSolver
         uint? CombatId,
         int Pressure,
         int RemainingHp,
-        int CurrentThreat);
+        int CurrentThreat,
+        int TotalThreat,
+        int IncomingHitCount);
 
     private sealed record CoverageSummary(
         IReadOnlyList<PredictionGap> Gaps,
@@ -94,6 +96,7 @@ internal sealed partial class CombatBeamSolver
         public int ChoiceBranchesEvaluated;
         public int ShuffleBranchesPruned = 0;
         public int SoldHpBranchesPruned;
+        public int HpInvestmentBranchesProtected;
         public int ReplayCount;
         public int ForkCount;
         public int TransitionCount;

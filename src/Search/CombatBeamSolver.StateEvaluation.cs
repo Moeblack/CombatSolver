@@ -157,7 +157,13 @@ internal sealed partial class CombatBeamSolver
                 1,
                 (int)Math.Round(CardChoiceSupport.CardValue(liveCard.Preview)));
         }
-        int persistentBuffValue = 0;
+        ThreatFocus focus = BuildThreatFocus(simulator, combat);
+        StrategicEffectContext strategicContext = StrategicEffectContext.Build(
+            liveCards,
+            enemyHp,
+            focus.TotalThreat,
+            focus.IncomingHitCount);
+        StrategicEffectVector strategicEffects = StrategicEffectVector.Zero;
         int offensivePersistentBuffValue = 0;
         PersistentSetupTraits persistentSetupTraits = PersistentSetupTraits.None;
         foreach (PowerModel power in combat.EffectivePowers())
@@ -169,12 +175,12 @@ internal sealed partial class CombatBeamSolver
             {
                 continue;
             }
-            int setupValue = PersistentPowerSetupValue(power);
-            persistentBuffValue += setupValue;
-            if (PersistentPowerAdvancesCombat(power, retainedAttackValue > 0))
-                offensivePersistentBuffValue += setupValue;
+            StrategicEffectVector effect = StrategicEffectModel.Evaluate(power, strategicContext);
+            strategicEffects += effect;
+            offensivePersistentBuffValue += effect.DamagePotential + effect.ScalingPotential;
             persistentSetupTraits |= PersistentPowerSetupTrait(power);
         }
+        int persistentBuffValue = strategicEffects.RetentionValue;
         int latentSetupValue = 0;
         PersistentSetupTraits latentSetupTraits = PersistentSetupTraits.None;
         foreach (PredictedCard latentCard in liveCards)
@@ -189,7 +195,6 @@ internal sealed partial class CombatBeamSolver
             }
         }
         int replayPotentialValue = ReplayPotentialValue(liveCards);
-        ThreatFocus focus = BuildThreatFocus(simulator, combat);
         int futureResourceValue = combat.GetAmount<EnergyNextTurnPower>(_player.Creature) * 16
             + combat.GetAmount<DrawCardsNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<StarNextTurnPower>(_player.Creature) * 8
@@ -298,6 +303,7 @@ internal sealed partial class CombatBeamSolver
             enemyCombatDistributionKey,
             revivingEnemyCount,
             persistentBuffValue,
+            strategicEffects,
             persistentSetupTraits,
             latentSetupValue,
             latentSetupTraits,
@@ -422,32 +428,6 @@ internal sealed partial class CombatBeamSolver
         return total;
     }
 
-    private static int PersistentPowerSetupValue(PowerModel power)
-    {
-        int amount = Math.Max(1, power.Amount);
-        return power switch
-        {
-            EchoFormPower => amount * 12,
-            BufferPower => amount * 8,
-            CuriousPower => amount * 10,
-            FocusPower => amount * 6,
-            DemonFormPower or CreativeAiPower => amount * 5,
-            ThunderPower => amount * 3,
-            LightningRodPower => amount * 4,
-            MasterPlannerPower => amount * 4,
-            StrengthPower or DexterityPower => amount * 2,
-            _ => amount,
-        };
-    }
-
-    private static bool PersistentPowerAdvancesCombat(PowerModel power, bool hasAttackPayoff)
-        => power switch
-        {
-            StrengthPower or DemonFormPower or EchoFormPower => hasAttackPayoff,
-            CuriousPower or FocusPower or CreativeAiPower or ThunderPower or LightningRodPower => true,
-            _ => false,
-        };
-
     private static PersistentSetupTraits PersistentPowerSetupTrait(PowerModel power)
         => power switch
         {
@@ -504,6 +484,8 @@ internal sealed partial class CombatBeamSolver
         int bestPressure = 0;
         int bestRemainingHp = int.MaxValue;
         int bestThreat = 0;
+        int totalThreat = 0;
+        int incomingHitCount = 0;
         foreach (Creature enemy in combat.KnownEnemies)
         {
             SimCreatureState enemyState = simulator.State.GetCreature(enemy);
@@ -516,10 +498,6 @@ internal sealed partial class CombatBeamSolver
 
             int remainingHp = Math.Max(0, enemyState.CurrentHp);
             int maxHp = Math.Max(1, enemyState.MaxHp);
-            int progress = Math.Max(0, maxHp - remainingHp);
-            if (progress == 0)
-                continue;
-
             int currentThreat = 0;
             if (!combat.WillSkipNextMove(enemy))
             {
@@ -529,12 +507,17 @@ internal sealed partial class CombatBeamSolver
                         continue;
                     foreach (ForecastAttackHit hit in move.AttackHits)
                     {
+                        incomingHitCount++;
                         currentThreat += Math.Max(
                             0,
                             combat.AdjustMonsterMoveDamage(enemy, move.Move.Id, hit.BaseDamage));
                     }
                 }
             }
+            totalThreat += currentThreat;
+            int progress = Math.Max(0, maxHp - remainingHp);
+            if (progress == 0)
+                continue;
 
             int pressure = (int)Math.Min(
                 int.MaxValue,
@@ -550,7 +533,13 @@ internal sealed partial class CombatBeamSolver
             bestRemainingHp = remainingHp;
             bestThreat = currentThreat;
         }
-        return new ThreatFocus(bestCombatId, bestPressure, bestRemainingHp, bestThreat);
+        return new ThreatFocus(
+            bestCombatId,
+            bestPressure,
+            bestRemainingHp,
+            bestThreat,
+            totalThreat,
+            incomingHitCount);
     }
 
     private CoverageSummary GetCoverageSummary(CombatPredictionSimulator simulator)

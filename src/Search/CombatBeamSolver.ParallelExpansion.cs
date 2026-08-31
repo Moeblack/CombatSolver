@@ -740,6 +740,7 @@ internal sealed partial class CombatBeamSolver
         _run.ChoiceBranchesEvaluated += source.ChoiceBranchesEvaluated;
         _run.ShuffleBranchesPruned += source.ShuffleBranchesPruned;
         _run.SoldHpBranchesPruned += source.SoldHpBranchesPruned;
+        _run.HpInvestmentBranchesProtected += source.HpInvestmentBranchesProtected;
         _run.ReplayCount += source.ReplayCount;
         _run.ForkCount += source.ForkCount;
         _run.TransitionCount += source.TransitionCount;
@@ -750,6 +751,7 @@ internal sealed partial class CombatBeamSolver
         source.ChoiceBranchesEvaluated = 0;
         source.ShuffleBranchesPruned = 0;
         source.SoldHpBranchesPruned = 0;
+        source.HpInvestmentBranchesProtected = 0;
         source.ReplayCount = 0;
         source.ForkCount = 0;
         source.TransitionCount = 0;

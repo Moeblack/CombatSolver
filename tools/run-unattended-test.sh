@@ -123,6 +123,8 @@ for name in \
     expected-initial-executable-action-count-at-least \
     expected-initial-sold-hp expected-initial-sold-hp-at-most \
     expected-initial-sold-hp-branches-pruned-at-least \
+    expected-initial-action-admission-representatives-protected-at-least \
+    expected-initial-hp-investment-branches-protected-at-least \
     expected-initial-potion-count expected-initial-potion-hp-saved-at-least \
     expected-initial-potion-branches-rejected-at-least \
     expected-initial-outstanding-stolen-resource \

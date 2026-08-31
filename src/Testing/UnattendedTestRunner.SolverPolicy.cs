@@ -85,6 +85,8 @@ internal sealed partial class UnattendedTestRunner
         => _request.ExpectedInitialSoldHp.HasValue
             || _request.ExpectedInitialSoldHpAtMost.HasValue
             || _request.ExpectedInitialSoldHpBranchesPrunedAtLeast.HasValue
+            || _request.ExpectedInitialActionAdmissionRepresentativesProtectedAtLeast.HasValue
+            || _request.ExpectedInitialHpInvestmentBranchesProtectedAtLeast.HasValue
             || _request.ExpectedInitialPotionCount.HasValue
             || _request.ExpectedInitialPotionHpSavedAtLeast.HasValue
             || _request.ExpectedInitialPotionBranchesRejectedAtLeast.HasValue
@@ -233,6 +235,20 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException(
                 $"首轮卖血预算剪枝为 {result.SoldHpBranchesPruned}，低于预期下限 {minimumPruned}。");
+        }
+        if (_request.ExpectedInitialActionAdmissionRepresentativesProtectedAtLeast is { } minimumProtected
+            && result.ActionAdmissionRepresentativesProtected < minimumProtected)
+        {
+            throw new InvalidOperationException(
+                $"首轮动作分族保路为 {result.ActionAdmissionRepresentativesProtected}，" +
+                $"低于预期下限 {minimumProtected}。");
+        }
+        if (_request.ExpectedInitialHpInvestmentBranchesProtectedAtLeast is { } minimumInvestments
+            && result.HpInvestmentBranchesProtected < minimumInvestments)
+        {
+            throw new InvalidOperationException(
+                $"首轮生命投资保路为 {result.HpInvestmentBranchesProtected}，" +
+                $"低于预期下限 {minimumInvestments}。");
         }
         if (_request.ExpectedInitialPotionCount is { } expectedPotionCount
             && result.PotionCount != expectedPotionCount)

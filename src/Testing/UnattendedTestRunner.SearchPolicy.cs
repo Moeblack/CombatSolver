@@ -305,11 +305,21 @@ internal sealed partial class UnattendedTestRunner
         AddMismatch(mismatches, "expanded", expected.ExpandedNodes, actual.ExpandedNodes);
         AddMismatch(mismatches, "dominated", expected.DominatedActionsPruned, actual.DominatedActionsPruned);
         AddMismatch(mismatches, "top_queue", expected.TopQueueActionsDropped, actual.TopQueueActionsDropped);
+        AddMismatch(
+            mismatches,
+            "action_admission_protected",
+            expected.ActionAdmissionRepresentativesProtected,
+            actual.ActionAdmissionRepresentativesProtected);
         AddMismatch(mismatches, "duplicate_cards", expected.DuplicateCardBranchesPruned, actual.DuplicateCardBranchesPruned);
         AddMismatch(mismatches, "transitions", expected.TransitionCount, actual.TransitionCount);
         AddMismatch(mismatches, "choices", expected.ChoiceBranchesEvaluated, actual.ChoiceBranchesEvaluated);
         AddMismatch(mismatches, "shuffles", expected.ShuffleBranchesPruned, actual.ShuffleBranchesPruned);
         AddMismatch(mismatches, "sold_hp_pruned", expected.SoldHpBranchesPruned, actual.SoldHpBranchesPruned);
+        AddMismatch(
+            mismatches,
+            "hp_investment_protected",
+            expected.HpInvestmentBranchesProtected,
+            actual.HpInvestmentBranchesProtected);
         AddMismatch(mismatches, "replays", expected.ReplayCount, actual.ReplayCount);
         AddMismatch(mismatches, "forks", expected.ForkCount, actual.ForkCount);
         AddMismatch(mismatches, "reused", expected.ReusedNodeSnapshots, actual.ReusedNodeSnapshots);
@@ -508,9 +518,12 @@ internal sealed partial class UnattendedTestRunner
         => $"{{actions={DescribeActions(result)} action_count={result.BestNode.ActionCount} " +
             $"score={result.BestNode.Score:R} expanded={result.ExpandedNodes} " +
             $"dominated={result.DominatedActionsPruned} top_queue={result.TopQueueActionsDropped} " +
+            $"action_admission_protected={result.ActionAdmissionRepresentativesProtected} " +
             $"duplicate_cards={result.DuplicateCardBranchesPruned} transitions={result.TransitionCount} " +
             $"choices={result.ChoiceBranchesEvaluated} shuffles={result.ShuffleBranchesPruned} " +
-            $"sold_hp={result.SoldHpBranchesPruned} replays={result.ReplayCount} forks={result.ForkCount} " +
+            $"sold_hp={result.SoldHpBranchesPruned} " +
+            $"hp_investment_protected={result.HpInvestmentBranchesProtected} " +
+            $"replays={result.ReplayCount} forks={result.ForkCount} " +
             $"reused={result.ReusedNodeSnapshots} tt_pruned={result.TranspositionBranchesPruned} " +
             $"repeatable={result.RepeatableNoProgressBranchesPruned} stand_pat={result.StandPatProbes} " +
             $"turns={result.SearchedTurns} potions={result.PotionCount} future_sold={result.FutureSoldHp} " +

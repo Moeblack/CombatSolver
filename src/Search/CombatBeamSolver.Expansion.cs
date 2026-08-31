@@ -1787,16 +1787,21 @@ internal sealed partial class CombatBeamSolver
         ActionOptionFamily families = ActionOptionFamily.None;
         if (block > 0
             || after.ProjectedPlayerHp > before.ProjectedPlayerHp
-            || after.PlayerHp > before.PlayerHp)
+            || after.PlayerHp > before.PlayerHp
+            || after.StrategicEffects.PreventionPotential
+                > before.StrategicEffects.PreventionPotential)
         {
             families |= ActionOptionFamily.ImmediateDefense;
         }
-        if (damage > 0)
+        if (damage > 0
+            || after.StrategicEffects.DamagePotential > before.StrategicEffects.DamagePotential)
             families |= ActionOptionFamily.ImmediateOffense;
         if (after.Energy > before.Energy
             || after.Stars > before.Stars
             || after.HandCount >= before.HandCount
             || after.FutureResourceValue > before.FutureResourceValue
+            || after.StrategicEffects.ResourcePotential > before.StrategicEffects.ResourcePotential
+            || after.StrategicEffects.CardAccessPotential > before.StrategicEffects.CardAccessPotential
             || after.LiveDeckClutter < before.LiveDeckClutter)
         {
             families |= ActionOptionFamily.ResourceAndCycle;
@@ -1806,6 +1811,7 @@ internal sealed partial class CombatBeamSolver
             || after.DelayedDamageValue > before.DelayedDamageValue
             || after.ReplayPotentialValue > before.ReplayPotentialValue
             || after.ReactiveDamageValue > before.ReactiveDamageValue
+            || after.StrategicEffects.RetentionValue > before.StrategicEffects.RetentionValue
             || after.LongTermResourceValue > before.LongTermResourceValue)
         {
             families |= ActionOptionFamily.PersistentSetup;
@@ -1855,6 +1861,12 @@ internal sealed partial class CombatBeamSolver
         }
         if (after.LongTermResourceValue > before.LongTermResourceValue)
             traits |= SearchRouteTraits.LongTermResource;
+        if (after.PlayerHp < before.PlayerHp
+            || after.PlayerMaxHp < before.PlayerMaxHp
+            || after.CumulativePlayerHpLost > before.CumulativePlayerHpLost)
+        {
+            traits |= SearchRouteTraits.HpInvestment;
+        }
         if (after.ReactiveDamageValue > before.ReactiveDamageValue)
             traits |= SearchRouteTraits.ReactiveDamage;
         if (after.Energy > before.Energy
@@ -1954,6 +1966,7 @@ internal sealed partial class CombatBeamSolver
             || !right.IsPure
             || left.CardType != right.CardType
             || left.TargetCombatId != right.TargetCombatId
+            || left.OptionFamilies != right.OptionFamilies
             || left.EnergySpent != right.EnergySpent
             || left.StarsSpent != right.StarsSpent)
         {

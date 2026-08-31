@@ -12,6 +12,10 @@
 | --- | --- | --- | --- |
 | `STRATEGY-ACTION-ADMISSION-EXPERTISE` | 通过（headless） | 原单节点分支预算压到 `3`，手牌包含升级熟练、升级子弹时间和三张打击；搜索先保留资源/过牌代表，首动作选择熟练并完成三回合短搜。runId `d2edebb4a7094d2fbce5787e02cc849c`。 | 2026-08-31 |
 | `STRATEGY-SMART-POTION-INTERVENTION` | 通过（headless） | 四只花园幽灵鳗固定 `15 HP`、纯攻击牌组和一瓶格挡药；Smart 主路线为无药死亡边界，主动强制一瓶反事实找到存活路线，最终采用格挡药并确认省血 `12/9`。runId `fb7b2287a75e442cad01e1ca32f14417`。 | 2026-08-31 |
+| `STRATEGY-SEMANTIC-AFTERIMAGE` | 通过（headless） | 单节点分支预算为 `3`，逐次出牌获得格挡的能力与五张 0 费攻击牌同手；能力收益按可达出牌次数形成防伤向量，首动作使用能力牌，路线预计战损 `0`、实际格挡 `5`。runId `35b7698ab74d462bb40182008bf6cd82`。 | 2026-08-31 |
+| `STRATEGY-HP-INVESTMENT-DYNAMIC` | 通过（headless） | 一张提供能量和抽牌的牌直接支付 `6 HP`，超过普通战斗原 `5 HP` 阈值；同起点保守路线存在时，至少一条确实换来战斗进度的投资分支获得保护，最终结果仍按整场战损选择零卖血路线。runId `02b131c187d1433c94ea558e485c591d`。 | 2026-08-31 |
+| `STRATEGY-ACTION-ADMISSION-COVERAGE` | 通过（headless） | 固定单节点分支预算 `3`，六种不同即时攻击、过牌与费用控制候选竞争；至少一个原即时 Top-N 之外的战略家族代表进入 frontier。runId `06eb33b27c344825b0801d282b7b8df2`。 | 2026-08-31 |
+| `STRATEGY-DOP-EQUIVALENCE` | 通过（headless） | 固定 `250` 节点下 DOP1/DOP2 的动作、评分、展开、转移、分族保路、生命投资和全部非时序剪枝统计一致；DOP2 实际形成至少两路并发。runId `64414648aaae4406a570a0ff59ef1f17`。 | 2026-08-31 |
 
 ## 0.23.0
 

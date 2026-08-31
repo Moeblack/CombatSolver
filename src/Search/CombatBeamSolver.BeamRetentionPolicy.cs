@@ -720,6 +720,7 @@ internal sealed partial class CombatBeamSolver
             AddRequired(required, bestOffensive, limit);
             AddRequired(required, bestResourcePreserving, limit);
             AddRequired(required, FindBestLane(ranked, SearchRouteTraits.LongTermResource), limit);
+            AddRequired(required, FindBestLane(ranked, SearchRouteTraits.HpInvestment), limit);
             if (preserveDefensiveRoute
                 && _profile.Phase == SolverSearchPhase.Deep
                 && limit >= 18)
@@ -733,6 +734,7 @@ internal sealed partial class CombatBeamSolver
                              SearchRouteTraits.ReactiveDamage,
                              SearchRouteTraits.EndTurnDeckCompression,
                              SearchRouteTraits.LongTermResource,
+                             SearchRouteTraits.HpInvestment,
                          })
                 {
                     foreach (IGrouping<int, SearchNode> potionCountGroup in ranked
@@ -1456,7 +1458,7 @@ internal sealed partial class CombatBeamSolver
         }
 
         private static int SetupLaneValue(SimulationSnapshot snapshot)
-            => snapshot.PersistentBuffValue * 16
+            => snapshot.StrategicEffects.RetentionValue * 16
                 + snapshot.LatentSetupValue * 8
                 + snapshot.ReplayPotentialValue * 16
                 + snapshot.FutureResourceValue;
@@ -1535,6 +1537,10 @@ internal sealed partial class CombatBeamSolver
                     + (int)Math.Min(int.MaxValue, AttackDensity(snapshot))
                     + snapshot.FocusTargetPressure
                     - snapshot.LiveDeckSize * 16,
+                SearchRouteTraits.HpInvestment => snapshot.StrategicEffects.RetentionValue * 16
+                    + snapshot.FutureResourceValue * 8
+                    + snapshot.DelayedDamageValue * 8
+                    + snapshot.FocusTargetPressure,
                 _ => throw new ArgumentOutOfRangeException(nameof(trait), trait, null),
             };
 

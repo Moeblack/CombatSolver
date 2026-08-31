@@ -68,6 +68,7 @@ internal enum SearchRouteTraits
     ReactiveDamage = 1 << 5,
     EndTurnDeckCompression = 1 << 6,
     LongTermResource = 1 << 7,
+    HpInvestment = 1 << 8,
 }
 
 [Flags]
@@ -293,6 +294,7 @@ internal sealed class SimulationSnapshot(
     StateFingerprint enemyCombatDistributionKey,
     int revivingEnemyCount,
     int persistentBuffValue,
+    StrategicEffectVector strategicEffects,
     PersistentSetupTraits persistentSetupTraits,
     int latentSetupValue,
     PersistentSetupTraits latentSetupTraits,
@@ -361,6 +363,7 @@ internal sealed class SimulationSnapshot(
     public StateFingerprint EnemyCombatDistributionKey { get; } = enemyCombatDistributionKey;
     public int RevivingEnemyCount { get; } = revivingEnemyCount;
     public int PersistentBuffValue { get; } = persistentBuffValue;
+    public StrategicEffectVector StrategicEffects { get; } = strategicEffects;
     public PersistentSetupTraits PersistentSetupTraits { get; } = persistentSetupTraits;
     public int LatentSetupValue { get; } = latentSetupValue;
     public PersistentSetupTraits LatentSetupTraits { get; } = latentSetupTraits;
@@ -523,10 +526,12 @@ internal sealed class SolverResult
     public required int ExpandedNodes { get; init; }
     public required int DominatedActionsPruned { get; init; }
     public required int TopQueueActionsDropped { get; init; }
+    public required int ActionAdmissionRepresentativesProtected { get; init; }
     public required int DuplicateCardBranchesPruned { get; init; }
     public required int ChoiceBranchesEvaluated { get; init; }
     public required int ShuffleBranchesPruned { get; init; }
     public required int SoldHpBranchesPruned { get; init; }
+    public required int HpInvestmentBranchesProtected { get; init; }
     public required int ReplayCount { get; init; }
     public required int ForkCount { get; init; }
     public required int TransitionCount { get; init; }
@@ -643,10 +648,12 @@ internal sealed class SolverResult
             ExpandedNodes = 0,
             DominatedActionsPruned = 0,
             TopQueueActionsDropped = 0,
+            ActionAdmissionRepresentativesProtected = 0,
             DuplicateCardBranchesPruned = 0,
             ChoiceBranchesEvaluated = 0,
             ShuffleBranchesPruned = 0,
             SoldHpBranchesPruned = 0,
+            HpInvestmentBranchesProtected = 0,
             ReplayCount = 0,
             ForkCount = 0,
             TransitionCount = 0,

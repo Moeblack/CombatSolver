@@ -103,6 +103,8 @@ param(
     [int]$ExpectedInitialSoldHp = -1,
     [int]$ExpectedInitialSoldHpAtMost = -1,
     [int]$ExpectedInitialSoldHpBranchesPrunedAtLeast = -1,
+    [int]$ExpectedInitialActionAdmissionRepresentativesProtectedAtLeast = -1,
+    [int]$ExpectedInitialHpInvestmentBranchesProtectedAtLeast = -1,
     [int]$ExpectedInitialPotionCount = -1,
     [int]$ExpectedInitialPotionHpSavedAtLeast = -1,
     [int]$ExpectedInitialPotionBranchesRejectedAtLeast = -1,
@@ -672,6 +674,8 @@ $request = [ordered]@{
     expectedInitialSoldHp = if ($ExpectedInitialSoldHp -ge 0) { $ExpectedInitialSoldHp } else { $null }
     expectedInitialSoldHpAtMost = if ($ExpectedInitialSoldHpAtMost -ge 0) { $ExpectedInitialSoldHpAtMost } else { $null }
     expectedInitialSoldHpBranchesPrunedAtLeast = if ($ExpectedInitialSoldHpBranchesPrunedAtLeast -ge 0) { $ExpectedInitialSoldHpBranchesPrunedAtLeast } else { $null }
+    expectedInitialActionAdmissionRepresentativesProtectedAtLeast = if ($ExpectedInitialActionAdmissionRepresentativesProtectedAtLeast -ge 0) { $ExpectedInitialActionAdmissionRepresentativesProtectedAtLeast } else { $null }
+    expectedInitialHpInvestmentBranchesProtectedAtLeast = if ($ExpectedInitialHpInvestmentBranchesProtectedAtLeast -ge 0) { $ExpectedInitialHpInvestmentBranchesProtectedAtLeast } else { $null }
     expectedInitialPotionCount = if ($ExpectedInitialPotionCount -ge 0) { $ExpectedInitialPotionCount } else { $null }
     expectedInitialPotionHpSavedAtLeast = if ($ExpectedInitialPotionHpSavedAtLeast -ge 0) { $ExpectedInitialPotionHpSavedAtLeast } else { $null }
     expectedInitialPotionBranchesRejectedAtLeast = if ($ExpectedInitialPotionBranchesRejectedAtLeast -ge 0) { $ExpectedInitialPotionBranchesRejectedAtLeast } else { $null }
