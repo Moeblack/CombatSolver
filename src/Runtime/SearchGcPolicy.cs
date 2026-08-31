@@ -514,7 +514,7 @@ internal static class SearchGcPolicy
 
         Exception? failure = null;
         NoGcRegionStartOutcome restartOutcome = NoGcRegionStartOutcome.InsufficientMemory;
-        GCMemoryInfo completedCollection = default;
+        bool collectionCompleted = false;
         long liveBefore = GC.GetTotalMemory(forceFullCollection: false);
         using Process processBefore = Process.GetCurrentProcess();
         long workingSetBefore = processBefore.WorkingSet64;
@@ -527,7 +527,8 @@ internal static class SearchGcPolicy
                 GC.EndNoGCRegion();
             if (restoreLatencyMode)
                 GCSettings.LatencyMode = previousMode;
-            completedCollection = CollectGeneration2InBackgroundAsync().GetAwaiter().GetResult();
+            CollectGeneration2ForSearch();
+            collectionCompleted = true;
             cancellationToken.ThrowIfCancellationRequested();
 
             lock (Gate)
@@ -564,11 +565,11 @@ internal static class SearchGcPolicy
             processAfter.Refresh();
             Entry.Logger.Info(
                 $"[CombatSolver/Test] HEAP_RECLAIM reason=in_search_memory_checkpoint " +
-                $"mode=background_non_compacting no_gc_region_ended={endNoGcRegion} " +
+                $"mode=blocking_non_compacting no_gc_region_ended={endNoGcRegion} " +
                 $"no_gc_region_restart={FormatStartOutcome(restartOutcome)} " +
                 $"elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F1} " +
                 $"gc_pause_delta_ms={(GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds:F1} " +
-                $"concurrent={completedCollection.Concurrent} compacted={completedCollection.Compacted} " +
+                $"collection_completed={collectionCompleted.ToString().ToLowerInvariant()} " +
                 $"managed_live_before={liveBefore} managed_live_after={GC.GetTotalMemory(false)} " +
                 $"working_set_before={workingSetBefore} working_set_after={processAfter.WorkingSet64} " +
                 $"private_before={privateBefore} private_after={processAfter.PrivateMemorySize64}");
@@ -585,6 +586,15 @@ internal static class SearchGcPolicy
 
         if (failure != null)
             throw failure;
+    }
+
+    private static void CollectGeneration2ForSearch()
+    {
+        GC.Collect(
+            GC.MaxGeneration,
+            GCCollectionMode.Forced,
+            blocking: true,
+            compacting: false);
     }
 
     private static NoGcRegionStartOutcome TryStartNoGcRegion(

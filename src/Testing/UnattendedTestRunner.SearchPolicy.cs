@@ -149,6 +149,7 @@ internal sealed partial class UnattendedTestRunner
         using CancellationTokenSource firstSearchCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
         await SearchGcPolicy.ReclaimIfPendingAsync("unattended_no_gc_budget_transition_setup");
+        await AssertInSearchReclaimAsync(deadline.Token);
         SearchGcPolicy.ResetCountersForTesting();
 
         TaskCompletionSource firstSearchEntered = new(
@@ -238,6 +239,22 @@ internal sealed partial class UnattendedTestRunner
             changedScope?.Dispose();
             await SearchGcPolicy.ReclaimIfPendingAsync("unattended_no_gc_budget_transition_cleanup");
         }
+    }
+
+    private static async Task AssertInSearchReclaimAsync(CancellationToken cancellationToken)
+    {
+        const long budgetBytes = 1_000_000_000L;
+        SearchMemoryPressureSignal signal = new();
+        using (SearchGcPolicy.EnterLowLatencySearch(
+                   budgetBytes,
+                   signal,
+                   cancellationToken))
+        {
+            signal.ReclaimAndContinue(cancellationToken);
+            if (signal.ReclaimCount != 1)
+                throw new InvalidOperationException("搜索内存检查点没有完成一次全代回收后继续。");
+        }
+        await SearchGcPolicy.ReclaimIfPendingAsync("unattended_in_search_reclaim_cleanup");
     }
 
     private static void AssertEquivalentSearchResults(
