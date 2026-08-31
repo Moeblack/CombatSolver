@@ -134,6 +134,7 @@ internal sealed partial class UnattendedTestRunner
         AssertProjectedShuffleEquivalence(simulator, player);
         AssertSpawnHpUsesSimulatedCreatureState(combat);
         AssertPendingSpawnCanEnterIllusionRevive(combat);
+        AssertPendingRandomBranchSpawnRollsAtTurnBoundary(combat);
         AssertDefeatedEnemyRejectsLatePowerApplication(combat, player);
         AssertWhisperingEarringOnlyRunsOnFirstTurn(simulator, simulatedCombat, player);
         AssertPredictionForkContextIdentityIndex();
@@ -342,6 +343,33 @@ internal sealed partial class UnattendedTestRunner
         simulatedCombat.PrepareMonsterMoveForNextRound(simulator, illusion, performedMove: null);
         if (simulatedCombat.GetPredictedMoveId(illusion) != "REVIVE_MOVE")
             throw new InvalidOperationException("幻象复活动作被待处理的初始行动覆盖。");
+    }
+
+    private static void AssertPendingRandomBranchSpawnRollsAtTurnBoundary(CombatState combat)
+    {
+        SimulatedCombatState simulatedCombat = new(combat)
+        {
+            CurrentSide = CombatSide.Enemy,
+        };
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        Creature source = simulatedCombat.Enemies.First();
+        int rngBeforeSpawn = simulator.Rng.MonsterAi.Counter();
+        Creature rat = MonsterSpawnSupport.Spawn<MegaCrit.Sts2.Core.Models.Monsters.TwoTailedRat>(
+            simulator,
+            simulatedCombat,
+            source,
+            slot: null);
+        if (simulator.Rng.MonsterAi.Counter() != rngBeforeSpawn)
+            throw new InvalidOperationException("敌方回合生成的随机初始行动怪物提前消费了怪物 RNG。");
+
+        simulatedCombat.PrepareMonsterMoveForNextRound(simulator, rat, performedMove: null);
+        if (simulator.Rng.MonsterAi.Counter() <= rngBeforeSpawn)
+            throw new InvalidOperationException("随机初始行动怪物没有在回合边界消费怪物 RNG。");
+        if (simulatedCombat.GetPredictedMoveId(rat) is not (
+                "SCRATCH_MOVE" or "DISEASE_BITE_MOVE" or "SCREECH_MOVE"))
+        {
+            throw new InvalidOperationException("双尾鼠没有在回合边界得到合法的初始行动。");
+        }
     }
 
     private static void AssertDefeatedEnemyRejectsLatePowerApplication(

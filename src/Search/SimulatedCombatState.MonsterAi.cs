@@ -155,7 +155,8 @@ internal sealed partial class SimulatedCombatState
             ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
         List<string> log = machine.StateLog.Select(state => state.Id).ToList();
         MoveState initial = machine.StateLog.LastOrDefault() as MoveState
-            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有初始行动记录。");
+            ?? machine.States.Values.OfType<MoveState>().FirstOrDefault()
+            ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有可用行动状态。");
         (_monsterAiStates ??= [])[creature] = new BranchMonsterAiState(
             monster,
             machine,
