@@ -78,7 +78,7 @@ internal sealed partial class SolverSettingsPanel
             budgetGrid,
             "搜索并行度",
             CreateSearchParallelismInput(),
-            "关闭时使用单线程搜索；2–16 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力；超过物理核心数通常只有小幅收益。默认按可用逻辑处理器自动选择 4、2 或单线程；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
+            "关闭时使用单线程搜索；2–16 是并行上限，实际并发还会受可独立分支数和内存安全准入限制，因此 CPU 不一定满载。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力；超过物理核心数通常只有小幅收益。默认按可用逻辑处理器自动选择 4、2 或单线程；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
         _noGcRegionEnabled = CreateToggle();
         _noGcRegionEnabled.Toggled += OnNoGcRegionEnabledToggled;
         AddBasicRow(
@@ -96,7 +96,7 @@ internal sealed partial class SolverSettingsPanel
             budgetGrid,
             "搜索内存预算（GB）",
             _noGcRegionBudget,
-            "这是独立于性能预设的单个搜索 NoGC 区域请求预算，不是进程总内存上限。开启 NoGC 后设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
+            "这是独立于性能预设的战斗级 NoGC 区域请求预算，不是进程总内存上限，也不等于实际驻留内存。提高后可容纳更多并行分支并减少长搜索中的回收，但会增加内存占用与系统换页风险；32 GB 只建议至少 48 GB 物理内存且当前内存充足的电脑使用。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
         _manualGcButton = SolverUiTokens.CreateButton(
             "手动 GC",
             SolverButtonStyle.Secondary);

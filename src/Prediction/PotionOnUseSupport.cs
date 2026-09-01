@@ -109,7 +109,7 @@ internal static class PotionOnUseSupport
                 combat.Apply<ShrinkPower>(target, value.DynamicVars.Repeat.IntValue, owner);
                 break;
             case BlessingOfTheForge:
-                foreach (PredictedCard card in simulator.State.GetPlayerCombatState(PlayerTarget()).Hand.Cards)
+                foreach (PredictedCard card in simulator.State.GetPlayerCombatState(PlayerTarget()).Hand)
                 {
                     if (card.Preview.IsUpgradable)
                     {

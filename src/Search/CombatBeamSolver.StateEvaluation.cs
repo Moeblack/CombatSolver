@@ -418,7 +418,7 @@ internal sealed partial class CombatBeamSolver
         int totalEnergyCost = 0;
         int totalStarCost = 0;
         int zeroCostPlayableCount = 0;
-        foreach (PredictedCard card in playerState.Hand.Cards)
+        foreach (PredictedCard card in playerState.Hand)
         {
             if (!combat.CanPlayCard(simulator, card))
                 continue;
@@ -527,7 +527,7 @@ internal sealed partial class CombatBeamSolver
     {
         ulong first = 0;
         ulong second = 0;
-        foreach (PredictedCard card in pile.Cards)
+        foreach (PredictedCard card in pile)
         {
             StateFingerprint cardKey = BuildCardStateFingerprint(card);
             first += StateFingerprintBuilder.MixFirst(cardKey.First);
@@ -1118,7 +1118,7 @@ internal sealed partial class CombatBeamSolver
         SearchMeasurement measurement = _run.Performance.Begin();
         StateFingerprintBuilder pileKey = new();
         pileKey.Add(pile.Cards.Count);
-        foreach (PredictedCard card in pile.Cards)
+        foreach (PredictedCard card in pile)
         {
             StateFingerprint cardFingerprint = BuildCardStateFingerprint(card);
             pileKey.Add(cardFingerprint.First);

@@ -719,7 +719,7 @@ internal static class AfterCardPlayedMirrors
         if (context.PreviewCard.Owner.Creature == power.Owner &&
             context.CardPlay is { IsAutoPlay: false, IsLastInSeries: true })
         {
-            context.StateStore.Get(power, () => new VoidFormPredictionState(power)).CardsPlayedThisTurn++;
+            context.StateStore.Get(power, static value => new VoidFormPredictionState(value)).CardsPlayedThisTurn++;
         }
     }
 

@@ -54,6 +54,7 @@ internal sealed partial class UnattendedTestRunner
         AssertDeploymentCardIdentitySurvivesEarlierCopyLeavingHand(card);
         AssertMissingSandpitIsACompletedFranticEscape(combat, player);
         AssertTerminalMonsterMovesStopForecasting();
+        AssertRosterSinkRemovalUsesUpdatedRoster(combat);
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -462,6 +463,29 @@ internal sealed partial class UnattendedTestRunner
             || MonsterMoveEffects.RemovesOwner(gasBomb, "STUNNED"))
         {
             throw new InvalidOperationException("终止型怪物行动分类不正确。");
+        }
+    }
+
+    private static void AssertRosterSinkRemovalUsesUpdatedRoster(CombatState combat)
+    {
+        CombatPredictionSimulator simulator = new(new SimulatedCombatState(combat));
+        Creature removed = simulator.State.Enemies.First();
+        simulator.State.RemoveCreature(removed);
+
+        if (simulator.State.Enemies.Contains(removed))
+            throw new InvalidOperationException("预测 roster sink 没有移除敌人。");
+        if (!ReferenceEquals(simulator.State.Enemies, simulator.State.CombatState.Enemies))
+        {
+            throw new InvalidOperationException(
+                "预测 roster sink 已更新底层列表后仍重复构造过滤视图。");
+        }
+
+        CombatPredictionSimulator fork = simulator.Fork();
+        if (fork.State.Enemies.Contains(removed)
+            || !ReferenceEquals(fork.State.Enemies, fork.State.CombatState.Enemies))
+        {
+            throw new InvalidOperationException(
+                "预测 roster sink 的移除结果没有跨 Fork 保持直接 roster 视图。");
         }
     }
 

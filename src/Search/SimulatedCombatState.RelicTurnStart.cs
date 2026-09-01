@@ -425,7 +425,7 @@ internal sealed partial class SimulatedCombatState
 
     private static void UpgradeHand(CombatPredictionSimulator simulator, Player player)
     {
-        foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).Hand.Cards)
+        foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).Hand)
         {
             if (card.Preview.IsUpgradable)
                 card.Upgrade();

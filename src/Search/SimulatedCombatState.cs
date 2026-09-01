@@ -385,7 +385,12 @@ internal sealed partial class SimulatedCombatState
         }
     }
 
-    private SimulatedCombatState(SimulatedCombatState source)
+    private SimulatedCombatState(
+        SimulatedCombatState source,
+        ForkableList<Creature> allies,
+        ForkableList<Creature> enemies,
+        ForkableList<Creature> knownEnemies,
+        ForkableList<Creature> escapedCreatures)
     {
         _runState = source._runState;
         _runRngSnapshot = source._runRngSnapshot;
@@ -415,10 +420,10 @@ internal sealed partial class SimulatedCombatState
         _playerNames = source._playerNames;
         _rootFloatingCards = source._rootFloatingCards;
         _rootDeadCreatures = source._rootDeadCreatures;
-        _allies = [];
-        _enemies = [];
-        _knownEnemies = [];
-        _escapedCreatures = [];
+        _allies = allies;
+        _enemies = enemies;
+        _knownEnemies = knownEnemies;
+        _escapedCreatures = escapedCreatures;
     }
 
     public IRunState RunState => _runState;
@@ -1806,8 +1811,9 @@ internal sealed partial class SimulatedCombatState
         ulong powersSecond = 0;
         int powerCount = 0;
         IReadOnlyList<PowerModel> effectivePowers = EffectivePowers();
-        foreach (PowerModel power in effectivePowers)
+        for (int index = 0; index < effectivePowers.Count; index++)
         {
+            PowerModel power = effectivePowers[index];
             if (power.Amount == 0)
                 continue;
             AddPower(power, ref powersFirst, ref powersSecond);
@@ -1912,14 +1918,14 @@ internal sealed partial class SimulatedCombatState
         ulong first = 0;
         ulong second = 0;
         int count = 0;
-        foreach (FeralPower power in effectivePowers.OfType<FeralPower>())
+        for (int index = 0; index < effectivePowers.Count; index++)
         {
-            if (power.Amount <= 0)
+            if (effectivePowers[index] is not FeralPower power || power.Amount <= 0)
                 continue;
             StateFingerprintBuilder item = new();
             item.Add(power.Owner.CombatId ?? uint.MaxValue);
             item.Add(simulator.StateStore
-                .Peek(power, () => new FeralPredictionState(power))
+                .Peek(power, static value => new FeralPredictionState(value))
                 .ZeroCostAttacksPlayed);
             AddUnorderedItem(item.Finish(), ref first, ref second);
             count++;
@@ -1935,14 +1941,14 @@ internal sealed partial class SimulatedCombatState
         ulong first = 0;
         ulong second = 0;
         int count = 0;
-        foreach (JugglingPower power in effectivePowers.OfType<JugglingPower>())
+        for (int index = 0; index < effectivePowers.Count; index++)
         {
-            if (power.Amount <= 0)
+            if (effectivePowers[index] is not JugglingPower power || power.Amount <= 0)
                 continue;
             StateFingerprintBuilder item = new();
             item.Add(power.Owner.CombatId ?? uint.MaxValue);
             item.Add(simulator.StateStore
-                .Peek(power, () => new JugglingPredictionState(power))
+                .Peek(power, static value => new JugglingPredictionState(value))
                 .AttacksPlayedThisTurn);
             AddUnorderedItem(item.Finish(), ref first, ref second);
             count++;
@@ -1958,24 +1964,28 @@ internal sealed partial class SimulatedCombatState
         ulong first = 0;
         ulong second = 0;
         int count = 0;
-        foreach (PowerModel power in effectivePowers)
+        for (int index = 0; index < effectivePowers.Count; index++)
         {
+            PowerModel power = effectivePowers[index];
             if (power.Amount <= 0)
                 continue;
             int? value = power switch
             {
                 HardenedShellPower shell => (int)simulator.StateStore
-                    .Peek(shell, () => new HardenedShellPredictionState(shell))
+                    .Peek(shell, static value => new HardenedShellPredictionState(value))
                     .DamageReceivedThisTurn,
                 AutomationPower automation => simulator.StateStore
-                    .Peek(automation, () => new AutomationPredictionState(automation))
+                    .Peek(automation, static value => new AutomationPredictionState(value))
                     .CardsLeft,
                 SlothPower sloth => simulator.StateStore
-                    .Peek(sloth, () => new CounterPredictionState(
-                        GetCardsPlayedThisTurn(sloth.Owner)))
+                    .Peek(
+                        sloth,
+                        (State: this, Power: sloth),
+                        static context => new CounterPredictionState(
+                            context.State.GetCardsPlayedThisTurn(context.Power.Owner)))
                     .Value,
                 VoidFormPower voidForm => simulator.StateStore
-                    .Peek(voidForm, () => new VoidFormPredictionState(voidForm))
+                    .Peek(voidForm, static value => new VoidFormPredictionState(value))
                     .CardsPlayedThisTurn,
                 ChainsOfBindingPower chains => EncodeChainsOfBindingState(simulator, chains),
                 _ => null,
@@ -1998,7 +2008,7 @@ internal sealed partial class SimulatedCombatState
     {
         ChainsOfBindingPredictionState state = simulator.StateStore.Peek(
             power,
-            () => new ChainsOfBindingPredictionState(power));
+            static value => new ChainsOfBindingPredictionState(value));
         return checked(state.BoundCardsAfflictedThisTurn * 2 + (state.BoundCardPlayed ? 1 : 0));
     }
 
@@ -2009,9 +2019,9 @@ internal sealed partial class SimulatedCombatState
         ulong first = 0;
         ulong second = 0;
         int count = 0;
-        foreach (NemesisPower power in effectivePowers.OfType<NemesisPower>())
+        for (int index = 0; index < effectivePowers.Count; index++)
         {
-            if (power.Amount <= 0)
+            if (effectivePowers[index] is not NemesisPower power || power.Amount <= 0)
                 continue;
             StateFingerprintBuilder item = new();
             item.Add(power.Owner.CombatId ?? uint.MaxValue);
@@ -2029,9 +2039,9 @@ internal sealed partial class SimulatedCombatState
         ulong first = 0;
         ulong second = 0;
         int count = 0;
-        foreach (TenderPower power in effectivePowers.OfType<TenderPower>())
+        for (int index = 0; index < effectivePowers.Count; index++)
         {
-            if (power.Amount <= 0)
+            if (effectivePowers[index] is not TenderPower power || power.Amount <= 0)
                 continue;
             StateFingerprintBuilder item = new();
             item.Add(power.Owner.CombatId ?? uint.MaxValue);
@@ -2045,7 +2055,7 @@ internal sealed partial class SimulatedCombatState
     private static void AddPlayerIntMap(
         ref StateFingerprintBuilder fingerprint,
         char marker,
-        IReadOnlyDictionary<Player, int>? values)
+        ForkableDictionary<Player, int>? values)
     {
         ulong first = 0;
         ulong second = 0;
@@ -2067,7 +2077,7 @@ internal sealed partial class SimulatedCombatState
     private static void AddCreatureIntMap(
         ref StateFingerprintBuilder fingerprint,
         char marker,
-        IReadOnlyDictionary<Creature, int>? values)
+        ForkableDictionary<Creature, int>? values)
     {
         ulong first = 0;
         ulong second = 0;
@@ -2089,7 +2099,7 @@ internal sealed partial class SimulatedCombatState
     private static void AddCreatureTypeSet(
         ref StateFingerprintBuilder fingerprint,
         char marker,
-        IReadOnlySet<(Creature Owner, Type Type)>? values)
+        ForkableSet<(Creature Owner, Type Type)>? values)
     {
         ulong first = 0;
         ulong second = 0;
@@ -2111,7 +2121,7 @@ internal sealed partial class SimulatedCombatState
     private static void AddCreatureSet(
         ref StateFingerprintBuilder fingerprint,
         char marker,
-        IReadOnlySet<Creature>? values)
+        ForkableSet<Creature>? values)
     {
         ulong first = 0;
         ulong second = 0;
@@ -2131,7 +2141,7 @@ internal sealed partial class SimulatedCombatState
 
     private static void AddSteamEruptionPhases(
         ref StateFingerprintBuilder fingerprint,
-        IReadOnlyDictionary<Creature, SteamEruptionPhase>? values)
+        ForkableDictionary<Creature, SteamEruptionPhase>? values)
     {
         ulong first = 0;
         ulong second = 0;

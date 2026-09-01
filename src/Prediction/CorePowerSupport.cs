@@ -594,7 +594,7 @@ internal static class CorePowerSupport
         List<PredictedCard>? toFlush = null;
         if (PersistentRelicSupport.ShouldFlush(combat, player))
         {
-            foreach (PredictedCard card in playerState.Hand.Cards)
+            foreach (PredictedCard card in playerState.Hand)
             {
                 if (!card.Preview.ShouldRetainThisTurn)
                     (toFlush ??= []).Add(card);
