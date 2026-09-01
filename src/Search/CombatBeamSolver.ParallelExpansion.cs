@@ -509,8 +509,7 @@ internal sealed partial class CombatBeamSolver
                     CardStateOccurrence: cardStateOccurrence);
                 SimulationSnapshot probeSnapshot = ReplayAction(node, action);
 
-                CombatPredictionSimulator probeSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;
-                CardChoiceSpec? choiceSpec = CardChoiceSupport.GetSpec(probeSimulator, card);
+                CardChoiceSpec? choiceSpec = BuildPrimaryCardChoiceSpec(probeSnapshot);
                 if (choiceSpec == null && CardChoiceSupport.RequiresUnsupportedExistingChoice(card.Preview))
                 {
                     probeSnapshot.ReleaseSimulator();

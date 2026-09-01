@@ -630,16 +630,7 @@ internal sealed partial class CombatBeamSolver
                     CardStateOccurrence: cardStateOccurrence);
                 SimulationSnapshot probeSnapshot = ReplayAction(node, action);
 
-                CombatPredictionSimulator probeSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;
-                SimulatedCombatState probeCombat =
-                    (SimulatedCombatState)probeSnapshot.Simulator.State.CombatState;
-                CardChoiceSpec? choiceSpec = probeCombat.PendingTurnStartChoice is { } pendingChoice
-                    && string.IsNullOrEmpty(pendingChoice.SourceId)
-                        ? TurnStartChoiceSupport.BuildPendingSpec(
-                            probeSimulator,
-                            probeCombat,
-                            _player)
-                        : null;
+                CardChoiceSpec? choiceSpec = BuildPrimaryCardChoiceSpec(probeSnapshot);
                 if (choiceSpec == null && CardChoiceSupport.RequiresUnsupportedExistingChoice(card.Preview))
                 {
                     probeSnapshot.ReleaseSimulator();
@@ -1107,6 +1098,21 @@ internal sealed partial class CombatBeamSolver
         return primaryChoiceSpec.SourcePile == PileType.Hand
             ? _profile.MaxHandChoiceBranchesPerAction
             : _profile.MaxPileChoiceBranchesPerAction;
+    }
+
+    private CardChoiceSpec? BuildPrimaryCardChoiceSpec(SimulationSnapshot probeSnapshot)
+    {
+        CombatPredictionSimulator probeSimulator =
+            (CombatPredictionSimulator)probeSnapshot.Simulator;
+        SimulatedCombatState probeCombat =
+            (SimulatedCombatState)probeSnapshot.Simulator.State.CombatState;
+        return probeCombat.PendingTurnStartChoice is { } pendingChoice
+            && string.IsNullOrEmpty(pendingChoice.SourceId)
+                ? TurnStartChoiceSupport.BuildPendingSpec(
+                    probeSimulator,
+                    probeCombat,
+                    _player)
+                : null;
     }
 
     private static CardChoiceSpec? BuildRequiredEmptyChoiceSpec(PlanCardChoice? requiredEmptyChoice)
