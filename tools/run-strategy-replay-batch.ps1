@@ -22,6 +22,8 @@ param(
     [string[]]$ExcludeReportId = @("52911e5d91de488aa8a7f51512314bf4"),
     [ValidateRange(1, 8)]
     [int]$SearchParallelism = 4,
+    [ValidateSet("Disabled", "Smart", "RequireAtLeastOne")]
+    [string]$PotionPolicy = "Smart",
     [ValidateRange(10, 3600)]
     [int]$HighTimeoutSeconds = 180,
     [ValidateRange(10, 3600)]
@@ -286,11 +288,6 @@ function Invoke-ReplayTest {
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
             Select-Object -Unique
     )
-    $potionPolicy = [string]$state.settings.potionPolicy
-    if ($potionPolicy -notin @("Disabled", "Smart", "RequireAtLeastOne")) {
-        $potionPolicy = "Smart"
-    }
-
     $runnerParameters = [ordered]@{
         ScenarioId = $scenarioId
         CharacterId = [string]$player.characterId
@@ -306,7 +303,7 @@ function Invoke-ReplayTest {
         InitialPlayerEnergy = [int]$player.energy
         InitialPlayerStars = [int]$player.stars
         PerformancePresetForTest = $Preset
-        PotionPolicyForTest = $potionPolicy
+        PotionPolicyForTest = $PotionPolicy
         SearchMaxDegreeOfParallelismForTest = $SearchParallelism
         ExpectedInitialProjectedBattleHpLostAtMost = $expectedLoss
         ExpectedInitialOnlyDeathRoutesFound = 0
