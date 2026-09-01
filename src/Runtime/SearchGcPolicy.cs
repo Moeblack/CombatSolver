@@ -12,6 +12,10 @@ internal static class SearchGcPolicy
     private const int ReclaimCompletionTimeoutMilliseconds = 30_000;
     private const int ConcurrentSearchExitPollMilliseconds = 10;
     private static readonly Lock Gate = new();
+    // 手动 GC 模式：禁用求解器驱动的所有自动 GC 生命周期（No-GC 区域、补账回收、显式收集）。
+    // CLR 的分代自动收集保持运行；只有玩家点击 UI 的“手动 GC”按钮才会触发全量强制回收。
+    // 用 static readonly 非 const，避免编译期折叠使短路分支被标记为不可达代码。
+    private static readonly bool AutoGcEnabled = false;
     private static int _activeSearches;
     private static GCLatencyMode _previousMode;
     private static bool _latencyModeOwned;
@@ -221,6 +225,8 @@ internal static class SearchGcPolicy
 
     internal static Task CaptureRootSnapshotBarrier()
     {
+        if (!AutoGcEnabled)
+            return Task.CompletedTask;
         lock (Gate)
             return _referenceReleaseBarrier;
     }
@@ -233,6 +239,8 @@ internal static class SearchGcPolicy
         if (noGcRegionBudgetBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(noGcRegionBudgetBytes));
         ArgumentNullException.ThrowIfNull(memoryPressureSignal);
+        if (!AutoGcEnabled)
+            return NoOpGcScope;
         long noGcRegionLohBudgetBytes = Math.Max(
             256L * 1024 * 1024,
             noGcRegionBudgetBytes / 6);
@@ -421,6 +429,8 @@ internal static class SearchGcPolicy
 
     internal static Task ExitNoGcRegionWhenSearchesIdleAsync(string reason)
     {
+        if (!AutoGcEnabled)
+            return Task.CompletedTask;
         lock (Gate)
         {
             if (!_regionExitOnlyTask.IsCompleted)
@@ -440,6 +450,8 @@ internal static class SearchGcPolicy
 
     private static void StartRegionExitOnlyLocked(string reason)
     {
+        if (!AutoGcEnabled)
+            return;
         if (!_regionExitOnlyRequested || _activeSearches != 0)
             throw new InvalidOperationException("No-GC 区域只能在搜索线程退出后结束。");
         TaskCompletionSource completion = _regionExitOnlyCompletion
@@ -575,6 +587,8 @@ internal static class SearchGcPolicy
         bool forceCollection,
         bool includeCombatLifecyclePressure)
     {
+        if (!AutoGcEnabled)
+            return Task.CompletedTask;
         lock (Gate)
         {
             long releaseEpoch = checked(++_referenceReleaseEpoch);
@@ -601,6 +615,8 @@ internal static class SearchGcPolicy
         bool includeCombatLifecyclePressure,
         long? requiredCoverageEpoch)
     {
+        if (!AutoGcEnabled)
+            return Task.CompletedTask;
         bool lifecycleCollectionRequired = includeCombatLifecyclePressure
             && _combatLifecycleAllocatedBytes >= BackgroundReclaimThresholdBytes;
         if (includeCombatLifecyclePressure)
@@ -712,6 +728,8 @@ internal static class SearchGcPolicy
 
     private static Task RequestReclaimLocked(string reason)
     {
+        if (!AutoGcEnabled)
+            return Task.CompletedTask;
         _regionExitRequired = true;
         if (!_reclaimActive && !_reclaimRequested)
         {
@@ -738,6 +756,8 @@ internal static class SearchGcPolicy
 
     private static void StartReclaimLocked()
     {
+        if (!AutoGcEnabled)
+            return;
         if (!_reclaimRequested || _activeSearches != 0)
             throw new InvalidOperationException("GC 回收只能在请求已登记且搜索线程退出后启动。");
 
@@ -1198,6 +1218,27 @@ internal static class SearchGcPolicy
             return;
         GCSettings.LatencyMode = _previousMode;
         _latencyModeOwned = false;
+    }
+
+    // 手动 GC 模式下的空作用域：不建立 No-GC 区域、不改变延迟模式、不请求任何自动回收。
+    private static readonly IDisposable NoOpGcScope = new NoOpScope();
+    private sealed class NoOpScope : IDisposable
+    {
+        public void Dispose()
+        {
+        }
+    }
+
+    // 手动 GC：阻塞式强制全量回收（含待终结对象）。仅在玩家点击 UI 按钮时调用。
+    internal static void ForceManualGc()
+    {
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] MANUAL_GC forced_gen2=" +
+            $"{GC.CollectionCount(GC.MaxGeneration)} " +
+            $"managed_live_bytes={GC.GetTotalMemory(forceFullCollection: true)}");
     }
 
     private sealed class SearchScope(

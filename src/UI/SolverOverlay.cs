@@ -45,6 +45,7 @@ internal static class SolverOverlay
     private static Button? _recalculateButton;
     private static Button? _executeButton;
     private static Button? _fullAutoButton;
+    private static Button? _manualGcButton;
     private static Button? _collapseButton;
     private static Button? _settingsButton;
     private static Button? _potionStrategyButton;
@@ -1170,6 +1171,12 @@ internal static class SolverOverlay
         _fullAutoButton.CustomMinimumSize = new Vector2(124, SolverUiTokens.Size.ButtonHeight);
         _fullAutoButton.Pressed += OnFullAutoPressed;
         footer.AddChild(_fullAutoButton);
+
+        _manualGcButton = CreateButton("手动 GC", false);
+        SolverUiTokens.ApplyButtonStyle(_manualGcButton, SolverButtonStyle.Secondary);
+        _manualGcButton.CustomMinimumSize = new Vector2(88, SolverUiTokens.Size.ButtonHeight);
+        _manualGcButton.Pressed += OnManualGcPressed;
+        footer.AddChild(_manualGcButton);
         return footer;
     }
 
@@ -1614,6 +1621,12 @@ internal static class SolverOverlay
             return;
         }
         SolverController.SetFullAuto(host, state, !SolverController.FullAutoEnabled);
+    }
+
+    private static void OnManualGcPressed()
+    {
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=manual_gc");
+        SearchGcPolicy.ForceManualGc();
     }
 
     private static void OnTheftPolicyPressed(SolverTheftPolicy policy)
