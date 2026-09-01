@@ -56,6 +56,7 @@ internal sealed record SolverSettingsData
     public bool SearchCompletionNotificationsEnabled { get; init; } = true;
     public SolverSearchCompletionNotificationMode SearchCompletionNotificationMode { get; init; }
         = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
+    [JsonIgnore]
     public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
     public SolverPerformancePreset? PerformancePreset { get; init; }
     public int? SearchMaxDegreeOfParallelism { get; init; }
@@ -242,7 +243,7 @@ internal static class SolverSettings
         if (data.PerformancePreset is { } configured)
             return configured;
         if (!HasExplicitPerformanceValues(data))
-            return SolverPerformancePreset.Medium;
+            return SolverPerformancePreset.VeryHigh;
 
         SolverPerformanceValues legacy = BuildCustomPerformance(data);
         if (legacy == LowPerformance)

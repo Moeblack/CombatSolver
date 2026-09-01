@@ -496,6 +496,7 @@ internal static class PlayerTurnSetupCoordinator
                 BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
                 SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
                     settings,
+                    combat,
                     includeTurnSetup: true,
                     theftPolicy: SolverController.ResolveTheftPolicy(combat));
                 long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);

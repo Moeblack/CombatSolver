@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using Godot;
 using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Players;
+using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
 
 namespace CombatSolver;
@@ -13,6 +16,68 @@ internal sealed partial class UnattendedTestRunner
             ?? throw new InvalidOperationException("控制器会话测试找不到 NGame。");
         if (SolverController.SolverDisabled)
             throw new InvalidOperationException("控制器会话测试要求求解器初始启用。");
+        Player player = LocalContext.GetMe(combat)
+            ?? throw new InvalidOperationException("药水策略 UI 测试找不到本地玩家。");
+        (int Slot, PotionModel Potion)? strategyPotion = Enumerable.Range(0, player.PotionSlots.Count)
+            .Select(slot => (Slot: slot, Potion: player.GetPotionAtSlotIndex(slot)))
+            .Where(item => item.Potion != null && PotionOnUseSupport.CanSearch(item.Potion))
+            .Select(item => (item.Slot, item.Potion!))
+            .Cast<(int Slot, PotionModel Potion)?>()
+            .FirstOrDefault();
+        if (strategyPotion is { } forcedPotion)
+        {
+            SolverController.SetPotionDirectiveForTesting(
+                combat,
+                forcedPotion.Slot,
+                forcedPotion.Potion.Id.Entry,
+                SolverPotionDirective.Force);
+            try
+            {
+                SolverSettingsSnapshot settings = SolverSettings.Capture();
+                SearchPolicySnapshot forcedPolicy = SolverController.CaptureSearchPolicy(
+                    settings,
+                    combat,
+                    includeTurnSetup: false,
+                    theftPolicy: SolverController.ResolveTheftPolicy(combat)) with
+                {
+                    ShortProfile = settings.ShortProfile with
+                    {
+                        MaxExpandedNodes = Math.Min(500, settings.ShortProfile.MaxExpandedNodes),
+                        SoftTimeBudgetMilliseconds = 5_000,
+                    },
+                    ForceShortOnly = true,
+                    MaxDegreeOfParallelism = 1,
+                };
+                CombatRootSnapshot forcedRoot = CombatRootSnapshot.Capture(combat);
+                SolverDisplayNames forcedDisplayNames = SolverDisplayNames.Capture(combat);
+                BattleDamageSnapshot forcedBattleDamage = BattleDamageTracker.Observe(combat);
+                SolverResult forcedResult = await Task.Run(() => CombatSearchCoordinator.Solve(
+                    forcedRoot,
+                    forcedDisplayNames,
+                    forcedBattleDamage,
+                    forcedPolicy,
+                    CancellationToken.None,
+                    progressCallback: null));
+                if (!forcedResult.BestNode.Actions.Any(action =>
+                        action.Kind == PlanActionKind.UsePotion
+                        && action.PotionSlot == forcedPotion.Slot
+                        && string.Equals(
+                            action.PotionId,
+                            forcedPotion.Potion.Id.Entry,
+                            StringComparison.Ordinal)))
+                {
+                    throw new InvalidOperationException("强制用药搜索结果没有使用指定槽位的指定药水。");
+                }
+            }
+            finally
+            {
+                SolverController.SetPotionDirectiveForTesting(
+                    combat,
+                    forcedPotion.Slot,
+                    forcedPotion.Potion.Id.Entry,
+                    SolverPotionDirective.Smart);
+            }
+        }
 
         SolverController.RequestSearch(host, combat, SearchReason.Manual);
         if (!SolverController.IsSearching)
@@ -34,6 +99,64 @@ internal sealed partial class UnattendedTestRunner
             || !SolverOverlay.ExerciseSettingsTabSwitchingForTesting())
         {
             throw new InvalidOperationException("设置页没有按常规、性能、反馈三页独立切换。");
+        }
+        if (strategyPotion is { } potionEntry)
+        {
+            if (!SolverOverlay.PotionStrategyUiConfiguredForTesting
+                || !SolverOverlay.ExercisePotionStrategyUiForTesting())
+            {
+                throw new InvalidOperationException("主界面药水策略没有按图标、名称和折叠面板建立。");
+            }
+            PotionStrategySnapshot initialStrategy = SolverController.CapturePotionStrategy(
+                combat,
+                SolverPotionPolicy.Smart);
+            if (initialStrategy.Resolve(potionEntry.Slot, potionEntry.Potion.Id.Entry)
+                != SolverPotionDirective.Smart)
+            {
+                throw new InvalidOperationException("新获得药水没有默认使用智能策略。");
+            }
+            SolverController.SetPotionDirectiveForTesting(
+                combat,
+                potionEntry.Slot,
+                potionEntry.Potion.Id.Entry,
+                SolverPotionDirective.Force);
+            PotionStrategySnapshot forcedStrategy = SolverController.CapturePotionStrategy(
+                combat,
+                SolverPotionPolicy.Smart);
+            PlanAction forcedUse = new(
+                PlanActionKind.UsePotion,
+                player.PlayerCombatState!.TurnNumber,
+                PotionSlot: potionEntry.Slot,
+                PotionId: potionEntry.Potion.Id.Entry);
+            if (!forcedStrategy.HasForcedDirectives
+                || !forcedStrategy.EvaluateForcedUses([forcedUse], renewablePotionShapedRock: false)
+                    .AllForcedUsesSatisfied
+                || forcedStrategy.EvaluateForcedUses([], renewablePotionShapedRock: false)
+                    .AllForcedUsesSatisfied)
+            {
+                throw new InvalidOperationException("指定药水没有形成精确槽位和药水身份约束。");
+            }
+            SolverController.SetPotionDirectiveForTesting(
+                combat,
+                potionEntry.Slot,
+                potionEntry.Potion.Id.Entry,
+                SolverPotionDirective.Disabled);
+            PotionStrategySnapshot disabledStrategy = SolverController.CapturePotionStrategy(
+                combat,
+                SolverPotionPolicy.Smart);
+            if (disabledStrategy.AllowsExplicitUse(
+                    potionEntry.Slot,
+                    potionEntry.Potion.Id.Entry,
+                    SolverPotionPolicy.Smart,
+                    forceAllDisabled: false))
+            {
+                throw new InvalidOperationException("保护药水仍进入主动用药候选。");
+            }
+            SolverController.SetPotionDirectiveForTesting(
+                combat,
+                potionEntry.Slot,
+                potionEntry.Potion.Id.Entry,
+                SolverPotionDirective.Smart);
         }
         if (!SolverOverlay.ExerciseSearchCompletionNotificationPolicyForTesting())
             throw new InvalidOperationException("搜索结束通知三态选项不能无损回读旧设置字段。");
@@ -68,6 +191,11 @@ internal sealed partial class UnattendedTestRunner
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
         }
         SolverSettingsData notificationDefaults = new();
+        if (SolverSettings.ResolvePerformancePreset(notificationDefaults)
+            != SolverPerformancePreset.VeryHigh)
+        {
+            throw new InvalidOperationException("新安装和恢复默认没有使用极高性能档。");
+        }
         if (!notificationDefaults.SearchCompletionNotificationsEnabled
             || notificationDefaults.SearchCompletionNotificationMode
             != SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground

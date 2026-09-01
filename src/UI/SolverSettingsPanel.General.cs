@@ -10,7 +10,6 @@ internal sealed partial class SolverSettingsPanel
     private CheckButton _stopOnDeathTurn = null!;
     private CheckButton _stopOnWorseRecalculation = null!;
     private OptionButton _searchCompletionNotificationPolicy = null!;
-    private OptionButton _potionPolicy = null!;
     private OptionButton _overlayTheme = null!;
     private HSlider _overlayOpacity = null!;
     private Label _overlayOpacityValue = null!;
@@ -98,8 +97,6 @@ internal sealed partial class SolverSettingsPanel
         _solverEnabled = CreateToggle();
         _solverEnabled.Toggled += OnSolverEnabledToggled;
         AddBasicRow(solverGrid, "启用求解器", _solverEnabled);
-        _potionPolicy = CreatePotionPolicyInput();
-        AddBasicRow(solverGrid, "药水策略", _potionPolicy);
         _searchCompletionNotificationPolicy = CreateSearchCompletionNotificationPolicyInput();
         AddBasicRow(
             solverGrid,
@@ -175,24 +172,6 @@ internal sealed partial class SolverSettingsPanel
                     : SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
             });
             SetStatus("已保存并立即生效", SolverUiTokens.Palette.Success);
-        };
-        return input;
-    }
-
-    private OptionButton CreatePotionPolicyInput()
-    {
-        OptionButton input = CreateOptionInput();
-        input.AddItem("禁用", (int)SolverPotionPolicy.Disabled);
-        input.AddItem("智能（默认）", (int)SolverPotionPolicy.Smart);
-        input.AddItem("至少用一瓶", (int)SolverPotionPolicy.RequireAtLeastOne);
-        _reloadInputs.Add(data => input.Selected = input.GetItemIndex((int)data.PotionPolicy));
-        input.ItemSelected += index =>
-        {
-            if (_loading)
-                return;
-            SolverPotionPolicy policy = (SolverPotionPolicy)input.GetItemId((int)index);
-            SolverSettings.Update(SolverSettings.Current with { PotionPolicy = policy });
-            SetStatus("已保存，下次搜索生效", SolverUiTokens.Palette.Success);
         };
         return input;
     }

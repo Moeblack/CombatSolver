@@ -46,6 +46,8 @@ internal static class SolverOverlay
     private static Button? _fullAutoButton;
     private static Button? _collapseButton;
     private static Button? _settingsButton;
+    private static Button? _potionStrategyButton;
+    private static SolverPotionStrategyPanel? _potionStrategyPanel;
     private static PanelContainer? _feedbackBanner;
     private static Label? _feedbackBannerLabel;
     private static HBoxContainer? _theftPolicyControls;
@@ -53,6 +55,7 @@ internal static class SolverOverlay
     private static Button? _letEscapeButton;
     private static bool _collapsed;
     private static bool _settingsVisible;
+    private static bool _potionStrategyVisible;
     private static bool _deployQueued;
     private static bool _detailsVisible;
     private static bool _dragging;
@@ -99,6 +102,21 @@ internal static class SolverOverlay
         => _settingsPanel?.SettingsTabsConfiguredForTesting == true;
     internal static bool VisualSettingsConfiguredForTesting
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
+    internal static bool PotionStrategyUiConfiguredForTesting
+        => _potionStrategyButton != null
+            && _potionStrategyPanel is { RowCountForTesting: > 0, RowsUseIconAndTextForTesting: true };
+    internal static bool ExercisePotionStrategyUiForTesting()
+    {
+        if (_potionStrategyButton == null || _potionStrategyPanel == null)
+            return false;
+        bool original = _potionStrategyVisible;
+        if (!original)
+            TogglePotionStrategy();
+        bool opened = _potionStrategyVisible && _potionStrategyPanel.Visible;
+        if (!original)
+            TogglePotionStrategy();
+        return opened && _potionStrategyVisible == original;
+    }
     internal static float OverlayOpacityForTesting => _panel?.Modulate.A ?? 1f;
     internal static int? CurrentSnapshotTurnForTesting => _lastSnapshot?.StartTurnNumber;
     internal static SolverOverlayTheme ActiveThemeForTesting => SolverUiTokens.IsLightTheme
@@ -500,8 +518,21 @@ internal static class SolverOverlay
         }
 
         CombatState? combat = CombatManager.Instance.DebugOnlyGetState();
+        bool combatActive = combat != null && CombatManager.Instance.IsInProgress;
+        if (_potionStrategyButton != null)
+        {
+            _potionStrategyButton.Disabled = !combatActive;
+            _potionStrategyButton.AddThemeColorOverride(
+                "font_color",
+                _potionStrategyVisible || SolverUiTokens.IsLightTheme
+                    ? Accent
+                    : SolverUiTokens.Palette.TextSecondary);
+        }
+        _potionStrategyPanel?.Refresh(
+            combatActive ? combat : null,
+            SolverController.IsDeploying);
         bool showTheftPolicy = combat != null
-            && CombatManager.Instance.IsInProgress
+            && combatActive
             && TheftEncounterStrategy.IsApplicable(combat);
         if (_theftPolicyControls != null)
             _theftPolicyControls.Visible = showTheftPolicy;
@@ -562,6 +593,7 @@ internal static class SolverOverlay
             ?? throw new InvalidOperationException("CombatSolver overlay has no host node.");
         bool wasVisible = _layer.Visible;
         bool wasSettingsVisible = _settingsVisible;
+        bool wasPotionStrategyVisible = _potionStrategyVisible;
         bool wasCollapsed = _collapsed;
         bool wereDetailsVisible = _detailsVisible;
         CanvasLayer oldLayer = _layer;
@@ -600,6 +632,7 @@ internal static class SolverOverlay
         }
 
         _settingsVisible = wasSettingsVisible;
+        _potionStrategyVisible = wasPotionStrategyVisible;
         if (wasSettingsVisible)
             _settingsPanel?.Reload();
         SetCollapsed(wasSettingsVisible ? false : wasCollapsed);
@@ -650,6 +683,9 @@ internal static class SolverOverlay
         panel.AddChild(root);
 
         root.AddChild(CreateHeader());
+        _potionStrategyPanel = new SolverPotionStrategyPanel();
+        _potionStrategyPanel.DirectiveChanged += OnPotionDirectiveChanged;
+        root.AddChild(_potionStrategyPanel);
         root.AddChild(CreateFeedbackBanner());
         root.AddChild(CreateDivider());
 
@@ -771,6 +807,7 @@ internal static class SolverOverlay
             $"x={_panelPosition.X:F1} y={_panelPosition.Y:F1}");
         _dragging = false;
         _settingsVisible = false;
+        _potionStrategyVisible = false;
         SetCollapsed(false);
         Entry.Logger.Info("[CombatSolver/Test] UI_CREATE responsive=true content_fit_height=true minimum_size_reflow=true draggable=true drag_coordinates=viewport drag_relayout=release_only max_width=820 max_height=440 route_row_height=44 route_viewport_height=148 visible_unwrapped_route_rows=3 cached_route_rows=16 all_searched_turns=true route_scroll=true persistent_status_card=true compact_title=true compact_footer=true collapsed_action_buttons=true footer_pause_toggles=false settings_pause_toggles=true footer_top_margin=8 details_in_status_row=true battle_hp_in_route_heading=true sold_hp_summary=false three_column_routes=true semantic_action_pills=true full_target_names=true whole_pill_kill_highlight=true text_outline_px=2 wrapped_summary=true summary_bold_metric=true flat_collapse=true plain_details_button=true full_auto_positive_toggle=true no_middle_dot=true status_badge=true plain_action_buttons=true always_show_energy=true plain_route_heading=true settings_button=true settings_persisted=true settings_tabs=general+performance+feedback performance_advanced=collapsed notification_policy=three_state performance_presets=low+medium+high+very_high+custom kill_pill=green_with_target_names status_badge=content_width deployment_speed_settings=true search_status=fixed_columns_seconds only_death_marker=true relic_action_labels=true position_persisted=true theft_policy_buttons=contextual stop_search_button=true");
         Entry.Logger.Info("[CombatSolver/Test] UI_FEEDBACK_BANNER position=full_width manual_improvement=green unexpected_replan=red export_prompt=full_bug_report");
@@ -829,6 +866,10 @@ internal static class SolverOverlay
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         header.AddChild(spacer);
+
+        _potionStrategyButton = CreateHeaderButton("药水策略", 76);
+        _potionStrategyButton.Pressed += TogglePotionStrategy;
+        header.AddChild(_potionStrategyButton);
 
         _settingsButton = CreateHeaderButton("设置", 54);
         _settingsButton.Pressed += ToggleSettings;
@@ -1216,10 +1257,28 @@ internal static class SolverOverlay
             SetCollapsed(false);
         _settingsVisible = !_settingsVisible;
         if (_settingsVisible)
+            _potionStrategyVisible = false;
+        if (_settingsVisible)
             _settingsPanel?.Reload();
         ApplyContentVisibility();
         QueueResponsiveLayout();
         Entry.Logger.Info($"[CombatSolver/Test] UI_ACTION action=settings visible={_settingsVisible}");
+    }
+
+    private static void TogglePotionStrategy()
+    {
+        if (_settingsVisible && _settingsPanel?.CommitPending() == false)
+            return;
+        if (_collapsed)
+            SetCollapsed(false);
+        _settingsVisible = false;
+        _potionStrategyVisible = !_potionStrategyVisible;
+        _potionStrategyPanel?.Invalidate();
+        RefreshControls();
+        ApplyContentVisibility();
+        QueueResponsiveLayout();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_ACTION action=potion_strategy visible={_potionStrategyVisible}");
     }
 
     private static void ToggleDetails()
@@ -1288,12 +1347,22 @@ internal static class SolverOverlay
             _footerDivider.Visible = !_collapsed && !_settingsVisible;
         if (_settingsPanel != null)
             _settingsPanel.Visible = !_collapsed && _settingsVisible;
+        if (_potionStrategyPanel != null)
+            _potionStrategyPanel.Visible = !_collapsed && !_settingsVisible && _potionStrategyVisible;
         if (_settingsButton != null)
         {
             _settingsButton.Text = _settingsVisible ? "返回" : "设置";
             _settingsButton.AddThemeColorOverride(
                 "font_color",
                 _settingsVisible || SolverUiTokens.IsLightTheme
+                    ? Accent
+                    : SolverUiTokens.Palette.TextSecondary);
+        }
+        if (_potionStrategyButton != null)
+        {
+            _potionStrategyButton.AddThemeColorOverride(
+                "font_color",
+                _potionStrategyVisible || SolverUiTokens.IsLightTheme
                     ? Accent
                     : SolverUiTokens.Palette.TextSecondary);
         }
@@ -1318,7 +1387,9 @@ internal static class SolverOverlay
         float desiredHeight = _collapsed
             ? SolverUiTokens.Size.CollapsedHeight
             : _panel.GetCombinedMinimumSize().Y;
-        float maximumHeight = _settingsVisible ? 540f : SolverUiTokens.Size.ExpandedMaxHeight;
+        float maximumHeight = _settingsVisible || _potionStrategyVisible
+            ? 540f
+            : SolverUiTokens.Size.ExpandedMaxHeight;
         float height = Math.Min(desiredHeight, Math.Min(maximumHeight, availableHeight));
 
         ApplyPanelBounds(viewportSize, width, height);
@@ -1431,6 +1502,23 @@ internal static class SolverOverlay
         if (host == null || state == null || !CombatManager.Instance.IsInProgress)
             return;
         SolverController.SetTheftPolicy(host, state, policy);
+        RefreshControls();
+    }
+
+    private static void OnPotionDirectiveChanged(
+        int slot,
+        string potionId,
+        SolverPotionDirective directive)
+    {
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_ACTION action=potion_directive slot={slot} " +
+            $"potion={potionId} directive={directive}");
+        NGame? host = NGame.Instance;
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (host == null || state == null || !CombatManager.Instance.IsInProgress)
+            return;
+        SolverController.SetPotionDirective(host, state, slot, potionId, directive);
+        _potionStrategyPanel?.Invalidate();
         RefreshControls();
     }
 

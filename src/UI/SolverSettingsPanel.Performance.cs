@@ -138,7 +138,7 @@ internal sealed partial class SolverSettingsPanel
         input.AddItem("低档（5 / 60 秒，6 GB）", (int)SolverPerformancePreset.Low);
         input.AddItem("中档（8 / 120 秒，8 GB）", (int)SolverPerformancePreset.Medium);
         input.AddItem("高档（12 / 180 秒，12 GB）", (int)SolverPerformancePreset.High);
-        input.AddItem("极高（20 / 300 秒，16 GB）", (int)SolverPerformancePreset.VeryHigh);
+        input.AddItem("极高（默认，20 / 300 秒，16 GB）", (int)SolverPerformancePreset.VeryHigh);
         input.AddItem("自定义", (int)SolverPerformancePreset.Custom);
         input.ItemSelected += index =>
         {

@@ -22,6 +22,7 @@ internal sealed partial class UnattendedTestRunner
         SolverSettingsSnapshot settings = SolverSettings.Capture();
         SearchPolicySnapshot capturedPolicy = SolverController.CaptureSearchPolicy(
             settings,
+            combat,
             includeTurnSetup: false,
             theftPolicy: SolverController.ResolveTheftPolicy(combat)) with
         {

@@ -510,6 +510,7 @@ internal sealed partial class UnattendedTestRunner
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combatState);
         SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
             SolverSettings.Capture(),
+            combatState,
             includeTurnSetup: false,
             theftPolicy: SolverController.ResolveTheftPolicy(combatState));
         CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(combatState);

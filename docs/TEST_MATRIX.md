@@ -1,15 +1,17 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.23.0`（当前定版；创意工坊稳定版为 `0.22.9`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.24.0`（发布准备；创意工坊稳定版为 `0.22.9`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
 
-## 下一版本（开发中）
+## 0.24.0（开发中）
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `POTION-STRATEGY-FORCED-SEARCH-0240` | 通过（headless 搜索、结构与生命周期） | 主界面从当前药水栏建立图标、官方名称和逐瓶选项，折叠开关生效；新药默认 Smart，Force 的真实短搜使用精确槽位与药水 ID，Disabled 阻止主动用药；新安装/恢复默认解析为 VeryHigh。runId `2b1bef9d976242d09591331db0906466`。 | 2026-09-01 |
+| `SMART-POTION-LETHAL-0240-SENTINEL` | 通过（headless 完整自动战斗） | 1 HP 致死场景继续选择格挡药并在第 2 回合获胜，首轮预计用药 `1`、整场战损 `0`、计划外重算 `0`。runId `33fad9cf08aa440eab0bc6dfc790f5b9`。 | 2026-09-01 |
 | `STRATEGY-ACTION-ADMISSION-EXPERTISE` | 通过（headless） | 原单节点分支预算压到 `3`，手牌包含升级熟练、升级子弹时间和三张打击；搜索先保留资源/过牌代表，首动作选择熟练并完成三回合短搜。runId `d2edebb4a7094d2fbce5787e02cc849c`。 | 2026-08-31 |
 | `STRATEGY-SMART-POTION-INTERVENTION` | 通过（headless） | 四只花园幽灵鳗固定 `15 HP`、纯攻击牌组和一瓶格挡药；Smart 主路线为无药死亡边界，主动强制一瓶反事实找到存活路线，最终采用格挡药并确认省血 `12/9`。runId `fb7b2287a75e442cad01e1ca32f14417`。 | 2026-08-31 |
 | `STRATEGY-SEMANTIC-AFTERIMAGE` | 通过（headless） | 单节点分支预算为 `3`，逐次出牌获得格挡的能力与五张 0 费攻击牌同手；能力收益按可达出牌次数形成防伤向量，首动作使用能力牌，路线预计战损 `0`、实际格挡 `5`。runId `35b7698ab74d462bb40182008bf6cd82`。 | 2026-08-31 |

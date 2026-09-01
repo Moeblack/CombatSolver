@@ -40,6 +40,7 @@ internal sealed class CombatRootSnapshot
     public int CapturedCombatModSubscriberCount { get; }
     public bool CapturedBaseLibCardModifiers { get; }
     public bool HasUnusedCardReplayAllocator { get; }
+    public bool HasRenewablePotionShapedRock { get; }
 
     private CombatRootSnapshot(
         Player playerIdentity,
@@ -66,7 +67,8 @@ internal sealed class CombatRootSnapshot
         int capturedRunModSubscriberCount,
         int capturedCombatModSubscriberCount,
         bool capturedBaseLibCardModifiers,
-        bool hasUnusedCardReplayAllocator)
+        bool hasUnusedCardReplayAllocator,
+        bool hasRenewablePotionShapedRock)
     {
         PlayerIdentity = playerIdentity;
         Enemies = enemies;
@@ -93,6 +95,7 @@ internal sealed class CombatRootSnapshot
         CapturedCombatModSubscriberCount = capturedCombatModSubscriberCount;
         CapturedBaseLibCardModifiers = capturedBaseLibCardModifiers;
         HasUnusedCardReplayAllocator = hasUnusedCardReplayAllocator;
+        HasRenewablePotionShapedRock = hasRenewablePotionShapedRock;
     }
 
     public static CombatRootSnapshot Capture(CombatState state)
@@ -134,6 +137,9 @@ internal sealed class CombatRootSnapshot
         bool hasUnusedCardReplayAllocator = simulatedCombat.RelicsOf(player)
             .OfType<ThrowingAxe>()
             .Any(relic => !relic.IsMelted && !relic._usedThisCombat);
+        bool hasRenewablePotionShapedRock = simulatedCombat.RelicsOf(player)
+            .OfType<PetrifiedToad>()
+            .Any(relic => !relic.IsMelted);
         if (!string.Equals(
                 continuationBefore.StateText,
                 projected.StateText,
@@ -192,7 +198,8 @@ internal sealed class CombatRootSnapshot
             simulatedCombat.RootRunModSubscriberCount,
             simulatedCombat.RootCombatModSubscriberCount,
             simulatedCombat.RootHasBaseLibCardModifiers,
-            hasUnusedCardReplayAllocator);
+            hasUnusedCardReplayAllocator,
+            hasRenewablePotionShapedRock);
     }
 
     public CombatPredictionSimulator ForkSimulator() => _rootSimulator.Fork();

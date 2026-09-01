@@ -26,36 +26,39 @@ internal static class CombatSearchCoordinator
                 progressCallback,
                 shortProfile).Solve();
             PopulateSingleSessionTotals(shortResult, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered: false);
-            shortResult = AuditRequiredPotionUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                shortProfile,
-                shortCheckpointMilliseconds: null,
-                primary: shortResult);
-            shortResult = AuditSmartPotionUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                shortProfile,
-                shortCheckpointMilliseconds: null,
-                primary: shortResult);
-            shortResult = AuditOpeningPowerUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                shortProfile,
-                shortCheckpointMilliseconds: null,
-                primary: shortResult);
+            if (!policy.PotionStrategy.HasForcedDirectives)
+            {
+                shortResult = AuditRequiredPotionUse(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    shortProfile,
+                    shortCheckpointMilliseconds: null,
+                    primary: shortResult);
+                shortResult = AuditSmartPotionUse(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    shortProfile,
+                    shortCheckpointMilliseconds: null,
+                    primary: shortResult);
+                shortResult = AuditOpeningPowerUse(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    shortProfile,
+                    shortCheckpointMilliseconds: null,
+                    primary: shortResult);
+            }
             if (policy.MeasurePhasePerformance)
                 policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(shortResult));
             return shortResult;
@@ -91,36 +94,39 @@ internal static class CombatSearchCoordinator
         result.DeepSearchImprovedResult = false;
         result.SingleSessionSearch = true;
         PopulateSingleSessionTotals(result, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered);
-        result = AuditRequiredPotionUse(
-            root,
-            displayNames,
-            battleDamage,
-            policy,
-            cancellationToken,
-            progressCallback,
-            deepProfile,
-            shortProfile.SoftTimeBudgetMilliseconds,
-            result);
-        result = AuditSmartPotionUse(
-            root,
-            displayNames,
-            battleDamage,
-            policy,
-            cancellationToken,
-            progressCallback,
-            deepProfile,
-            shortProfile.SoftTimeBudgetMilliseconds,
-            result);
-        result = AuditOpeningPowerUse(
-            root,
-            displayNames,
-            battleDamage,
-            policy,
-            cancellationToken,
-            progressCallback,
-            deepProfile,
-            shortProfile.SoftTimeBudgetMilliseconds,
-            result);
+        if (!policy.PotionStrategy.HasForcedDirectives)
+        {
+            result = AuditRequiredPotionUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                deepProfile,
+                shortProfile.SoftTimeBudgetMilliseconds,
+                result);
+            result = AuditSmartPotionUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                deepProfile,
+                shortProfile.SoftTimeBudgetMilliseconds,
+                result);
+            result = AuditOpeningPowerUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                deepProfile,
+                shortProfile.SoftTimeBudgetMilliseconds,
+                result);
+        }
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SEARCH_SESSION mode=single_anytime " +
             $"short_checkpoint_ms={shortProfile.SoftTimeBudgetMilliseconds} " +

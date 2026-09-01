@@ -50,6 +50,9 @@ internal sealed partial class CombatBeamSolver(
     private readonly int? _maximumPotionUses = maximumPotionUses;
     private readonly IReadOnlyList<PlanAction> _fixedPrefixActions = fixedPrefixActions ?? [];
     private readonly SolverTheftPolicy? _theftPolicy = policy.TheftPolicy;
+    private readonly PotionStrategySnapshot _potionStrategy = policy.PotionStrategy;
+    private readonly bool _forceAllPotionsDisabled = potionPolicyOverride == SolverPotionPolicy.Disabled;
+    private readonly bool _enforcePotionDirectives = potionPolicyOverride == null;
     private readonly SolverPotionPolicy _potionPolicy = potionPolicyOverride
         ?? (policy.TheftPolicy == SolverTheftPolicy.PreserveResources
             ? SolverPotionPolicy.Smart
@@ -70,11 +73,21 @@ internal sealed partial class CombatBeamSolver(
     private FinalPlanOrdering? _finalOrdering;
     private FinalPlanOrdering FinalOrdering => _finalOrdering ??= new FinalPlanOrdering(
         _potionPolicy,
+        _potionStrategy,
+        _enforcePotionDirectives,
+        root.HasRenewablePotionShapedRock,
         _theftPolicy,
         potionFreePolicyBaseline,
         root.InitialPlayerMaxHp,
         policy.Diagnostics,
         _detailedDiagnostics,
         battleDamage);
+
+    private bool AllowsPotionUse(int slot, string potionId)
+        => _potionStrategy.AllowsExplicitUse(
+            slot,
+            potionId,
+            _potionPolicy,
+            _forceAllPotionsDisabled);
 
 }

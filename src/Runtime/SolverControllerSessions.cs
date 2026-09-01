@@ -35,6 +35,7 @@ internal sealed class SolverCombatSession
     public ManualProjectionComparison? LastManualProjectionComparison { get; set; }
     public bool ManualRouteImprovementDetected { get; set; }
     public bool AutomaticSearchPaused { get; set; }
+    public Dictionary<(int Slot, string PotionId), SolverPotionDirective> PotionDirectives { get; } = [];
     public Dictionary<ReplanCause, int> ReplanCounts { get; } = [];
     public int SearchesStarted { get; set; }
     public int ContinuationsReused { get; set; }

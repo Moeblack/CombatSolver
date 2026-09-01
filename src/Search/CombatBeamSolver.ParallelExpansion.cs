@@ -585,7 +585,6 @@ internal sealed partial class CombatBeamSolver
     {
         SimulationSnapshot snapshot = node.Snapshot;
         if (snapshot.PlayerDead || snapshot.AllEnemiesDead
-            || _potionPolicy == SolverPotionPolicy.Disabled
             || _maximumPotionUses != null && node.PotionCount >= _maximumPotionUses.Value)
         {
             return;
@@ -599,6 +598,7 @@ internal sealed partial class CombatBeamSolver
             if (potion == null
                 || !simulatedCombat.IsPotionAvailable(_player, potionSlot)
                 || !PotionOnUseSupport.CanSearch(potion)
+                || !AllowsPotionUse(potionSlot, potion.Id.Entry)
                 || PotionUsePolicy.RequiresOpeningUse(potion)
                     && node.Actions.Any(action => action.Kind != PlanActionKind.UsePotion))
             {

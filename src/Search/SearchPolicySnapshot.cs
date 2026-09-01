@@ -4,6 +4,7 @@ internal sealed record SearchPolicySnapshot(
     SolverSearchProfile ShortProfile,
     SolverSearchProfile DeepProfile,
     SolverPotionPolicy PotionPolicy,
+    PotionStrategySnapshot PotionStrategy,
     bool DetailedDiagnostics,
     bool VerifyIncrementalSearch,
     bool ForceShortOnly,

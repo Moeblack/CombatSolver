@@ -305,6 +305,7 @@ internal static class SolverController
 
     internal static SearchPolicySnapshot CaptureSearchPolicy(
         SolverSettingsSnapshot settings,
+        CombatState state,
         bool includeTurnSetup,
         SolverTheftPolicy? theftPolicy)
     {
@@ -322,6 +323,7 @@ internal static class SolverController
             settings.ShortProfile,
             settings.DeepProfile,
             settings.PotionPolicy,
+            CapturePotionStrategy(state, settings.PotionPolicy),
             settings.EnableDetailedDiagnosticLogs,
             UnattendedTestRunner.VerifyIncrementalSearch,
             UnattendedTestRunner.ForceShortSearchOnly,
@@ -776,6 +778,7 @@ internal static class SolverController
             SolverTheftPolicy? theftPolicy = ResolveTheftPolicy(state);
             SearchPolicySnapshot searchPolicy = CaptureSearchPolicy(
                 settings,
+                state,
                 includeTurnSetup: false,
                 theftPolicy: theftPolicy);
             search.MaxDegreeOfParallelism = searchPolicy.MaxDegreeOfParallelism;
@@ -1172,6 +1175,85 @@ internal static class SolverController
             $"[CombatSolver/Test] THEFT_POLICY_CHANGED previous={previous?.ToString() ?? "-"} current={policy}");
         SolverOverlay.RefreshControls();
         RequestSearch(host, state, SearchReason.Manual);
+    }
+
+    internal static PotionStrategySnapshot CapturePotionStrategy(
+        CombatState state,
+        SolverPotionPolicy defaultPolicy)
+    {
+        AssertMainThread();
+        Player player = LocalContext.GetMe(state)
+            ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
+        List<PotionSlotDirective> directives = [];
+        foreach (((int slot, string potionId), SolverPotionDirective directive) in _combat.PotionDirectives)
+        {
+            PotionModel? potion = player.GetPotionAtSlotIndex(slot);
+            if (potion != null && string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
+                directives.Add(new PotionSlotDirective(slot, potionId, directive));
+        }
+        return new PotionStrategySnapshot(defaultPolicy, directives);
+    }
+
+    internal static SolverPotionDirective ResolvePotionDirective(
+        CombatState state,
+        int slot,
+        string potionId)
+        => CapturePotionStrategy(state, SolverPotionPolicy.Smart).Resolve(slot, potionId);
+
+    internal static void SetPotionDirective(
+        NGame host,
+        CombatState state,
+        int slot,
+        string potionId,
+        SolverPotionDirective directive)
+    {
+        AssertMainThread();
+        if (!Enum.IsDefined(directive))
+            throw new ArgumentOutOfRangeException(nameof(directive));
+        if (_deployment != null)
+        {
+            Entry.Logger.Info("[CombatSolver/Test] POTION_DIRECTIVE_REJECT reason=deploying");
+            return;
+        }
+        Player player = LocalContext.GetMe(state)
+            ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
+        PotionModel potion = player.GetPotionAtSlotIndex(slot)
+            ?? throw new InvalidOperationException($"药水槽位 {slot} 为空。");
+        if (!string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"药水槽位 {slot} 为 {potion.Id.Entry}，预期 {potionId}。");
+        }
+
+        (int Slot, string PotionId) key = (slot, potionId);
+        if (_combat.PotionDirectives.GetValueOrDefault(key) == directive
+            && _combat.PotionDirectives.ContainsKey(key))
+        {
+            return;
+        }
+        _combat.PotionDirectives[key] = directive;
+        _combat.ContinuationSource = null;
+        _combat.PendingCompleteProjectionBaseline = null;
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] POTION_DIRECTIVE_CHANGED slot={slot} potion={potionId} directive={directive}");
+        SolverOverlay.RefreshControls();
+        RequestSearch(host, state, SearchReason.Manual);
+    }
+
+    internal static void SetPotionDirectiveForTesting(
+        CombatState state,
+        int slot,
+        string potionId,
+        SolverPotionDirective directive)
+    {
+        AssertMainThread();
+        if (!UnattendedTestRunner.IsActive)
+            throw new InvalidOperationException("药水策略测试覆盖只能在无人测试中使用。");
+        PotionModel potion = LocalContext.GetMe(state)?.GetPotionAtSlotIndex(slot)
+            ?? throw new InvalidOperationException($"测试药水槽位 {slot} 为空。");
+        if (!string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
+            throw new InvalidOperationException($"测试药水槽位 {slot} 与 {potionId} 不一致。");
+        _combat.PotionDirectives[(slot, potionId)] = directive;
     }
 
     internal static SolverTheftPolicy? ResolveTheftPolicy(CombatState state)
