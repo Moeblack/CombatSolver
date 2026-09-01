@@ -160,7 +160,7 @@ internal sealed partial class SolverSettingsPanel
     {
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=manual_gc");
         SearchGcPolicy.ForceManualGc();
-        SetStatus("内存回收已完成", SolverUiTokens.Palette.Success);
+        SetStatus("内存回收已安排", SolverUiTokens.Palette.Success);
     }
 
     private void ReloadPerformancePage(SolverSettingsData data)

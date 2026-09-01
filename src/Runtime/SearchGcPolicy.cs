@@ -570,6 +570,25 @@ internal static class SearchGcPolicy
                 requiredCoverageEpoch: null);
     }
 
+    // The settings action must cooperate with the same process-wide lifecycle as automatic
+    // reclamation. Queueing the request avoids blocking the Godot main thread and lets an
+    // active search leave its No-GC region at the existing safe search-exit boundary.
+    internal static void ForceManualGc()
+    {
+        Task reclaim = ReclaimIfPendingAsync(
+            "manual_gc",
+            forceCollection: true,
+            includeCombatLifecyclePressure: true);
+        _ = reclaim.ContinueWith(
+            task => Entry.Logger.Error(
+                $"[CombatSolver/Test] MANUAL_GC_FAILED exception={task.Exception?.GetBaseException()}"),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] MANUAL_GC queued=true completed={reclaim.IsCompleted.ToString().ToLowerInvariant()}");
+    }
+
     private static Task ReclaimAfterReferenceReleaseBoundaryAsync(
         string reason,
         bool forceCollection,
