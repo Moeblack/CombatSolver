@@ -10,6 +10,8 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `ISSUE-213617-SMART-TIME-CLOSURE` | 通过（问题包同根 headless 短搜） | Smart、DOP4、`2.068 s`，生成 `9` 个动作；自动药不再触发主动用药门槛，超时结果保持回合完整。runId `7b2a2cf1e7e34dd7813ec0248733ee8b`。 | 2026-09-01 |
+| `ISSUE-213617-MUMMIFIED-HAND-REPEAT-COST` | 通过（`1/1` 实机/模拟差分） | 连续打出 `SWORD_SAGE`、`PARRY` 后，木乃伊手临时费用、随机候选和 RNG 一致。runId `4e42216ff3d145d5a8a19b8dca0c857f`。 | 2026-09-01 |
 | `TEST-SUBJECT-TURN-BUDGET-FIXED` | 通过（问题包同首根 headless 搜索） | Medium 搜索的升级早有准备、`Glam` 重放与本能反应/战术大师弃牌链按整张牌共用选择预算；深化 `30 s` 的回合层调度从修复前 `4` 回合推进到 `8` 回合，转移 `131,808 → 127,890`，分配 `12,410,879,432 → 12,246,683,840 B`。runId `116f9e03b1fd4181b7412792a9e8277e`。 | 2026-09-01 |
 | `HEADBUTT-CHOICE-SCHEDULING-SENTINEL` | 通过（headless 选牌与跨回合复用） | 普通战斗的头槌牌堆选择正常部署，第 2 回合精确复用，计划外重算 `0`。runId `cb66e56414814c0eba21b176f5de3ce9`。 | 2026-09-01 |
 | `STRATAGEM-SHUFFLE-CHOICE-FREEZE` | 通过（问题包同首根 headless 搜索） | 洗牌监听器中的战略选牌按请求时刻冻结候选；跨 `1` 次洗牌搜索到 `3` 回合路线，不再因后续生成的煤灰牌导致计算失败。runId `b8ca4dd0641840c59b7cee9a8c7a393e`。 | 2026-09-01 |

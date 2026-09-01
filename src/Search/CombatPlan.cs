@@ -571,6 +571,7 @@ internal sealed class SolverResult
     public required int ProjectedBattleHpLost { get; init; }
     public required int BattlePotionsUsedSoFar { get; init; }
     public required int PotionCount { get; init; }
+    public required int ExplicitPotionCount { get; init; }
     public int ProjectedBattlePotionCount => BattlePotionsUsedSoFar + PotionCount;
     public required int PotionHpSaved { get; internal set; }
     public required int PotionHpRequired { get; internal set; }
@@ -628,6 +629,9 @@ internal sealed class SolverResult
         int remainingPotionCount = PotionCountByTurn
             .Where(item => item.Key >= cached.StartTurnNumber)
             .Sum(item => item.Value);
+        int remainingExplicitPotionCount = BestNode.Actions.Count(action =>
+            action.Kind == PlanActionKind.UsePotion
+            && action.Turn >= cached.StartTurnNumber);
         int remainingPotionCost = PotionStrategicCostByTurn
             .Where(item => item.Key >= cached.StartTurnNumber)
             .Sum(item => item.Value);
@@ -686,6 +690,7 @@ internal sealed class SolverResult
             ProjectedBattleHpLost = battleDamage.HpLostSoFar + totalRemainingLoss,
             BattlePotionsUsedSoFar = battleDamage.PotionsUsedSoFar,
             PotionCount = remainingPotionCount,
+            ExplicitPotionCount = remainingExplicitPotionCount,
             PotionHpSaved = remainingPotionCount == 0 ? 0 : PotionHpSaved,
             PotionHpRequired = remainingPotionCost,
             PotionBranchesRejected = 0,

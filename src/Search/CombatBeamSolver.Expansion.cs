@@ -767,7 +767,7 @@ internal sealed partial class CombatBeamSolver
                     return $"{slot}:{item?.Id.Entry ?? "-"}:{(item != null && PotionOnUseSupport.CanSearch(item))}";
                 }))}");
         }
-        if (_maximumPotionUses == null || node.PotionCount < _maximumPotionUses.Value)
+        if (_maximumPotionUses == null || ExplicitPotionUseCount(node) < _maximumPotionUses.Value)
         for (int potionSlot = 0; potionSlot < root.PotionSlotCount; potionSlot++)
         {
             PotionModel? potion = simulatedCombat.GetPotionAtSlot(_player, potionSlot);

@@ -1126,8 +1126,8 @@ internal static class CombatSearchCoordinator
         Action<SolverResult>? interimResultCallback,
         Func<bool>? adoptCurrentResultRequested)
     {
-        if (potionFree.PotionCount != 0)
-            throw new InvalidOperationException("Smart 梯度搜索必须从无药结果开始。");
+        if (potionFree.ExplicitPotionCount != 0)
+            throw new InvalidOperationException("Smart 梯度搜索必须从无主动用药结果开始。");
 
         bool potionFreeWon = potionFree.Snapshot.AllEnemiesDead
             && !potionFree.Snapshot.PlayerDead

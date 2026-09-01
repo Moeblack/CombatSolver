@@ -27,6 +27,9 @@ internal sealed partial class CombatBeamSolver
                     int sold = features.FutureSoldHp;
                     int battleSold = battleDamage.SoldHpCommitted + sold;
                     int potionCount = features.PotionCount;
+                    int explicitPotionCount = PotionUsePolicy.ExplicitUseCount(
+                        potionCount,
+                        candidate.Snapshot.AutomaticPotionUseCount);
                     int ambergrisCount = candidate.Node.Actions.Count(action =>
                         action.Kind == PlanActionKind.UsePotion
                         && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
@@ -35,10 +38,17 @@ internal sealed partial class CombatBeamSolver
                             candidate.Node.Actions,
                             renewablePotionShapedRock)
                         : new ForcedPotionUseEvaluation(true, 0, 0, 0);
-                    int optionalPotionCount = Math.Max(0, potionCount - forced.ForcedUseCount);
+                    int explicitPotionStrategicCost = candidate.Node.Actions
+                        .Where(action => action.Kind == PlanActionKind.UsePotion)
+                        .Sum(action => PotionUsePolicy.StrategicHpCost(
+                            action.PotionId!,
+                            renewablePotionShapedRock));
+                    int optionalPotionCount = Math.Max(
+                        0,
+                        explicitPotionCount - forced.ForcedUseCount);
                     int optionalPotionStrategicCost = Math.Max(
                         0,
-                        candidate.Node.PotionStrategicCost - forced.ForcedStrategicHpCost);
+                        explicitPotionStrategicCost - forced.ForcedStrategicHpCost);
                     int optionalAmbergrisCount = Math.Max(0, ambergrisCount - forced.ForcedAmbergrisCount);
                     SolverPotionPolicy effectivePotionPolicy = potionPolicy switch
                     {
@@ -60,7 +70,8 @@ internal sealed partial class CombatBeamSolver
                                 optionalPotionStrategicCost)
                             : 0);
                     return (candidate.Node, candidate.Snapshot, candidate.Annotations, Features: features,
-                        FutureSold: sold, BattleSold: battleSold, PotionCount: potionCount, HpDeficit: hpDeficit,
+                        FutureSold: sold, BattleSold: battleSold, PotionCount: potionCount,
+                        ExplicitPotionCount: explicitPotionCount, HpDeficit: hpDeficit,
                         StrategicHpDeficit: strategicHpDeficit, PolicyHpDeficit: policyHpDeficit,
                         MaxHpDeficit: maxHpDeficit, HealthResourceCost: healthResourceCost,
                         StrategicSold: strategicSold, PotionStrategicCost: candidate.Node.PotionStrategicCost,
@@ -94,7 +105,7 @@ internal sealed partial class CombatBeamSolver
             }
             int potionFreeBaselineIndex = policyCandidates
                 .Select((candidate, index) => (Candidate: candidate, Index: index))
-                .Where(item => item.Candidate.PotionCount == 0)
+                .Where(item => item.Candidate.ExplicitPotionCount == 0)
                 .OrderByDescending(item => item.Candidate.Features.AllEnemiesDead)
                 .ThenBy(item => theftPolicy == SolverTheftPolicy.PreserveResources
                     ? item.Candidate.Features.OutstandingStolenResource
@@ -160,11 +171,10 @@ internal sealed partial class CombatBeamSolver
             var selected = policyCandidates
                 .Where(candidate =>
                     candidate.ForcedUsesSatisfied
-                    && candidate.PotionCount >= minimumPotionUses
+                    && candidate.ExplicitPotionCount >= minimumPotionUses
                     && (PotionUsePolicy.IsEligible(
                          candidate.EffectivePotionPolicy,
                          candidate.OptionalPotionCount,
-                         candidate.Snapshot.AutomaticPotionUseCount,
                          candidate.OptionalPotionStrategicCost,
                          potionFreeWon,
                          potionFreeStrategicHpDeficit,
@@ -209,11 +219,10 @@ internal sealed partial class CombatBeamSolver
             int potionBranchesRejected = policyCandidates.Count(candidate =>
                 candidate.PotionCount > 0
                 && (!candidate.ForcedUsesSatisfied
-                    || candidate.PotionCount < minimumPotionUses
+                    || candidate.ExplicitPotionCount < minimumPotionUses
                     || !(PotionUsePolicy.IsEligible(
                           candidate.EffectivePotionPolicy,
                           candidate.OptionalPotionCount,
-                          candidate.Snapshot.AutomaticPotionUseCount,
                           candidate.OptionalPotionStrategicCost,
                           potionFreeWon,
                           potionFreeStrategicHpDeficit,

@@ -101,6 +101,11 @@ internal sealed partial class CombatBeamSolver(
             _potionPolicy,
             _forceAllPotionsDisabled);
 
+    private static int ExplicitPotionUseCount(SearchNode node)
+        => PotionUsePolicy.ExplicitUseCount(
+            node.PotionCount,
+            node.Snapshot.AutomaticPotionUseCount);
+
     internal static string? DescribePotionProgressPhase(
         SolverDisplayNames displayNames,
         SolverPotionPolicy? potionPolicyOverride,

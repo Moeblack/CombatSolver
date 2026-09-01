@@ -74,7 +74,7 @@ internal sealed partial class CombatBeamSolver
 
         void ConsiderCurrentResult(SearchNode node)
         {
-            if (node.PotionCount < _minimumPotionUses
+            if (ExplicitPotionUseCount(node) < _minimumPotionUses
                 || !SolverInterimResultOrdering.IsCompleteVictory(
                     node.ActionCount,
                     node.Snapshot.AllEnemiesDead,
@@ -335,7 +335,22 @@ internal sealed partial class CombatBeamSolver
                     && stopwatch.ElapsedMilliseconds >= _profile.SoftTimeBudgetMilliseconds)
                 {
                     timeBudgetReached = true;
-                    ended.AddRange(active);
+                    int forcedEndTurnCandidates = 0;
+                    foreach (SearchNode node in active)
+                    {
+                        foreach (SearchNode endNode in BuildAcceptedEndTurnNodes(node))
+                        {
+                            ended.Add(endNode);
+                            forcedEndTurnCandidates++;
+                        }
+                        node.Snapshot.ReleaseSimulator();
+                    }
+                    policy.Diagnostics.Info(
+                        $"[CombatSolver/Test] SEARCH_TIME_BUDGET " +
+                        $"completed_turns={searchedTurnLayers} play_depth={playDepth} " +
+                        $"elapsed_ms={stopwatch.ElapsedMilliseconds} " +
+                        $"budget_ms={_profile.SoftTimeBudgetMilliseconds} " +
+                        $"forced_end_turn={forcedEndTurnCandidates}");
                     active = [];
                     break;
                 }
@@ -346,12 +361,13 @@ internal sealed partial class CombatBeamSolver
                         fallback = child;
                     if (child.IsTerminal || child.Turn > node.Turn)
                     {
-                        if (child.PotionCount == 0 && child.Score > potionFreeBoundaryFallbackScore)
+                        int explicitPotionUses = ExplicitPotionUseCount(child);
+                        if (explicitPotionUses == 0 && child.Score > potionFreeBoundaryFallbackScore)
                         {
                             potionFreeBoundaryFallback = child;
                             potionFreeBoundaryFallbackScore = child.Score;
                         }
-                        else if (child.PotionCount > 0 && child.Score > potionBoundaryFallbackScore)
+                        else if (explicitPotionUses > 0 && child.Score > potionBoundaryFallbackScore)
                         {
                             potionBoundaryFallback = child;
                             potionBoundaryFallbackScore = child.Score;
@@ -547,7 +563,7 @@ internal sealed partial class CombatBeamSolver
                 frontier.Count, completed.Count, "回合层完成", force: true);
             if (completed.Any(node =>
                     node.Snapshot.AllEnemiesDead
-                    && node.PotionCount == 0
+                    && ExplicitPotionUseCount(node) == 0
                     && node.FutureSoldHp == 0
                     && node.Snapshot.CumulativePlayerHpLost == 0
                     && node.Snapshot.PlayerMaxHp >= root.InitialPlayerMaxHp))
@@ -578,12 +594,12 @@ internal sealed partial class CombatBeamSolver
                 ? [RefreshReleasedFallback(fallback)]
                 : [.. completed, .. frontier];
         }
-        if (!finalPool.Any(node => node.PotionCount == 0)
+        if (!finalPool.Any(node => ExplicitPotionUseCount(node) == 0)
             && potionFreeBoundaryFallback != null)
         {
             finalPool.Add(RefreshReleasedFallback(potionFreeBoundaryFallback));
         }
-        if (!finalPool.Any(node => node.PotionCount > 0)
+        if (!finalPool.Any(node => ExplicitPotionUseCount(node) > 0)
             && potionBoundaryFallback != null)
         {
             finalPool.Add(RefreshReleasedFallback(potionBoundaryFallback));
@@ -805,6 +821,8 @@ internal sealed partial class CombatBeamSolver
             ProjectedBattleHpLost = battleDamage.HpLostSoFar + futureHpLost,
             BattlePotionsUsedSoFar = battleDamage.PotionsUsedSoFar,
             PotionCount = selectedCandidate.PotionCount,
+            ExplicitPotionCount = annotatedActions.Count(action =>
+                action.Kind == PlanActionKind.UsePotion),
             PotionHpSaved = potionHpSaved,
             PotionHpRequired = potionHpRequired,
             PotionBranchesRejected = potionBranchesRejected,

@@ -593,7 +593,8 @@ internal sealed partial class CombatBeamSolver
     {
         SimulationSnapshot snapshot = node.Snapshot;
         if (snapshot.PlayerDead || snapshot.AllEnemiesDead
-            || _maximumPotionUses != null && node.PotionCount >= _maximumPotionUses.Value)
+            || _maximumPotionUses != null
+                && ExplicitPotionUseCount(node) >= _maximumPotionUses.Value)
         {
             return;
         }
