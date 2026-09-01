@@ -115,8 +115,15 @@ internal sealed partial class UnattendedTestRunner
                 EndedNodes: 0,
                 ElapsedMilliseconds: 600,
                 Phase: "正在搜索无药路线",
-                CurrentBestPotionCount: 0,
-                CurrentBestProjectedBattleHpLost: 9),
+                CurrentBestResult: new SolverInterimResult(
+                    Won: false,
+                    OutstandingStolenResource: 0,
+                    ProjectedBattleHpLost: 9,
+                    StrategicHpDeficit: 9,
+                    PotionStrategicCost: 0,
+                    ProjectedBattlePotionCount: 0,
+                    EnemyHp: 1,
+                    Score: 0d)),
             deployWhenReady: false,
             reviewedWorldlinesBeforeSearch: 5);
         if (SolverOverlay.SearchProgressRatioForTesting < progressRatio
@@ -621,20 +628,20 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("Smart 药水补查没有按每瓶 9 HP 限制多药层数。");
         }
-        if (CombatSearchCoordinator.IsInterimResourceTradeImprovementForTesting(
-                candidateHpLost: 2,
+        if (SolverInterimResultOrdering.IsResourceTradeImprovement(
+                candidateHpDeficit: 2,
                 candidatePotionCost: 9,
-                currentHpLost: 10,
+                currentHpDeficit: 10,
                 currentPotionCost: 0)
-            || !CombatSearchCoordinator.IsInterimResourceTradeImprovementForTesting(
-                candidateHpLost: 1,
+            || !SolverInterimResultOrdering.IsResourceTradeImprovement(
+                candidateHpDeficit: 1,
                 candidatePotionCost: 9,
-                currentHpLost: 10,
+                currentHpDeficit: 10,
                 currentPotionCost: 0)
-            || CombatSearchCoordinator.IsInterimResourceTradeImprovementForTesting(
-                candidateHpLost: 10,
+            || SolverInterimResultOrdering.IsResourceTradeImprovement(
+                candidateHpDeficit: 10,
                 candidatePotionCost: 0,
-                currentHpLost: 10,
+                currentHpDeficit: 10,
                 currentPotionCost: 0))
         {
             throw new InvalidOperationException("搜索中间路线没有按每瓶 9 HP 成本保持严格递增优。");
@@ -676,7 +683,6 @@ internal sealed partial class UnattendedTestRunner
         }
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
         List<long> elapsedSamples = [];
-        using CancellationTokenSource adoptionCancellation = new();
         bool adoptionRequested = false;
         int? displayedPotionCount = null;
         int? displayedHpLost = null;
@@ -686,20 +692,18 @@ internal sealed partial class UnattendedTestRunner
             displayNames,
             battleDamage,
             policy,
-            adoptionCancellation.Token,
+            CancellationToken.None,
             progress =>
             {
                 elapsedSamples.Add(progress.ElapsedMilliseconds);
                 if (adoptionRequested
-                    || progress.CurrentBestPotionCount is not { } potionCount
-                    || progress.CurrentBestProjectedBattleHpLost is not { } hpLost)
+                    || progress.CurrentBestResult is not { } result)
                 {
                     return;
                 }
-                displayedPotionCount = potionCount;
-                displayedHpLost = hpLost;
+                displayedPotionCount = result.ProjectedBattlePotionCount;
+                displayedHpLost = result.ProjectedBattleHpLost;
                 adoptionRequested = true;
-                adoptionCancellation.Cancel();
             },
             () => adoptionRequested));
         stopwatch.Stop();

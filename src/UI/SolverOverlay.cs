@@ -255,12 +255,9 @@ internal static class SolverOverlay
         string potionSearchPhase = progress.Phase.StartsWith("正在搜索", StringComparison.Ordinal)
             ? progress.Phase + " · "
             : string.Empty;
-        string currentBest = progress is
-        {
-            CurrentBestPotionCount: { } potionCount,
-            CurrentBestProjectedBattleHpLost: { } hpLost,
-        }
-            ? $"当前可采用：用 {potionCount} 瓶药，预计战损 {hpLost} · "
+        string currentBest = progress.CurrentBestResult is { } result
+            ? $"当前可采用：用 {result.ProjectedBattlePotionCount} 瓶药，" +
+              $"预计战损 {result.ProjectedBattleHpLost} · "
             : string.Empty;
         SetReviewText(
             $"{potionSearchPhase}{currentBest}已查阅 " +

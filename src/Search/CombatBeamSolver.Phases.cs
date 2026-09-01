@@ -68,6 +68,47 @@ internal sealed partial class CombatBeamSolver
             ? new ParallelExpansionExecutor(this, expansionParallelism)
             : null;
         long lastProgressMs = -100;
+        SolverInterimResult? currentBestResult = null;
+        SearchNode? currentBestNode = null;
+        bool adoptionReached = false;
+
+        void ConsiderCurrentResult(SearchNode node)
+        {
+            if (node.ActionCount == 0
+                || node.PotionCount < _minimumPotionUses
+                || node.Snapshot.PlayerDead
+                || node.Snapshot.ProjectedPlayerHp <= 0)
+            {
+                return;
+            }
+
+            int ambergrisCount = node.Actions.Count(action =>
+                action.Kind == PlanActionKind.UsePotion
+                && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
+            SolverInterimResult candidate = new(
+                Won: node.Snapshot.AllEnemiesDead,
+                OutstandingStolenResource: node.Snapshot.OutstandingStolenResource,
+                ProjectedBattleHpLost: battleDamage.HpLostSoFar
+                    + node.Snapshot.CumulativePlayerHpLost,
+                StrategicHpDeficit: node.Snapshot.CumulativePlayerHpLost
+                    + Math.Max(0, root.InitialPlayerMaxHp - node.Snapshot.PlayerMaxHp),
+                PotionStrategicCost: PotionUsePolicy.EffectiveStrategicHpCost(
+                    node.PotionStrategicCost,
+                    ambergrisCount,
+                    root.InitialPlayerMaxHp),
+                ProjectedBattlePotionCount: battleDamage.PotionsUsedSoFar + node.PotionCount,
+                EnemyHp: node.Snapshot.EnemyHp,
+                Score: node.Score);
+            if (currentBestResult != null
+                && !SolverInterimResultOrdering.IsBetter(candidate, currentBestResult))
+            {
+                return;
+            }
+
+            currentBestResult = candidate;
+            currentBestNode = node;
+        }
+
         void PublishProgress(
             int currentTurn,
             int completedTurns,
@@ -95,7 +136,8 @@ internal sealed partial class CombatBeamSolver
                 endedNodes,
                 elapsedMs,
                 _progressPhaseOverride
-                ?? $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}"));
+                ?? $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}",
+                currentBestResult));
         }
 
         PublishProgress(_startTurnNumber, 0, 0, 1, 0, "初始化", force: true);
@@ -211,6 +253,14 @@ internal sealed partial class CombatBeamSolver
                  playDepth++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (_adoptCurrentResultRequested?.Invoke() == true && currentBestNode != null)
+                {
+                    adoptionReached = true;
+                    timeBudgetReached = true;
+                    ended.AddRange(active);
+                    active = [];
+                    break;
+                }
                 if (!policy.VerifyIncrementalSearch
                     && policy.MemoryPressureSignal.IsLimitReached())
                 {
@@ -433,6 +483,8 @@ internal sealed partial class CombatBeamSolver
                 CaptureContinuation(node);
             List<SearchNode> retainedAfterRound = [.. completed, .. frontier];
             ReleaseDroppedSnapshots(ended, retainedAfterRound);
+            foreach (SearchNode candidate in retainedAfterRound)
+                ConsiderCurrentResult(candidate);
             searchedTurnLayers++;
             if (_detailedDiagnostics)
             {
@@ -471,9 +523,25 @@ internal sealed partial class CombatBeamSolver
             }
         }
 
-        List<SearchNode> finalPool = completed.Count == 0 && frontier.Count == 0
-            ? [RefreshReleasedFallback(fallback)]
-            : [.. completed, .. frontier];
+        List<SearchNode> finalPool;
+        if (adoptionReached && currentBestNode != null)
+        {
+            SearchNode adopted = RefreshReleasedFallback(currentBestNode);
+            List<SearchNode> remaining = [.. completed, .. frontier];
+            ReleaseDroppedSnapshots(remaining, [adopted]);
+            finalPool = [adopted];
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SEARCH_CHECKPOINT_ADOPTED " +
+                $"potions={currentBestResult!.ProjectedBattlePotionCount} " +
+                $"projected_battle_hp_lost={currentBestResult.ProjectedBattleHpLost} " +
+                $"expanded={_run.Expanded}");
+        }
+        else
+        {
+            finalPool = completed.Count == 0 && frontier.Count == 0
+                ? [RefreshReleasedFallback(fallback)]
+                : [.. completed, .. frontier];
+        }
         if (!finalPool.Any(node => node.PotionCount == 0)
             && potionFreeBoundaryFallback != null)
         {

@@ -1,5 +1,15 @@
 namespace CombatSolver;
 
+internal sealed record SolverInterimResult(
+    bool Won,
+    int OutstandingStolenResource,
+    int ProjectedBattleHpLost,
+    int StrategicHpDeficit,
+    int PotionStrategicCost,
+    int ProjectedBattlePotionCount,
+    int EnemyHp,
+    double Score);
+
 internal sealed record SolverProgress(
     int StartTurnNumber,
     int CurrentTurnNumber,
@@ -12,5 +22,4 @@ internal sealed record SolverProgress(
     int EndedNodes,
     long ElapsedMilliseconds,
     string Phase,
-    int? CurrentBestPotionCount = null,
-    int? CurrentBestProjectedBattleHpLost = null);
+    SolverInterimResult? CurrentBestResult = null);

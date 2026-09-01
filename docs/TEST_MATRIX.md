@@ -16,7 +16,8 @@
 | `POTION-SEARCH-MULTI-PHASE-LABELS-0244` | 通过（headless UI 文案与搜索阶段） | 战损提示包含性能预设建议，点击后持久关闭且不再跳转；搜索阶段覆盖无药、恰好 `N` 瓶的智能梯度，以及固定政策的单药、双药和三药药名。 | 2026-09-01 |
 | `SMART-POTION-GRADIENT-EXACT-0244` | 通过（headless 搜索结构与阈值） | Smart 以无药为唯一基线，普通药按 `9/18/27 HP` 开放恰好 `1/2/3` 瓶额度，同层药水共同竞争并在第一条合格梯度停止。runId `406220b4b3b7482a97ebef4a16a330e9`。 | 2026-09-01 |
 | `SMART-POTION-LETHAL-GRADIENT-0244` | 通过（headless 完整自动战斗） | 无药路线死亡时进入恰好一瓶梯度，实际使用格挡药并以零战损生还，计划外重算 `0`。runId `aa7e15b86b3a412c9c8abdea72d6b375`。 | 2026-09-01 |
-| `SMART-POTION-INTERIM-MONOTONIC-0250` | 通过（headless 搜索与控制器生命周期） | 搜索进度显示最近完整路线的用药数与预计战损，并按每瓶 `9 HP` 战略成本严格递增优；玩家采纳后取消更深搜索并采用同一结果。战损提示点击后持久关闭且不再跳转。runId `157a7989d6a5413fb86b694baf7ca908`。 | 2026-09-01 |
+| `SMART-POTION-CHECKPOINT-ADOPTION-0250` | 通过（headless 搜索与控制器生命周期） | 单个 solver 的回合层检查点持续发布当前可执行路线；用药数与预计战损按每瓶 `9 HP` 战略成本严格递增优，玩家采纳后正常收束并采用同一结果。战损提示点击后持久关闭且不再跳转。runId `c273a77c45f446d59d435a98f9a1e8dd`。 | 2026-09-01 |
+| `TURN-SETUP-INTERIM-ADOPTION-0250` | 通过（headless 烘焙手套开局搜索） | 回合准备 solver 完成前显示当前路线；点击采纳后从安全检查点生成 `23` 动作完整计划，执行/重算接管队列继续正常工作。runId `0c29c9807cfb477f9e9e36f69a8cb626`。 | 2026-09-01 |
 
 ## 0.24.3（已发布）
 

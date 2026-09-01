@@ -135,6 +135,7 @@ internal static class PlayerTurnSetupCoordinator
         public SolverProgress? Progress;
         public SolverProgress? RenderedProgress;
         public int SearchState;
+        public int AdoptCurrentResultRequestState;
         public TaskCompletionSource ManualRecalculationRequested { get; set; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
         public int ManualSearchState;
@@ -149,6 +150,10 @@ internal static class PlayerTurnSetupCoordinator
             => Result?.TurnSetupChoices ?? ReplayChoices;
         public TaskCompletionSource PlanReady { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool AdoptCurrentResultRequested
+            => Volatile.Read(ref AdoptCurrentResultRequestState) != 0;
+        public void RequestAdoptCurrentResult()
+            => Interlocked.Exchange(ref AdoptCurrentResultRequestState, 1);
     }
 
     private static readonly Type CombatTurnStateType = typeof(CombatManager).Assembly.GetType(
@@ -283,6 +288,23 @@ internal static class PlayerTurnSetupCoordinator
         => _deferredSetupCancellation != null
            || _active is { InitialSearch: not null, Result: null, SearchState: 1 }
            || _active is { ManualSearchState: 1 };
+
+    public static bool CanAdoptCurrentSearchResult
+        => _active is { AdoptCurrentResultRequested: false } active
+           && (active.SearchState == 1 || active.ManualSearchState == 1)
+           && Volatile.Read(ref active.Progress)?.CurrentBestResult != null;
+
+    public static bool IsAdoptingCurrentSearchResult
+        => _active?.AdoptCurrentResultRequested == true;
+
+    public static void AdoptCurrentSearchResult()
+    {
+        if (!CanAdoptCurrentSearchResult || _active is not { } active)
+            return;
+        active.RequestAdoptCurrentResult();
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=turn_setup_adopt_current_search_result");
+    }
 
     internal static int ManualRecalculationCompletedCountForTesting
         => _active?.ManualRecalculationCompletedCount ?? 0;
@@ -950,6 +972,7 @@ internal static class PlayerTurnSetupCoordinator
         int turn = active.Player.PlayerCombatState!.TurnNumber;
         active.Progress = null;
         active.RenderedProgress = null;
+        Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
         Interlocked.Exchange(ref active.ManualSearchState, 1);
         SolverOverlay.ShowSearching(
             host,
@@ -978,7 +1001,8 @@ internal static class PlayerTurnSetupCoordinator
                         refreshed.BattleDamage,
                         refreshed.SearchPolicy,
                         active.Token,
-                        progress => Volatile.Write(ref active.Progress, progress));
+                        progress => Volatile.Write(ref active.Progress, progress),
+                        () => active.AdoptCurrentResultRequested);
                 }
                 finally
                 {
@@ -1002,6 +1026,7 @@ internal static class PlayerTurnSetupCoordinator
                 active.Token.ThrowIfCancellationRequested();
             }
             SolverResult result = await solveTask;
+            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             if (!IsCurrentActivePlan(active))
                 return;
             if (result.TurnSetupChoices.Count == 0)
@@ -1032,6 +1057,7 @@ internal static class PlayerTurnSetupCoordinator
         }
         finally
         {
+            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             Interlocked.Exchange(ref active.ManualSearchState, 0);
             if (!active.ReplayDrivingStarted)
                 active.Choices.ReleaseVisibleSurface();
@@ -1087,7 +1113,8 @@ internal static class PlayerTurnSetupCoordinator
                         initialSearch.BattleDamage,
                         initialSearch.SearchPolicy,
                         active.Token,
-                        progress => Volatile.Write(ref active.Progress, progress));
+                        progress => Volatile.Write(ref active.Progress, progress),
+                        () => active.AdoptCurrentResultRequested);
                 }
                 finally
                 {
@@ -1111,9 +1138,11 @@ internal static class PlayerTurnSetupCoordinator
                 active.Token.ThrowIfCancellationRequested();
             }
             result = await solveTask;
+            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
         }
         catch (OperationCanceledException)
         {
+            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             bool ownsCurrentLifecycle = ReferenceEquals(_active, active)
                 && SolverController.IsCurrentCombatLifecycle(
                     active.Combat,
@@ -1136,6 +1165,7 @@ internal static class PlayerTurnSetupCoordinator
         }
         catch (Exception ex)
         {
+            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             if (!IsCurrentActivePlan(active))
             {
                 active.PlanReady.TrySetResult();

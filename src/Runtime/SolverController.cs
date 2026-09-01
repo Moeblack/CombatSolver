@@ -75,13 +75,11 @@ internal static class SolverController
     public static bool SolverDisabled => _solverDisabled;
     public static bool CanAdoptCurrentSearchResult
         => _search is { AdoptCurrentResultRequested: false } search
-           && Volatile.Read(ref search.Progress) is
-           {
-               CurrentBestPotionCount: not null,
-               CurrentBestProjectedBattleHpLost: not null,
-           };
+               && Volatile.Read(ref search.Progress)?.CurrentBestResult != null
+           || PlayerTurnSetupCoordinator.CanAdoptCurrentSearchResult;
     public static bool IsAdoptingCurrentSearchResult
-        => _search?.AdoptCurrentResultRequested == true;
+        => _search?.AdoptCurrentResultRequested == true
+           || PlayerTurnSetupCoordinator.IsAdoptingCurrentSearchResult;
 
     /// <summary>
     /// True whenever the current run is a networked multiplayer session (host or client).
@@ -1220,19 +1218,16 @@ internal static class SolverController
     public static void AdoptCurrentSearchResult()
     {
         AssertMainThread();
-        if (_search is not { } search
-            || search.AdoptCurrentResultRequested
-            || Volatile.Read(ref search.Progress) is not
-            {
-                CurrentBestPotionCount: not null,
-                CurrentBestProjectedBattleHpLost: not null,
-            })
+        if (_search is not { } search)
         {
+            PlayerTurnSetupCoordinator.AdoptCurrentSearchResult();
             return;
         }
+        if (search.AdoptCurrentResultRequested
+            || Volatile.Read(ref search.Progress)?.CurrentBestResult == null)
+            return;
 
         search.RequestAdoptCurrentResult();
-        search.Cancellation.Cancel();
         SolverOverlay.RefreshControls();
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=adopt_current_search_result");
     }

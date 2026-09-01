@@ -444,8 +444,16 @@ internal sealed partial class UnattendedTestRunner
                 && state != null
                 && PlayerTurnSetupCoordinator.IsInitialChoiceSearchPendingForTesting(state))
             {
+                if (!SolverController.CanAdoptCurrentSearchResult)
+                {
+                    await NextFrameAsync();
+                    continue;
+                }
                 int turn = player?.PlayerCombatState?.TurnNumber
                     ?? throw new InvalidOperationException("开局搜索控件测试找不到玩家回合。");
+                SolverController.AdoptCurrentSearchResult();
+                if (!SolverController.IsAdoptingCurrentSearchResult)
+                    throw new InvalidOperationException("开局搜索的当前完整路线没有进入采纳状态。");
                 SolverController.RequestDeploy(_host, state);
                 if (!PlayerTurnSetupCoordinator.TakeoverRequestedForTesting)
                     throw new InvalidOperationException("开局搜索期间的执行请求没有进入回合准备接管队列。");
@@ -455,7 +463,8 @@ internal sealed partial class UnattendedTestRunner
                 initialSearchControlsSubmitted = true;
                 turnSetupPlanAccepted = true;
                 Entry.Logger.Info(
-                    $"[CombatSolver/Test] TURN_SETUP_INITIAL_SEARCH_CONTROLS_SUBMITTED turn={turn}");
+                    $"[CombatSolver/Test] TURN_SETUP_INITIAL_SEARCH_CONTROLS_SUBMITTED " +
+                    $"turn={turn} adopted_interim=true");
             }
             if (!turnSetupPlanAccepted
                 && state != null

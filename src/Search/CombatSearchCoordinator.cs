@@ -15,19 +15,34 @@ internal static class CombatSearchCoordinator
         Func<bool>? adoptCurrentResultRequested = null)
     {
         SolverResult? currentAdoptableResult = null;
+        SolverInterimResult? currentDisplayedResult = null;
         SolverProgress? lastProgress = null;
+
+        bool TryPromoteDisplayedResult(SolverInterimResult candidate)
+        {
+            if (currentDisplayedResult != null
+                && !SolverInterimResultOrdering.IsBetter(candidate, currentDisplayedResult))
+            {
+                return false;
+            }
+            currentDisplayedResult = candidate;
+            return true;
+        }
+
         void PublishAdoptableResult(SolverResult result)
         {
             if (result.BestNode.ActionCount == 0
                 || result.OnlyDeathRoutesFound
                 || result.Snapshot.PlayerDead
-                || result.Snapshot.ProjectedPlayerHp <= 0
-                || currentAdoptableResult != null
-                    && !IsBetterInterimResult(root, result, currentAdoptableResult))
+                || result.Snapshot.ProjectedPlayerHp <= 0)
             {
                 return;
             }
 
+            SolverInterimResult summary = BuildInterimResult(root, result);
+            bool promoted = TryPromoteDisplayedResult(summary);
+            if (!promoted && summary != currentDisplayedResult)
+                return;
             currentAdoptableResult = result;
             policy.Diagnostics.Info(
                 $"[CombatSolver/Test] SEARCH_INTERIM_RESULT potions={result.ProjectedBattlePotionCount} " +
@@ -36,8 +51,7 @@ internal static class CombatSearchCoordinator
             {
                 progressCallback(lastProgress with
                 {
-                    CurrentBestPotionCount = result.ProjectedBattlePotionCount,
-                    CurrentBestProjectedBattleHpLost = result.ProjectedBattleHpLost,
+                    CurrentBestResult = currentDisplayedResult,
                 });
             }
         }
@@ -47,23 +61,28 @@ internal static class CombatSearchCoordinator
             : progress =>
             {
                 lastProgress = progress;
-                SolverResult? current = currentAdoptableResult;
+                if (progress.CurrentBestResult is { } candidate)
+                    TryPromoteDisplayedResult(candidate);
                 progressCallback(progress with
                 {
-                    CurrentBestPotionCount = current?.ProjectedBattlePotionCount,
-                    CurrentBestProjectedBattleHpLost = current?.ProjectedBattleHpLost,
+                    CurrentBestResult = currentDisplayedResult,
                 });
             };
         try
         {
-            return SolveCore(
+            SolverResult result = SolveCore(
                 root,
                 displayNames,
                 battleDamage,
                 policy,
                 cancellationToken,
                 enrichedProgressCallback,
-                adoptCurrentResultRequested == null ? null : PublishAdoptableResult);
+                adoptCurrentResultRequested == null ? null : PublishAdoptableResult,
+                adoptCurrentResultRequested);
+            return adoptCurrentResultRequested?.Invoke() == true
+                && currentAdoptableResult != null
+                    ? currentAdoptableResult
+                    : result;
         }
         catch (OperationCanceledException)
             when (adoptCurrentResultRequested?.Invoke() == true
@@ -84,7 +103,8 @@ internal static class CombatSearchCoordinator
         SearchPolicySnapshot policy,
         CancellationToken cancellationToken,
         Action<SolverProgress>? progressCallback,
-        Action<SolverResult>? interimResultCallback)
+        Action<SolverResult>? interimResultCallback,
+        Func<bool>? adoptCurrentResultRequested)
     {
         SolverSearchProfile shortProfile = policy.ShortProfile;
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
@@ -128,9 +148,12 @@ internal static class CombatSearchCoordinator
                 cancellationToken,
                 progressCallback,
                 shortProfile,
-                potionPolicyOverride: initialPotionPolicyOverride).Solve();
+                potionPolicyOverride: initialPotionPolicyOverride,
+                adoptCurrentResultRequested: adoptCurrentResultRequested).Solve();
             PopulateSingleSessionTotals(shortResult, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered: false);
             interimResultCallback?.Invoke(shortResult);
+            if (adoptCurrentResultRequested?.Invoke() == true)
+                return shortResult;
             if (!policy.PotionStrategy.HasForcedDirectives)
             {
                 shortResult = RunSupplementalAudits(
@@ -144,7 +167,8 @@ internal static class CombatSearchCoordinator
                     shortCheckpointMilliseconds: null,
                     requestClock,
                     shortResult,
-                    interimResultCallback);
+                    interimResultCallback,
+                    adoptCurrentResultRequested);
             }
             if (policy.MeasurePhasePerformance)
                 policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(shortResult));
@@ -173,7 +197,8 @@ internal static class CombatSearchCoordinator
             progressCallback,
             deepProfile,
             shortCheckpointMilliseconds: shortProfile.SoftTimeBudgetMilliseconds,
-            potionPolicyOverride: initialPotionPolicyOverride).Solve();
+            potionPolicyOverride: initialPotionPolicyOverride,
+            adoptCurrentResultRequested: adoptCurrentResultRequested).Solve();
         if (policy.MeasurePhasePerformance)
             policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(result));
         bool deepTriggered = result.Elapsed.TotalMilliseconds > shortProfile.SoftTimeBudgetMilliseconds;
@@ -183,6 +208,8 @@ internal static class CombatSearchCoordinator
         result.SingleSessionSearch = true;
         PopulateSingleSessionTotals(result, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered);
         interimResultCallback?.Invoke(result);
+        if (adoptCurrentResultRequested?.Invoke() == true)
+            return result;
         if (!policy.PotionStrategy.HasForcedDirectives)
         {
             result = RunSupplementalAudits(
@@ -196,7 +223,8 @@ internal static class CombatSearchCoordinator
                 shortProfile.SoftTimeBudgetMilliseconds,
                 requestClock,
                 result,
-                interimResultCallback);
+                interimResultCallback,
+                adoptCurrentResultRequested);
         }
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SEARCH_SESSION mode=single_anytime " +
@@ -216,7 +244,8 @@ internal static class CombatSearchCoordinator
         int? shortCheckpointMilliseconds,
         Stopwatch requestClock,
         SolverResult primary,
-        Action<SolverResult>? interimResultCallback)
+        Action<SolverResult>? interimResultCallback,
+        Func<bool>? adoptCurrentResultRequested)
     {
         long remainingMilliseconds = profile.SoftTimeBudgetMilliseconds - requestClock.ElapsedMilliseconds;
         if (remainingMilliseconds <= 0)
@@ -253,7 +282,8 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 selected,
-                interimResultCallback);
+                interimResultCallback,
+                adoptCurrentResultRequested);
             if (policy.PotionPolicy != SolverPotionPolicy.Smart)
             {
                 selected = AuditOpeningPowerUse(
@@ -1051,7 +1081,8 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile profile,
         int? shortCheckpointMilliseconds,
         SolverResult primary,
-        Action<SolverResult>? interimResultCallback)
+        Action<SolverResult>? interimResultCallback,
+        Func<bool>? adoptCurrentResultRequested)
     {
         if (policy.PotionPolicy != SolverPotionPolicy.Smart)
             return primary;
@@ -1067,7 +1098,8 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 primary,
-                interimResultCallback);
+                interimResultCallback,
+                adoptCurrentResultRequested);
         }
         catch (PotionPolicyUnsatisfiedException)
             when (policy.PotionPolicy == SolverPotionPolicy.Smart
@@ -1089,7 +1121,8 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile profile,
         int? shortCheckpointMilliseconds,
         SolverResult potionFree,
-        Action<SolverResult>? interimResultCallback)
+        Action<SolverResult>? interimResultCallback,
+        Func<bool>? adoptCurrentResultRequested)
     {
         if (potionFree.PotionCount != 0)
             throw new InvalidOperationException("Smart 梯度搜索必须从无药结果开始。");
@@ -1133,7 +1166,8 @@ internal static class CombatSearchCoordinator
                     SolverPotionPolicy.RequireAtLeastOne,
                     baseline,
                     maximumPotionUses: potionCount,
-                    minimumPotionUses: potionCount).Solve();
+                    minimumPotionUses: potionCount,
+                    adoptCurrentResultRequested: adoptCurrentResultRequested).Solve();
             }
             catch (PotionPolicyUnsatisfiedException)
             {
@@ -1191,57 +1225,20 @@ internal static class CombatSearchCoordinator
         return potionFree;
     }
 
-    private static bool IsBetterInterimResult(
+    private static SolverInterimResult BuildInterimResult(
         CombatRootSnapshot root,
-        SolverResult candidate,
-        SolverResult current)
-    {
-        bool candidateWon = candidate.Snapshot.AllEnemiesDead
-            && !candidate.Snapshot.PlayerDead
-            && candidate.Snapshot.ProjectedPlayerHp > 0;
-        bool currentWon = current.Snapshot.AllEnemiesDead
-            && !current.Snapshot.PlayerDead
-            && current.Snapshot.ProjectedPlayerHp > 0;
-        if (candidateWon != currentWon)
-            return candidateWon;
-        if (candidate.OutstandingStolenResource != current.OutstandingStolenResource)
-            return candidate.OutstandingStolenResource < current.OutstandingStolenResource;
-        int candidatePotionCost = SmartPotionHpRequired(root, candidate);
-        int currentPotionCost = SmartPotionHpRequired(root, current);
-        if (IsInterimResourceTradeImprovementForTesting(
-                candidate.ProjectedBattleHpLost,
-                candidatePotionCost,
-                current.ProjectedBattleHpLost,
-                currentPotionCost))
-        {
-            return true;
-        }
-        if (IsInterimResourceTradeImprovementForTesting(
-                current.ProjectedBattleHpLost,
-                currentPotionCost,
-                candidate.ProjectedBattleHpLost,
-                candidatePotionCost))
-        {
-            return false;
-        }
-        if (candidate.ProjectedBattlePotionCount != current.ProjectedBattlePotionCount)
-            return candidate.ProjectedBattlePotionCount < current.ProjectedBattlePotionCount;
-        if (candidate.Snapshot.EnemyHp != current.Snapshot.EnemyHp)
-            return candidate.Snapshot.EnemyHp < current.Snapshot.EnemyHp;
-        return candidate.BestNode.Score > current.BestNode.Score;
-    }
-
-    internal static bool IsInterimResourceTradeImprovementForTesting(
-        int candidateHpLost,
-        int candidatePotionCost,
-        int currentHpLost,
-        int currentPotionCost)
-    {
-        int candidateBurden = checked(candidateHpLost + candidatePotionCost);
-        int currentBurden = checked(currentHpLost + currentPotionCost);
-        return candidateBurden < currentBurden
-            || candidateBurden == currentBurden && candidateHpLost < currentHpLost;
-    }
+        SolverResult result)
+        => new(
+            Won: result.Snapshot.AllEnemiesDead
+                && !result.Snapshot.PlayerDead
+                && result.Snapshot.ProjectedPlayerHp > 0,
+            OutstandingStolenResource: result.OutstandingStolenResource,
+            ProjectedBattleHpLost: result.ProjectedBattleHpLost,
+            StrategicHpDeficit: StrategicHpDeficit(root, result),
+            PotionStrategicCost: SmartPotionHpRequired(root, result),
+            ProjectedBattlePotionCount: result.ProjectedBattlePotionCount,
+            EnemyHp: result.Snapshot.EnemyHp,
+            Score: result.BestNode.Score);
 
     private static bool IsBetterCompletedResult(
         CombatRootSnapshot root,
