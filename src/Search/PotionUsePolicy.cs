@@ -30,6 +30,10 @@ internal static class PotionUsePolicy
             or SoldiersStew
             or StrengthPotion;
 
+    public static bool RequiresOpeningUse(string potionId)
+        => RequiresOpeningUse(ModelDb.AllPotions.Single(candidate =>
+            candidate.Id.Entry.Equals(potionId, StringComparison.Ordinal)));
+
     public static int StrategicHpCost(string potionId, bool renewablePotionShapedRock = false)
     {
         PotionModel potion = ModelDb.AllPotions.Single(candidate =>
