@@ -477,7 +477,7 @@ src/UI/SolverOverlaySnapshot.cs	public static SolverOverlaySnapshot Capture(Solv
 src/UI/SolverOverlay.cs	public static void ShowResult(Node host, SolverOverlaySnapshot snapshot)
 src/UI/SolverRouteRow.cs	public void Populate(SolverOverlayTurnSnapshot turn)
 src/UI/SolverActionPill.cs	public static Control Create(SolverOverlayActionSnapshot action)
-src/Runtime/SolverController.cs	SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0)
+src/Runtime/SolverController.cs	SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
 EOF
 overlay_renderer_paths=(
     "$repository_root/src/UI/SolverOverlay.cs"
