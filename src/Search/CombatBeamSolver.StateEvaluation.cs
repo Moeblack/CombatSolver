@@ -137,7 +137,11 @@ internal sealed partial class CombatBeamSolver
             : projectedHp * hpWeight;
         score += (player.MaxHp - root.InitialPlayerMaxHp) * hpWeight;
         score -= cumulativePlayerHpLost * hpWeight;
-        int longTermResourceValue = combat.LongTermResourceValue;
+        int exhaustedTheHunts = playerState.ExhaustPile.Cards.Count(card => card.Preview is TheHunt);
+        int rewardedTheHunts = Math.Max(0, combat.GetAmount<TheHuntPower>(_player.Creature));
+        int missedTheHuntRewards = Math.Max(0, exhaustedTheHunts - rewardedTheHunts);
+        int longTermResourceValue = combat.LongTermResourceValue
+            - missedTheHuntRewards * CorePowerSupport.TheHuntLongTermResourceValue;
         score += longTermResourceValue * SolverWeights.LongTermResourceBeamValue;
         int angerCopiesGenerated = combat.AngerCopiesGenerated;
         score += angerCopiesGenerated * SolverWeights.AngerCopyBeamPenalty;

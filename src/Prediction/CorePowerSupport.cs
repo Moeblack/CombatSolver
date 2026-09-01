@@ -16,6 +16,8 @@ namespace CombatSolver;
 
 internal static class CorePowerSupport
 {
+    internal const int TheHuntLongTermResourceValue = 30;
+
     public static void ApplyCardPowers(
         CombatPredictionSimulator simulator,
         SimulatedCombatState combat,
@@ -119,10 +121,13 @@ internal static class CorePowerSupport
             case Sunder when target != null && WasCardKill(simulator, playedCard, target, historyEntryStart):
                 simulator.GainEnergy(card.Owner, card.DynamicVars.Energy.IntValue);
                 break;
-            case TheHunt when target != null && WasFatalKill(combat, simulator, playedCard, target, historyEntryStart):
+            case TheHunt when target != null:
             {
-                combat.Apply<TheHuntPower>(owner, 1, owner);
-                combat.RecordLongTermResource(30);
+                if (WasFatalKill(combat, simulator, playedCard, target, historyEntryStart))
+                {
+                    combat.Apply<TheHuntPower>(owner, 1, owner);
+                    combat.RecordLongTermResource(TheHuntLongTermResourceValue);
+                }
                 break;
             }
             case ToricToughness:

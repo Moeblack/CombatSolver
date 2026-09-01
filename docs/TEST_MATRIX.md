@@ -24,6 +24,7 @@
 | `STRATEGY-REPLAY-99DC-HIGH-CALCULATED-GAMBLE` | 通过（headless） | 严格恢复构装兽群报告首回合根；High、禁用药水、DOP4 在 Short 阶段得到第 `4` 回合结束的 `0` 战损路线，从报告原求解器 `10` 追平人工 `0`。runId `10f27aef7c9941a8820de637ce28c2ab`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-8695-HIGH-ENERGY-DEFENSE` | 通过（headless） | 严格恢复感染棱晶报告首回合根；High、Smart、DOP4 得到 `8` 战损，评估并拒绝 `120` 条药水分支，从报告原求解器 `21` 追平人工 `8`。runId `566104854a2448ef95976505746abac2`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-EE98-HIGH-DUAL-POTION` | 通过（headless） | 严格恢复寄生蛙报告首回合根；High、Smart、DOP4 在 Short 阶段使用束缚药水和格挡药水，反事实省血 `50/18`，战损从报告原求解器 `27` 降到 `17`，追平人工。runId `c3e91ca55bd3476487d8710e899b12f1`。 | 2026-08-31 |
+| `STRATEGY-THE-HUNT-OPPORTUNITY-COST` | 通过（headless） | 感染棱晶严格首根 High、Smart、DOP4 从 `29` 降到 `21`，前三回合战损 `0/6/13` 与人工一致，runId `2ac40cf8aa7240629ccc5fa1a10f894d`；致命狩猎哨兵仍首动使用狩猎、长期资源至少 `30`、战损 `0`，runId `4c445ef747f643c59b0fc437bd161d4d`。 | 2026-09-01 |
 
 ## 0.23.0
 
