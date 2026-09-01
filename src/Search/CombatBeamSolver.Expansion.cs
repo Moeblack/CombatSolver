@@ -157,6 +157,55 @@ internal sealed partial class CombatBeamSolver
     internal IReadOnlyList<PlanAction> BuildPreferredOpeningPotionActions()
         => BuildPreferredPotionActionsAfterPrefix([]);
 
+    internal IReadOnlyList<PlanAction> BuildOpeningPotionEnablerActions()
+    {
+        SimulationSnapshot rootSnapshot = Replay([]);
+        List<SearchNode> children = [];
+        try
+        {
+            SearchNode seed = new(
+                null,
+                0,
+                rootSnapshot.PotionUseCount,
+                rootSnapshot.PotionStrategicCost,
+                rootSnapshot.Turn,
+                SearchRouteTraits.None,
+                0,
+                rootSnapshot.Score,
+                rootSnapshot.StateKey,
+                rootSnapshot.HasRisk,
+                rootSnapshot.BoundaryReason,
+                false,
+                null,
+                rootSnapshot,
+                CombatProgressState.Capture(rootSnapshot));
+            children.AddRange(Expand(seed).Where(node =>
+                node.Action is { Kind: PlanActionKind.PlayCard, Turn: var turn }
+                && turn == rootSnapshot.Turn));
+            SearchNode? best = children
+                .Where(node => node.Snapshot.Energy > rootSnapshot.Energy
+                    || node.Snapshot.Stars > rootSnapshot.Stars
+                    || node.Snapshot.HandCount > rootSnapshot.HandCount
+                    || node.Snapshot.ReachableHandValue > rootSnapshot.ReachableHandValue
+                    || node.Snapshot.ZeroCostPlayableCount > rootSnapshot.ZeroCostPlayableCount)
+                .OrderByDescending(node =>
+                    (node.Snapshot.Energy - rootSnapshot.Energy) * 64
+                    + (node.Snapshot.Stars - rootSnapshot.Stars) * 48
+                    + (node.Snapshot.HandCount - rootSnapshot.HandCount) * 16
+                    + node.Snapshot.ReachableHandValue - rootSnapshot.ReachableHandValue
+                    + (node.Snapshot.ZeroCostPlayableCount - rootSnapshot.ZeroCostPlayableCount) * 8)
+                .ThenByDescending(node => node.Score)
+                .FirstOrDefault();
+            return best?.Action is { } action ? [action] : [];
+        }
+        finally
+        {
+            foreach (SearchNode child in children)
+                child.Snapshot.ReleaseSimulator();
+            rootSnapshot.ReleaseSimulator();
+        }
+    }
+
     internal IReadOnlyList<PlanAction> BuildPreferredPotionActionsAfterPrefix(
         IReadOnlyList<PlanAction> prefix)
     {
@@ -274,6 +323,58 @@ internal sealed partial class CombatBeamSolver
                 followUp.Snapshot.ReleaseSimulator();
             powerSnapshot?.ReleaseSimulator();
             rootSnapshot.ReleaseSimulator();
+        }
+    }
+
+    internal IReadOnlyList<PlanAction> BuildOpeningOffensiveFollowUps(
+        IReadOnlyList<PlanAction> prefix)
+    {
+        SimulationSnapshot prefixSnapshot = Replay(prefix);
+        List<SearchNode> followUps = [];
+        try
+        {
+            SearchNode seed = new(
+                null,
+                0,
+                prefixSnapshot.PotionUseCount,
+                prefixSnapshot.PotionStrategicCost,
+                prefixSnapshot.Turn,
+                SearchRouteTraits.None,
+                0,
+                prefixSnapshot.Score,
+                prefixSnapshot.StateKey,
+                prefixSnapshot.HasRisk,
+                prefixSnapshot.BoundaryReason,
+                false,
+                null,
+                prefixSnapshot,
+                CombatProgressState.Capture(prefixSnapshot));
+            followUps.AddRange(Expand(seed).Where(node =>
+                node.Action is
+                {
+                    Kind: PlanActionKind.PlayCard,
+                    Turn: var turn,
+                    TargetCombatId: not null,
+                }
+                && turn == prefixSnapshot.Turn
+                && node.Snapshot.EnemyHp < prefixSnapshot.EnemyHp));
+            return followUps
+                .GroupBy(node => node.Action!.TargetCombatId!.Value)
+                .Select(group => group
+                    .OrderBy(node => node.Snapshot.AliveEnemyCount)
+                    .ThenBy(node => node.Snapshot.EnemyHp)
+                    .ThenByDescending(node => node.Snapshot.FocusTargetPressure)
+                    .ThenByDescending(node => node.Score)
+                    .First().Action!)
+                .OrderBy(action => action.TargetCombatId)
+                .Take(3)
+                .ToArray();
+        }
+        finally
+        {
+            foreach (SearchNode followUp in followUps)
+                followUp.Snapshot.ReleaseSimulator();
+            prefixSnapshot.ReleaseSimulator();
         }
     }
 

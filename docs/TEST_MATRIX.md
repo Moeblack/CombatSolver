@@ -27,6 +27,7 @@
 | `STRATEGY-THE-HUNT-OPPORTUNITY-COST` | 通过（headless） | 感染棱晶严格首根 High、Smart、DOP4 从 `29` 降到 `21`，前三回合战损 `0/6/13` 与人工一致，runId `2ac40cf8aa7240629ccc5fa1a10f894d`；致命狩猎哨兵仍首动使用狩猎、长期资源至少 `30`、战损 `0`，runId `4c445ef747f643c59b0fc437bd161d4d`。 | 2026-09-01 |
 | `STRATEGY-REPLAY-941B-GENERATED-RESOURCE-POTION` | 通过（headless） | 直飞产卵虫严格首根 High、Smart、DOP4 选择无色药水生成急躁，随后打击、急躁、群星之子+、战火铸就，战损从当前 `2` 降到 `0`，追平人工；runId `f8bc0f22a1be4c688f75c603528b917d`。感染棱晶哨兵保持 `21`，runId `6fb2503e4bb34db2972b569f7dd944d9`。 | 2026-09-01 |
 | `STRATEGY-SMART-POTION-NONDEGRADING` | 通过（headless） | 蔓生伏地虫严格首根 High、Smart、DOP4 保留 `4` 战损无药主路线，拒绝 `14` 战损敏捷药补查路线并追平人工，runId `5db3d24895f045ee888841b2d9ee207a`；无色药生成急躁哨兵仍为 `0` 战损，runId `296884e4797343f8a1a0502da863b778`。 | 2026-09-01 |
+| `STRATEGY-SMART-POTION-ENABLER-FOCUS` | 质量改善，待处理 | 残杀千足虫严格首根 High、Smart、DOP4 保留放血→迅捷药、持续设置和分目标首攻后验，战损从未完成路线的 `48` 降到获胜路线 `35`，人工为 `31`，runId `e05ccbcc56a0448e87d58fc075c9fd60`；蔓生伏地虫哨兵保持无药 `4`，runId `f2ab6a5bfb9a486ba244b1cbcf86a075`。 | 2026-09-01 |
 
 ## 0.23.0
 
