@@ -165,12 +165,27 @@ internal sealed partial class CombatBeamSolver
                 (int)Math.Round(CardChoiceSupport.CardValue(liveCard.Preview)));
         }
         ThreatFocus focus = BuildThreatFocus(simulator, combat);
+        IReadOnlyList<PowerModel> effectivePowers = combat.EffectivePowers();
+        StrategicEffectRequirements strategicRequirements = StrategicEffectRequirements.None;
+        for (int powerIndex = 0; powerIndex < effectivePowers.Count; powerIndex++)
+        {
+            PowerModel power = effectivePowers[powerIndex];
+            if (!ReferenceEquals(power.Owner, _player.Creature)
+                || power.Amount <= 0
+                || power.TypeForCurrentAmount != PowerType.Buff
+                || power is ITemporaryPower)
+            {
+                continue;
+            }
+            strategicRequirements |= StrategicEffectModel.Requirements(power);
+        }
         StrategicEffectContext? strategicContext = null;
         StrategicEffectVector strategicEffects = StrategicEffectVector.Zero;
         int offensivePersistentBuffValue = 0;
         PersistentSetupTraits persistentSetupTraits = PersistentSetupTraits.None;
-        foreach (PowerModel power in combat.EffectivePowers())
+        for (int powerIndex = 0; powerIndex < effectivePowers.Count; powerIndex++)
         {
+            PowerModel power = effectivePowers[powerIndex];
             if (!ReferenceEquals(power.Owner, _player.Creature)
                 || power.Amount <= 0
                 || power.TypeForCurrentAmount != PowerType.Buff
@@ -182,7 +197,8 @@ internal sealed partial class CombatBeamSolver
                 liveCards,
                 enemyHp,
                 focus.TotalThreat,
-                focus.IncomingHitCount);
+                focus.IncomingHitCount,
+                strategicRequirements);
             StrategicEffectVector effect = StrategicEffectModel.Evaluate(
                 power,
                 strategicContext.Value);
@@ -223,12 +239,17 @@ internal sealed partial class CombatBeamSolver
             combat,
             playerState,
             _player.Creature);
+        int summonNextTurn = combat.GetAmount<SummonNextTurnPower>(_player.Creature);
+        int summonNextTurnValue = summonNextTurn == 0
+            ? 0
+            : summonNextTurn
+                * (4 + Math.Min(12, liveCards.Count(card =>
+                    card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2));
         int futureResourceValue = combat.GetAmount<EnergyNextTurnPower>(_player.Creature) * 16
             + combat.GetAmount<DrawCardsNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<StarNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<RetainHandPower>(_player.Creature) * 4
-            + combat.GetAmount<SummonNextTurnPower>(_player.Creature)
-                * (4 + Math.Min(12, liveCards.Count(card => card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2))
+            + summonNextTurnValue
             + retainedHandValue
             + freeCardOpportunityValue;
         Creature? currentOsty = combat.GetOsty(_player);
