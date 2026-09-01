@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime;
 using System.Text.Json;
 using MegaCrit.Sts2.Core.Nodes;
 
@@ -19,6 +20,52 @@ internal sealed partial class UnattendedTestRunner
         DateTimeOffset startedAtUtc,
         Func<UnattendedStageTiming[]> captureStageTimings)
     {
+        private UnattendedSolverMetrics? _solverMetrics;
+
+        public void CaptureSolverResult(SolverResult result)
+        {
+            RuntimeMemorySnapshot memory = CaptureRuntimeMemory();
+            _solverMetrics = new UnattendedSolverMetrics
+            {
+                Phase = result.SearchPhase,
+                Boundary = result.BoundaryReason,
+                SelectedExpanded = result.ExpandedNodes,
+                SelectedTransitions = result.TransitionCount,
+                SelectedChoiceBranches = result.ChoiceBranchesEvaluated,
+                TotalExpanded = result.TotalExpandedNodes,
+                TotalTransitions = result.TotalTransitionCount,
+                TotalChoiceBranches = result.TotalChoiceBranchesEvaluated,
+                ElapsedMilliseconds = result.Elapsed.TotalMilliseconds,
+                TotalElapsedMilliseconds = result.TotalSearchElapsed.TotalMilliseconds,
+                WorkerAllocatedBytes = result.WorkerAllocatedBytes,
+                TotalWorkerAllocatedBytes = result.TotalWorkerAllocatedBytes,
+                TotalGen0Collections = result.TotalGen0Collections,
+                TotalGen1Collections = result.TotalGen1Collections,
+                TotalGen2Collections = result.TotalGen2Collections,
+                TotalGcPauseMilliseconds = result.TotalGcPauseDuration.TotalMilliseconds,
+                MaxGcPauseMilliseconds = result.TotalMaxObservedGcPause.TotalMilliseconds,
+                MaxParallelConcurrency = result.MaxParallelExpansionConcurrency,
+                SearchedTurns = result.SearchedTurns,
+                ShufflesCrossed = result.Snapshot.ShufflesCrossed,
+                Score = result.BestNode.Score,
+                ProjectedBattleHpLost = result.ProjectedBattleHpLost,
+                PotionCount = result.PotionCount,
+                OnlyDeathRoutes = result.OnlyDeathRoutesFound,
+                FinalHp = result.Snapshot.PlayerHp,
+                FinalEnemyHp = result.Snapshot.EnemyHp,
+                CombatEndedTurn = result.CombatEndedTurn,
+                CapturedAtElapsedMilliseconds = stopwatch.Elapsed.TotalMilliseconds,
+                ManagedLiveBytes = GC.GetTotalMemory(forceFullCollection: false),
+                ManagedHeapBytes = memory.ManagedHeapBytes,
+                ManagedFragmentedBytes = memory.ManagedFragmentedBytes,
+                WorkingSetBytes = memory.WorkingSetBytes,
+                PrivateMemoryBytes = memory.PrivateMemoryBytes,
+                NoGcRegionActive = GCSettings.LatencyMode == GCLatencyMode.NoGCRegion,
+                NoGcRegionBudgetBytes = SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting,
+                NoGcRegionRolloverCount = SearchGcPolicy.RolloverCountForTesting,
+            };
+        }
+
         public RuntimeMemorySnapshot Write(
             string status,
             string stage,
@@ -49,6 +96,7 @@ internal sealed partial class UnattendedTestRunner
                 ManagedFragmentedBytes = memory.ManagedFragmentedBytes,
                 WorkingSetBytes = memory.WorkingSetBytes,
                 PrivateMemoryBytes = memory.PrivateMemoryBytes,
+                SolverMetrics = _solverMetrics,
                 StageTimings = captureStageTimings(),
                 CompletedChecks = completedChecks.ToArray(),
                 Error = error,

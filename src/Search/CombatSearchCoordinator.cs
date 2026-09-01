@@ -14,6 +14,8 @@ internal static class CombatSearchCoordinator
         Action<SolverProgress>? progressCallback,
         Func<bool>? adoptCurrentResultRequested = null)
     {
+        SearchRequestWorkTotals requestWorkTotals = new();
+        policy = policy with { RequestWorkTotals = requestWorkTotals };
         SolverResult? currentAdoptableResult = null;
         SolverInterimResult? currentDisplayedResult = null;
         SolverProgress? lastProgress = null;
@@ -81,10 +83,12 @@ internal static class CombatSearchCoordinator
                 enrichedProgressCallback,
                 adoptCurrentResultRequested == null ? null : PublishAdoptableResult,
                 adoptCurrentResultRequested);
-            return adoptCurrentResultRequested?.Invoke() == true
+            SolverResult selected = adoptCurrentResultRequested?.Invoke() == true
                 && currentAdoptableResult != null
                     ? currentAdoptableResult
                     : result;
+            PopulateRequestWorkTotals(selected, requestWorkTotals);
+            return selected;
         }
         catch (OperationCanceledException)
             when (adoptCurrentResultRequested?.Invoke() == true
@@ -94,6 +98,7 @@ internal static class CombatSearchCoordinator
                 $"[CombatSolver/Test] SEARCH_INTERIM_ADOPTED " +
                 $"potions={currentAdoptableResult.ProjectedBattlePotionCount} " +
                 $"projected_battle_hp_lost={currentAdoptableResult.ProjectedBattleHpLost}");
+            PopulateRequestWorkTotals(currentAdoptableResult, requestWorkTotals);
             return currentAdoptableResult;
         }
     }
@@ -1333,6 +1338,9 @@ internal static class CombatSearchCoordinator
         int deepExpanded = searches.Sum(result => result.DeepExpandedNodes);
         int shortTransitions = searches.Sum(result => result.ShortTransitionCount);
         int deepTransitions = searches.Sum(result => result.DeepTransitionCount);
+        long totalExpanded = searches.Sum(result => (long)result.ExpandedNodes);
+        long totalTransitions = searches.Sum(result => (long)result.TransitionCount);
+        long totalChoiceBranches = searches.Sum(result => (long)result.ChoiceBranchesEvaluated);
         int gen0 = searches.Sum(result => result.TotalGen0Collections);
         int gen1 = searches.Sum(result => result.TotalGen1Collections);
         int gen2 = searches.Sum(result => result.TotalGen2Collections);
@@ -1348,6 +1356,9 @@ internal static class CombatSearchCoordinator
         selected.DeepExpandedNodes = deepExpanded;
         selected.ShortTransitionCount = shortTransitions;
         selected.DeepTransitionCount = deepTransitions;
+        selected.TotalExpandedNodes = totalExpanded;
+        selected.TotalTransitionCount = totalTransitions;
+        selected.TotalChoiceBranchesEvaluated = totalChoiceBranches;
         selected.TotalGen0Collections = gen0;
         selected.TotalGen1Collections = gen1;
         selected.TotalGen2Collections = gen2;
@@ -1355,6 +1366,20 @@ internal static class CombatSearchCoordinator
         selected.TotalMaxObservedGcPause = maxGcPause;
         selected.DeepSearchTriggered = deepTriggered;
         selected.SearchPhase = deepTriggered ? SolverSearchPhase.Deep : SolverSearchPhase.Short;
+    }
+
+    private static void PopulateRequestWorkTotals(
+        SolverResult result,
+        SearchRequestWorkTotals requestWorkTotals)
+        => PopulateRequestWorkTotals(result, requestWorkTotals.Snapshot());
+
+    private static void PopulateRequestWorkTotals(
+        SolverResult result,
+        SearchRequestWorkSnapshot totals)
+    {
+        result.TotalExpandedNodes = totals.ExpandedNodes;
+        result.TotalTransitionCount = totals.TransitionCount;
+        result.TotalChoiceBranchesEvaluated = totals.ChoiceBranchesEvaluated;
     }
 
     private static void PopulateSingleSessionTotals(
@@ -1378,5 +1403,11 @@ internal static class CombatSearchCoordinator
         result.DeepExpandedNodes = deepTriggered ? result.ExpandedNodes : 0;
         result.ShortTransitionCount = deepTriggered ? 0 : result.TransitionCount;
         result.DeepTransitionCount = deepTriggered ? result.TransitionCount : 0;
+        PopulateRequestWorkTotals(
+            result,
+            SearchRequestWorkSnapshot.ForSingleSolver(
+                result.ExpandedNodes,
+                result.TransitionCount,
+                result.ChoiceBranchesEvaluated));
     }
 }

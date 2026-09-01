@@ -16,6 +16,7 @@ internal sealed partial class UnattendedTestRunner
                 "DOP1/DOP2 搜索等价测试至少需要两个可用逻辑处理器。");
         }
 
+        AssertAdaptiveFramePressureBaseline();
         await AssertNoGcBudgetTransitionAsync();
 
         SolverSettingsData originalSettings = SolverSettings.Current;
@@ -38,10 +39,23 @@ internal sealed partial class UnattendedTestRunner
             ShortBudgetOverrideMilliseconds = null,
             DeepBudgetOverrideMilliseconds = null,
         };
+        if (string.Equals(
+                Godot.DisplayServer.GetName(),
+                "headless",
+                StringComparison.OrdinalIgnoreCase)
+            && capturedPolicy.FramePressureSignal.RecoveryEnabled)
+        {
+            throw new InvalidOperationException("headless 搜索策略没有旁路渲染帧恢复。");
+        }
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
         AssertFullRngStateIdentity(combat);
         CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(combat);
+        await AssertCanceledSearchWorkRecordedOnceAsync(
+            rootSnapshot,
+            displayNames,
+            battleDamage,
+            capturedPolicy);
 
         SearchPolicySnapshot serialPolicy = capturedPolicy with { MaxDegreeOfParallelism = 1 };
         SearchPolicySnapshot parallelPolicy = capturedPolicy with { MaxDegreeOfParallelism = 2 };
@@ -110,6 +124,112 @@ internal sealed partial class UnattendedTestRunner
         {
             SolverSettings.ApplyForTesting(originalSettings);
         }
+    }
+
+    private static async Task AssertCanceledSearchWorkRecordedOnceAsync(
+        CombatRootSnapshot rootSnapshot,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot capturedPolicy)
+    {
+        SearchRequestWorkTotals requestWorkTotals = new();
+        SearchPolicySnapshot canceledPolicy = capturedPolicy with
+        {
+            MaxDegreeOfParallelism = 1,
+            RequestWorkTotals = requestWorkTotals,
+        };
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+        try
+        {
+            await Task.Run(() => new CombatBeamSolver(
+                rootSnapshot,
+                displayNames,
+                battleDamage,
+                canceledPolicy,
+                cancellation.Token).Solve());
+            throw new InvalidOperationException("预取消搜索没有抛出取消异常。");
+        }
+        catch (OperationCanceledException ex) when (ex.CancellationToken == cancellation.Token)
+        {
+        }
+
+        SearchRequestWorkSnapshot totals = requestWorkTotals.Snapshot();
+        if (requestWorkTotals.RecordedSolverCountForTesting != 1
+            || totals.ExpandedNodes != 0
+            || totals.TransitionCount != 0
+            || totals.ChoiceBranchesEvaluated != 0)
+        {
+            throw new InvalidOperationException(
+                $"取消搜索的请求工作量没有精确记录一次：" +
+                $"records={requestWorkTotals.RecordedSolverCountForTesting} " +
+                $"expanded={totals.ExpandedNodes} transitions={totals.TransitionCount} " +
+                $"choices={totals.ChoiceBranchesEvaluated}。");
+        }
+    }
+
+    private static void AssertAdaptiveFramePressureBaseline()
+    {
+        SearchFramePressureSignal signal = new();
+        for (int index = 0; index < 31; index++)
+            signal.ObserveFrame(50d, searchActive: false);
+        signal.ResetPressure();
+        if (signal.BaselineSampleCount != 31
+            || Math.Abs(signal.BaselineFrameGapMilliseconds - 50d) > 0.001d
+            || Math.Abs(signal.PressureFrameGapMilliseconds - 75d) > 0.001d)
+        {
+            throw new InvalidOperationException(
+                $"低帧率基线没有形成相对帧压力阈值：" +
+                $"samples={signal.BaselineSampleCount} " +
+                $"baseline={signal.BaselineFrameGapMilliseconds:F3} " +
+                $"threshold={signal.PressureFrameGapMilliseconds:F3}。");
+        }
+        signal.ObserveFrame(50d, searchActive: true);
+        if (signal.PressureEpochForTesting != 0)
+            throw new InvalidOperationException("稳定的低帧率基线被误判为搜索帧压力。");
+        signal.ObserveFrame(75d, searchActive: true);
+        if (signal.PressureEpochForTesting != 1)
+            throw new InvalidOperationException("相对基线明显退化的帧没有触发搜索帧压力。");
+
+        SearchFramePressureSignal sixtyFpsSignal = new();
+        for (int index = 0; index < 31; index++)
+            sixtyFpsSignal.ObserveFrame(1000d / 60d, searchActive: false);
+        sixtyFpsSignal.ResetPressure();
+        if (Math.Abs(sixtyFpsSignal.PressureFrameGapMilliseconds - 33d) > 0.001d)
+        {
+            throw new InvalidOperationException(
+                $"60 FPS 基线没有保留 33ms 的绝对响应下限：" +
+                $"threshold={sixtyFpsSignal.PressureFrameGapMilliseconds:F3}。");
+        }
+
+        SearchFramePressureSignal sparseSignal = new();
+        sparseSignal.ObserveFrame(200d, searchActive: false);
+        sparseSignal.ResetPressure();
+        if (Math.Abs(sparseSignal.BaselineFrameGapMilliseconds - (1000d / 60d)) > 0.001d
+            || Math.Abs(sparseSignal.PressureFrameGapMilliseconds - 33d) > 0.001d)
+        {
+            throw new InvalidOperationException(
+                $"稀疏加载帧错误抬高了帧压力阈值：" +
+                $"baseline={sparseSignal.BaselineFrameGapMilliseconds:F3} " +
+                $"threshold={sparseSignal.PressureFrameGapMilliseconds:F3}。");
+        }
+
+        SearchFramePressureSignal disabledSignal = new();
+        for (int index = 0; index < 31; index++)
+            disabledSignal.ObserveFrame(50d, searchActive: false);
+        disabledSignal.ResetPressure(recoveryEnabled: false);
+        disabledSignal.ObserveFrame(500d, searchActive: true);
+        int disabledObservedEpoch = 0;
+        if (disabledSignal.RecoveryEnabled
+            || disabledSignal.PressureEpochForTesting != 0
+            || disabledSignal.WaitForRecovery(ref disabledObservedEpoch))
+        {
+            throw new InvalidOperationException("无显示服务的搜索仍触发了帧恢复等待。");
+        }
+
+        signal.ResetPressure();
+        if (signal.PressureEpochForTesting != 0)
+            throw new InvalidOperationException("新搜索继承了上一轮帧压力 epoch。");
     }
 
     private static void AssertFullRngStateIdentity(CombatState combat)

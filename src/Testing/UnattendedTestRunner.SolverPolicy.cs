@@ -158,6 +158,7 @@ internal sealed partial class UnattendedTestRunner
             await NextFrameAsync();
         }
 
+        _writer.CaptureSolverResult(result);
         AssertAppliedNoGcRegionBudget();
         long reviewedWorldlines = (long)result.ShortExpandedNodes + result.DeepExpandedNodes;
         SolverOverlaySnapshot reviewSnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(

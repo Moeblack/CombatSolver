@@ -26,6 +26,32 @@ internal sealed partial class CombatBeamSolver
 {
     public SolverResult Solve()
     {
+        try
+        {
+            SolverResult result = SolveCore();
+            RecordRequestWork();
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            RecordRequestWork();
+            throw;
+        }
+        catch (PotionPolicyUnsatisfiedException)
+        {
+            RecordRequestWork();
+            throw;
+        }
+    }
+
+    private void RecordRequestWork()
+        => policy.RequestWorkTotals?.Record(
+            _run.Expanded,
+            _run.TransitionCount,
+            _run.ChoiceBranchesEvaluated);
+
+    private SolverResult SolveCore()
+    {
         using IDisposable notificationIsolation = SimulationNotificationIsolation.Enter();
         cancellationToken.ThrowIfCancellationRequested();
         if (_minimumPotionUses < 0
@@ -785,17 +811,20 @@ internal sealed partial class CombatBeamSolver
             Snapshot = selectedSnapshot,
             Forecast = _forecast,
             ExpandedNodes = _run.Expanded,
+            TotalExpandedNodes = _run.Expanded,
             DominatedActionsPruned = _run.DominatedActionsPruned,
             TopQueueActionsDropped = _run.TopQueueActionsDropped,
             ActionAdmissionRepresentativesProtected = _run.ActionAdmissionRepresentativesProtected,
             DuplicateCardBranchesPruned = _run.DuplicateCardBranchesPruned,
             ChoiceBranchesEvaluated = _run.ChoiceBranchesEvaluated,
+            TotalChoiceBranchesEvaluated = _run.ChoiceBranchesEvaluated,
             ShuffleBranchesPruned = _run.ShuffleBranchesPruned,
             SoldHpBranchesPruned = _run.SoldHpBranchesPruned,
             HpInvestmentBranchesProtected = _run.HpInvestmentBranchesProtected,
             ReplayCount = _run.ReplayCount,
             ForkCount = _run.ForkCount,
             TransitionCount = _run.TransitionCount,
+            TotalTransitionCount = _run.TransitionCount,
             ReusedNodeSnapshots = _run.ReusedNodeSnapshots,
             TranspositionBranchesPruned = _run.TranspositionBranchesPruned,
             RepeatableNoProgressBranchesPruned = _run.RepeatableNoProgressBranchesPruned,

@@ -319,7 +319,11 @@ internal static class SolverController
         bool includeTurnSetup,
         SolverTheftPolicy? theftPolicy)
     {
-        FramePressureSignal.ResetPressure();
+        FramePressureSignal.ResetPressure(
+            recoveryEnabled: !string.Equals(
+                DisplayServer.GetName(),
+                "headless",
+                StringComparison.OrdinalIgnoreCase));
         int maxDegreeOfParallelism = UnattendedTestRunner.SearchMaxDegreeOfParallelismOverride
             ?? settings.SearchMaxDegreeOfParallelism;
         if (maxDegreeOfParallelism < 1
@@ -912,6 +916,10 @@ internal static class SolverController
                 $"cause={CauseToken(replanCause)} previous_boundary={previousBoundary?.ToString() ?? "-"} " +
                 $"turn={turn} deploy_when_ready={deployWhenReady} " +
                 $"theft_policy={theftPolicy?.ToString() ?? "-"} " +
+                $"frame_baseline_samples={FramePressureSignal.BaselineSampleCount} " +
+                $"frame_baseline_ms={FramePressureSignal.BaselineFrameGapMilliseconds:F1} " +
+                $"frame_pressure_threshold_ms={FramePressureSignal.PressureFrameGapMilliseconds:F1} " +
+                $"frame_recovery_enabled={FramePressureSignal.RecoveryEnabled} " +
                 $"max_dop={searchPolicy.MaxDegreeOfParallelism}");
             Entry.Logger.Info(SolverDiagnostics.DescribeStart(
                 state,
@@ -1629,7 +1637,7 @@ internal static class SolverController
         AssertMainThread();
         double milliseconds = gap.TotalMilliseconds;
         SolverSearchSession? search = _search;
-        FramePressureSignal.ObserveFrame(search != null && milliseconds >= 33d);
+        FramePressureSignal.ObserveFrame(milliseconds, searchActive: IsSearching);
         if (search == null)
             return;
         search.ObserveFrame(milliseconds);
