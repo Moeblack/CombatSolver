@@ -44,8 +44,8 @@ internal static class PotionUsePolicy
     public static int HpSaved(int potionFreeHpDeficit, int potionRouteHpDeficit)
         => Math.Max(0, potionFreeHpDeficit - potionRouteHpDeficit);
 
-    public static int SmartRequiredHpSaved(int strategicHpCost, int potionFreeHpDeficit)
-        => Math.Min(strategicHpCost, Math.Max(0, potionFreeHpDeficit));
+    public static int SmartRequiredHpSaved(int strategicHpCost)
+        => strategicHpCost;
 
     public static int AmbergrisRequiredHpSaved(int maximumHp)
         => (int)Math.Ceiling(maximumHp * AmbergrisMinimumHpSavedFraction);
@@ -95,7 +95,7 @@ internal static class PotionUsePolicy
             SolverPotionPolicy.Smart => potionCount == 0
                 || potionRouteWon && !potionFreeWon
                 || HpSaved(potionFreeHpDeficit, potionRouteHpDeficit)
-                    >= SmartRequiredHpSaved(strategicHpCost, potionFreeHpDeficit),
+                    >= SmartRequiredHpSaved(strategicHpCost),
             _ => throw new ArgumentOutOfRangeException(nameof(policy)),
         };
 }

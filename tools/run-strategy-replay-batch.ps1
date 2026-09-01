@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-批量回放 CombatSolver 报告：High 追不平人工时自动转 Very High，单包失败后继续下一包。
+批量回放 CombatSolver 报告：默认使用 Very High，单包失败后继续下一包；High 仅用于专项诊断。
 
 .EXAMPLE
 ./tools/run-strategy-replay-batch.ps1 -ReportsRoot ./.local/issue-bundles/better-worldline-20260831/raw/reports -ManifestPath ./manifest.json
@@ -25,9 +25,9 @@ param(
     [ValidateSet("Disabled", "Smart", "RequireAtLeastOne")]
     [string]$PotionPolicy = "Smart",
     [ValidateRange(10, 3600)]
-    [int]$HighTimeoutSeconds = 180,
+    [int]$HighTimeoutSeconds = 120,
     [ValidateRange(10, 3600)]
-    [int]$VeryHighTimeoutSeconds = 300,
+    [int]$VeryHighTimeoutSeconds = 120,
     [ValidateRange(0, 3600000)]
     [int]$ShortBudgetOverrideMilliseconds = 0,
     [ValidateRange(0, 3600000)]
@@ -445,40 +445,25 @@ foreach ($entry in $entries) {
         continue
     }
 
-    Write-Host "  High / DOP $SearchParallelism" -ForegroundColor DarkCyan
-    $high = Invoke-ReplayTest -Entry $entry -Candidate $candidate -Preset High -TimeoutSeconds $HighTimeoutSeconds
-    if ($high.status -in @("passed", "observed")) {
-        $finalStatus = if ($high.status -eq "passed") { "passed_high" } else { "observed_high" }
-        Save-BatchResult (New-BatchResult -Entry $entry -Status $finalStatus -Reason $high.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High" -SolverLoss $high.loss -ElapsedSeconds $high.elapsed -RunId $high.runId)
-        Write-Host "  完成：High 战损 $($high.loss)" -ForegroundColor Green
+    $preset = if ($HighOnly) { "High" } else { "VeryHigh" }
+    $timeoutSeconds = if ($HighOnly) { $HighTimeoutSeconds } else { $VeryHighTimeoutSeconds }
+    Write-Host "  $preset / DOP $SearchParallelism" -ForegroundColor DarkCyan
+    $replay = Invoke-ReplayTest -Entry $entry -Candidate $candidate -Preset $preset -TimeoutSeconds $timeoutSeconds
+    $presetStatus = if ($HighOnly) { "high" } else { "very_high" }
+    if ($replay.status -in @("passed", "observed")) {
+        $finalStatus = "$($replay.status)_$presetStatus"
+        Save-BatchResult (New-BatchResult -Entry $entry -Status $finalStatus -Reason $replay.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset $preset -SolverLoss $replay.loss -ElapsedSeconds $replay.elapsed -RunId $replay.runId)
+        Write-Host "  完成：$preset 战损 $($replay.loss)" -ForegroundColor Green
         continue
     }
-    if ($high.status -ne "quality_gap") {
-        Save-BatchResult (New-BatchResult -Entry $entry -Status $high.status -Reason $high.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High" -SolverLoss $high.loss -ElapsedSeconds $high.elapsed -RunId $high.runId)
-        Write-Host "  结束：$($high.status)" -ForegroundColor Yellow
-        continue
-    }
-    if ($HighOnly) {
-        Save-BatchResult (New-BatchResult -Entry $entry -Status "quality_gap_high" -Reason "high=$($high.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High" -SolverLoss $high.loss -ElapsedSeconds $high.elapsed -RunId $high.runId)
-        Write-Host "  High 策略缺口：战损 $($high.loss)" -ForegroundColor Red
+    if ($replay.status -eq "quality_gap") {
+        Save-BatchResult (New-BatchResult -Entry $entry -Status "quality_gap_$presetStatus" -Reason "$preset=$($replay.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset $preset -SolverLoss $replay.loss -ElapsedSeconds $replay.elapsed -RunId $replay.runId)
+        Write-Host "  $preset 策略缺口：战损 $($replay.loss)" -ForegroundColor Red
         continue
     }
 
-    Write-Host "  High 战损 $($high.loss)，未追平人工；转 Very High" -ForegroundColor Yellow
-    $veryHigh = Invoke-ReplayTest -Entry $entry -Candidate $candidate -Preset VeryHigh -TimeoutSeconds $VeryHighTimeoutSeconds
-    $totalElapsed = [math]::Round($high.elapsed + $veryHigh.elapsed, 2)
-    if ($veryHigh.status -eq "passed") {
-        Save-BatchResult (New-BatchResult -Entry $entry -Status "very_high_only" -Reason "high=$($high.loss); veryHigh=$($veryHigh.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
-        Write-Host "  仅 Very High 追平：战损 $($veryHigh.loss)；High 仍需优化" -ForegroundColor Yellow
-    }
-    elseif ($veryHigh.status -eq "quality_gap") {
-        Save-BatchResult (New-BatchResult -Entry $entry -Status "quality_gap" -Reason "high=$($high.loss); veryHigh=$($veryHigh.loss)" -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
-        Write-Host "  策略缺口：Very High 战损 $($veryHigh.loss)" -ForegroundColor Red
-    }
-    else {
-        Save-BatchResult (New-BatchResult -Entry $entry -Status $veryHigh.status -Reason $veryHigh.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset "High,VeryHigh" -SolverLoss $veryHigh.loss -ElapsedSeconds $totalElapsed -RunId $veryHigh.runId)
-        Write-Host "  结束：$($veryHigh.status)" -ForegroundColor Yellow
-    }
+    Save-BatchResult (New-BatchResult -Entry $entry -Status $replay.status -Reason $replay.reason -ReplayStatePath $candidate.replayPath -TurnNumber $candidate.turnNumber -Preset $preset -SolverLoss $replay.loss -ElapsedSeconds $replay.elapsed -RunId $replay.runId)
+    Write-Host "  结束：$($replay.status)" -ForegroundColor Yellow
 }
 
 ConvertTo-Json -InputObject @($results) -Depth 20 | Set-Content -LiteralPath $jsonPath -Encoding UTF8

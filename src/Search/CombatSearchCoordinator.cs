@@ -1301,6 +1301,7 @@ internal static class CombatSearchCoordinator
                 $"won={setupWon} hp_deficit={setupDeficit} " +
                 $"selected={ReferenceEquals(selected, setupPosterior)}");
         }
+        selected.PotionHpRequired = SmartPotionHpRequired(root, selected);
         for (int maximumPotionUses = selected.PotionCount - 1;
              potionFreeWon && maximumPotionUses >= 1 && selected.PotionCount > 1;
              maximumPotionUses--)
@@ -1355,6 +1356,7 @@ internal static class CombatSearchCoordinator
                 selected = fewerPotions;
         }
 
+        selected.PotionHpRequired = SmartPotionHpRequired(root, selected);
         int correctedSaved = CorrectedPotionHpSaved(root, selected, potionFree);
         bool potionProtectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
             && selected.OutstandingStolenResource < potionFree.OutstandingStolenResource;
@@ -1755,6 +1757,18 @@ internal static class CombatSearchCoordinator
             : Math.Max(
                 0,
                 StrategicHpDeficit(root, potionFree) - StrategicHpDeficit(root, potionRoute));
+
+    private static int SmartPotionHpRequired(CombatRootSnapshot root, SolverResult result)
+    {
+        int ambergrisCount = result.BestNode.Actions.Count(action =>
+            action.Kind == PlanActionKind.UsePotion
+            && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
+        int strategicHpCost = PotionUsePolicy.EffectiveStrategicHpCost(
+            result.PotionStrategicCostByTurn.Values.Sum(),
+            ambergrisCount,
+            root.InitialPlayerMaxHp);
+        return PotionUsePolicy.SmartRequiredHpSaved(strategicHpCost);
+    }
 
     private static int StrategicHpDeficit(CombatRootSnapshot root, SolverResult result)
         => result.Snapshot.CumulativePlayerHpLost

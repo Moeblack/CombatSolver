@@ -212,8 +212,7 @@ internal sealed partial class CombatBeamSolver
                 && potionFreeWon)
             {
                 potionHpRequired = PotionUsePolicy.SmartRequiredHpSaved(
-                    potionHpRequired,
-                    potionFreeStrategicHpDeficit);
+                    potionHpRequired);
             }
             if (potionPolicy == SolverPotionPolicy.RequireAtLeastOne)
             {
