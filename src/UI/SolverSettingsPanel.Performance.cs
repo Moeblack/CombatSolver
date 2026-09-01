@@ -6,6 +6,7 @@ namespace CombatSolver;
 internal sealed partial class SolverSettingsPanel
 {
     private OptionButton _performancePreset = null!;
+    private Button _manualGcButton = null!;
     private Control _advancedParameters = null!;
     private Button _advancedParametersToggle = null!;
     private bool _advancedParametersExpanded;
@@ -67,6 +68,17 @@ internal sealed partial class SolverSettingsPanel
                 1d,
                 SolverSettings.MaximumNoGcRegionBudgetGigabytes),
             "这是独立于性能预设的单个搜索 No-GC 区域请求预算，不是进程总内存上限。设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
+        _manualGcButton = SolverUiTokens.CreateButton(
+            "手动 GC",
+            SolverButtonStyle.Secondary);
+        _manualGcButton.Name = "ManualGcButton";
+        _manualGcButton.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        _manualGcButton.Pressed += OnManualGcPressed;
+        AddBasicRow(
+            budgetGrid,
+            "内存维护",
+            _manualGcButton,
+            "立即执行一次完整内存回收。执行期间游戏会短暂停顿。");
         content.AddChild(budgetGrid);
 
         _advancedParametersToggle = SolverUiTokens.CreateButton(
@@ -138,6 +150,17 @@ internal sealed partial class SolverSettingsPanel
         _advancedParameters = advanced;
         content.AddChild(_advancedParameters);
         return CreatePageScroll(content);
+    }
+
+    internal bool ManualGcButtonConfiguredForTesting
+        => _manualGcButton.Text == "手动 GC"
+           && _performancePage.IsAncestorOf(_manualGcButton);
+
+    private void OnManualGcPressed()
+    {
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=manual_gc");
+        SearchGcPolicy.ForceManualGc();
+        SetStatus("内存回收已完成", SolverUiTokens.Palette.Success);
     }
 
     private void ReloadPerformancePage(SolverSettingsData data)

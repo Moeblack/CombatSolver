@@ -154,6 +154,8 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("设置页没有按常规、性能、反馈三页独立切换。");
         }
+        if (!SolverOverlay.ManualGcButtonConfiguredForTesting)
+            throw new InvalidOperationException("手动 GC 按钮没有归属性能设置页。");
         if (!SolverOverlay.ExercisePerformanceHintForTesting())
             throw new InvalidOperationException("战损结果没有可用的性能预设重试胶囊提示。");
         if (strategyPotion is { } potionEntry)
