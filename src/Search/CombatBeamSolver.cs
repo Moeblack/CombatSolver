@@ -33,7 +33,8 @@ internal sealed partial class CombatBeamSolver(
     SolverPotionPolicy? potionPolicyOverride = null,
     PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
     int? maximumPotionUses = null,
-    IReadOnlyList<PlanAction>? fixedPrefixActions = null)
+    IReadOnlyList<PlanAction>? fixedPrefixActions = null,
+    int? minimumPotionUses = null)
 {
     private readonly SolverSearchProfile _profile = searchProfile ?? SolverSearchProfile.Short;
     private readonly SearchRunContext _run = new(
@@ -48,11 +49,13 @@ internal sealed partial class CombatBeamSolver(
     private readonly bool _isActEndingBoss = root.IsActEndingBoss;
     private readonly bool _detailedDiagnostics = policy.DetailedDiagnostics;
     private readonly int? _maximumPotionUses = maximumPotionUses;
+    private readonly int _minimumPotionUses = minimumPotionUses ?? 0;
     private readonly IReadOnlyList<PlanAction> _fixedPrefixActions = fixedPrefixActions ?? [];
     private readonly string? _progressPhaseOverride = DescribePotionProgressPhase(
         displayNames,
         potionPolicyOverride,
         maximumPotionUses,
+        minimumPotionUses,
         fixedPrefixActions);
     private readonly SolverTheftPolicy? _theftPolicy = policy.TheftPolicy;
     private readonly PotionStrategySnapshot _potionStrategy = policy.PotionStrategy;
@@ -84,6 +87,7 @@ internal sealed partial class CombatBeamSolver(
         _theftPolicy,
         potionFreePolicyBaseline,
         root.InitialPlayerMaxHp,
+        _minimumPotionUses,
         policy.Diagnostics,
         _detailedDiagnostics,
         battleDamage);
@@ -99,6 +103,7 @@ internal sealed partial class CombatBeamSolver(
         SolverDisplayNames displayNames,
         SolverPotionPolicy? potionPolicyOverride,
         int? maximumPotionUses,
+        int? minimumPotionUses,
         IReadOnlyList<PlanAction>? fixedPrefixActions)
     {
         if (potionPolicyOverride == SolverPotionPolicy.Disabled)
@@ -120,6 +125,11 @@ internal sealed partial class CombatBeamSolver(
         if (potionPolicyOverride == SolverPotionPolicy.RequireAtLeastOne
             || potionPolicyOverride == SolverPotionPolicy.Smart && maximumPotionUses.HasValue)
         {
+            if (minimumPotionUses is > 0
+                && maximumPotionUses == minimumPotionUses)
+            {
+                return $"正在搜索恰好 {minimumPotionUses} 瓶药路线";
+            }
             return "正在搜索用药路线";
         }
         return null;

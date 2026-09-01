@@ -17,6 +17,10 @@ internal static class CombatSearchCoordinator
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
             shortProfile = shortProfile with { SoftTimeBudgetMilliseconds = shortBudget };
         Stopwatch requestClock = Stopwatch.StartNew();
+        SolverPotionPolicy? initialPotionPolicyOverride = policy.PotionPolicy == SolverPotionPolicy.Smart
+            && !policy.PotionStrategy.HasForcedDirectives
+                ? SolverPotionPolicy.Disabled
+                : null;
         if (progressCallback != null)
         {
             long completedSearches = 0;
@@ -50,7 +54,8 @@ internal static class CombatSearchCoordinator
                 policy,
                 cancellationToken,
                 progressCallback,
-                shortProfile).Solve();
+                shortProfile,
+                potionPolicyOverride: initialPotionPolicyOverride).Solve();
             PopulateSingleSessionTotals(shortResult, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered: false);
             if (!policy.PotionStrategy.HasForcedDirectives)
             {
@@ -92,7 +97,8 @@ internal static class CombatSearchCoordinator
             cancellationToken,
             progressCallback,
             deepProfile,
-            shortCheckpointMilliseconds: shortProfile.SoftTimeBudgetMilliseconds).Solve();
+            shortCheckpointMilliseconds: shortProfile.SoftTimeBudgetMilliseconds,
+            potionPolicyOverride: initialPotionPolicyOverride).Solve();
         if (policy.MeasurePhasePerformance)
             policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(result));
         bool deepTriggered = result.Elapsed.TotalMilliseconds > shortProfile.SoftTimeBudgetMilliseconds;
@@ -169,16 +175,19 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 selected);
-            selected = AuditOpeningPowerUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                deadline.Token,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                selected);
+            if (policy.PotionPolicy != SolverPotionPolicy.Smart)
+            {
+                selected = AuditOpeningPowerUse(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    deadline.Token,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    selected);
+            }
         }
         catch (OperationCanceledException)
             when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -204,6 +213,9 @@ internal static class CombatSearchCoordinator
         SolverResult primary)
     {
         int primaryDeficit = StrategicHpDeficit(root, primary);
+        int maximumSmartPotionUses = policy.PotionPolicy == SolverPotionPolicy.Smart
+            ? MaximumSmartPotionUses(root, policy, potionFreeWon: true, primaryDeficit)
+            : Math.Max(1, primary.PotionCount);
         if (primaryDeficit == 0
             || policy.PotionPolicy == SolverPotionPolicy.RequireAtLeastOne
                 && battleDamage.PotionsUsedSoFar == 0)
@@ -220,6 +232,7 @@ internal static class CombatSearchCoordinator
                 shortCheckpointMilliseconds)
             .BuildOpeningPowerActions();
         IReadOnlyList<PlanAction> openingPotions = policy.PotionPolicy == SolverPotionPolicy.Disabled
+            || maximumSmartPotionUses == 0
             ? []
             : new CombatBeamSolver(
                     root,
@@ -231,7 +244,7 @@ internal static class CombatSearchCoordinator
                     profile,
                     shortCheckpointMilliseconds,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
-                    maximumPotionUses: 1)
+                    maximumPotionUses: maximumSmartPotionUses)
                 .BuildOpeningPotionActions();
         IReadOnlyList<PlanAction> generatedResourcePotions = openingPotions.Count == 0
             ? []
@@ -245,7 +258,7 @@ internal static class CombatSearchCoordinator
                     profile,
                     shortCheckpointMilliseconds,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
-                    maximumPotionUses: 1)
+                    maximumPotionUses: maximumSmartPotionUses)
                 .SelectGeneratedResourcePotionActions(openingPotions);
         IReadOnlyList<PlanAction> openingResources = new CombatBeamSolver(
                 root,
@@ -270,7 +283,7 @@ internal static class CombatSearchCoordinator
                     profile,
                     shortCheckpointMilliseconds,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
-                    maximumPotionUses: 1)
+                    maximumPotionUses: maximumSmartPotionUses)
                 .BuildPowerActionsAfterPrefix([openingPotion]);
             foreach (PlanAction power in powers)
             {
@@ -527,7 +540,7 @@ internal static class CombatSearchCoordinator
                     profile,
                     shortCheckpointMilliseconds,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
-                    maximumPotionUses: Math.Max(1, primary.PotionCount),
+                    maximumPotionUses: maximumSmartPotionUses,
                     fixedPrefixActions: jointPrefix),
                 policy,
                 $"POTION_POWER_POSTERIOR potion={openingPotion.PotionId} power={postPotionPower.CardId}");
@@ -589,7 +602,7 @@ internal static class CombatSearchCoordinator
                     profile,
                     shortCheckpointMilliseconds,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
-                    maximumPotionUses: Math.Max(1, primary.PotionCount))
+                    maximumPotionUses: maximumSmartPotionUses)
                 .BuildOpeningDefensiveFollowUp(jointPrefix);
             if (defensiveFollowUp == null)
                 continue;
@@ -605,7 +618,7 @@ internal static class CombatSearchCoordinator
                     profile,
                     shortCheckpointMilliseconds,
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
-                    maximumPotionUses: Math.Max(1, primary.PotionCount),
+                    maximumPotionUses: maximumSmartPotionUses,
                     fixedPrefixActions: [openingPotion, postPotionPower, defensiveFollowUp]),
                 policy,
                 $"POTION_POWER_DEFENSIVE_POSTERIOR potion={openingPotion.PotionId} " +
@@ -960,9 +973,11 @@ internal static class CombatSearchCoordinator
         int? shortCheckpointMilliseconds,
         SolverResult primary)
     {
+        if (policy.PotionPolicy != SolverPotionPolicy.Smart)
+            return primary;
         try
         {
-            return AuditSmartPotionUseCore(
+            return SearchSmartPotionGradient(
                 root,
                 displayNames,
                 battleDamage,
@@ -983,7 +998,7 @@ internal static class CombatSearchCoordinator
         }
     }
 
-    private static SolverResult AuditSmartPotionUseCore(
+    private static SolverResult SearchSmartPotionGradient(
         CombatRootSnapshot root,
         SolverDisplayNames displayNames,
         BattleDamageSnapshot battleDamage,
@@ -992,371 +1007,39 @@ internal static class CombatSearchCoordinator
         Action<SolverProgress>? progressCallback,
         SolverSearchProfile profile,
         int? shortCheckpointMilliseconds,
-        SolverResult primary)
+        SolverResult potionFree)
     {
-        if (policy.PotionPolicy != SolverPotionPolicy.Smart)
-            return primary;
-        if (primary.PotionCount == 0)
-        {
-            return AuditMissedSmartPotionUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                primary);
-        }
-
-        policy.Diagnostics.Info(
-            $"[CombatSolver/Test] SMART_POTION_AUDIT start potion_count={primary.PotionCount} " +
-            $"reported_saved={primary.PotionHpSaved} required={primary.PotionHpRequired}");
-        SolverResult potionFree = new CombatBeamSolver(
-            root,
-            displayNames,
-            battleDamage,
-            policy,
-            cancellationToken,
-            progressCallback,
-            profile,
-            shortCheckpointMilliseconds,
-            SolverPotionPolicy.Disabled).Solve();
-        bool auditDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
-            && potionFree.Elapsed.TotalMilliseconds > checkpoint;
-        potionFree.SearchPhase = auditDeepTriggered ? SolverSearchPhase.Deep : SolverSearchPhase.Short;
-        potionFree.DeepSearchTriggered = auditDeepTriggered;
-        potionFree.DeepSearchImprovedResult = false;
-        potionFree.SingleSessionSearch = true;
-        PopulateSingleSessionTotals(
-            potionFree,
-            shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-            auditDeepTriggered);
+        if (potionFree.PotionCount != 0)
+            throw new InvalidOperationException("Smart 梯度搜索必须从无药结果开始。");
 
         bool potionFreeWon = potionFree.Snapshot.AllEnemiesDead
             && !potionFree.Snapshot.PlayerDead
             && potionFree.Snapshot.ProjectedPlayerHp > 0;
+        int potionFreeDeficit = StrategicHpDeficit(root, potionFree);
+        int maximumPotionUses = MaximumSmartPotionUses(
+            root,
+            policy,
+            potionFreeWon,
+            potionFreeDeficit);
+        if (maximumPotionUses == 0)
+        {
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SMART_POTION_GRADIENT result " +
+                $"stop=no_potion_acceptable hp_deficit={potionFreeDeficit} maximum=0");
+            return potionFree;
+        }
+
         PotionFreePolicyBaseline baseline = new(
-            Won: potionFreeWon,
-            HpDeficit: StrategicHpDeficit(root, potionFree),
-            PlayerHp: potionFree.Snapshot.PlayerHp);
-        List<SolverResult> searches = [primary, potionFree];
-        SolverResult selected = primary;
-        PlanAction[] posteriorPrefix = PrefixThroughFirstPotion(primary);
-        if (posteriorPrefix.Length > 0)
+            potionFreeWon,
+            potionFreeDeficit,
+            potionFree.Snapshot.PlayerHp);
+        List<SolverResult> searches = [potionFree];
+        for (int potionCount = 1; potionCount <= maximumPotionUses; potionCount++)
         {
-            SolverResult posterior = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.RequireAtLeastOne,
-                baseline,
-                maximumPotionUses: primary.PotionCount,
-                fixedPrefixActions: posteriorPrefix).Solve();
-            bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
-                && posterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
-            posterior.SearchPhase = posteriorDeepTriggered
-                ? SolverSearchPhase.Deep
-                : SolverSearchPhase.Short;
-            posterior.DeepSearchTriggered = posteriorDeepTriggered;
-            posterior.DeepSearchImprovedResult = false;
-            posterior.SingleSessionSearch = true;
-            PopulateSingleSessionTotals(
-                posterior,
-                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                posteriorDeepTriggered);
-            searches.Add(posterior);
-
-            bool posteriorWon = posterior.Snapshot.AllEnemiesDead
-                && !posterior.Snapshot.PlayerDead
-                && posterior.Snapshot.ProjectedPlayerHp > 0;
-            int posteriorDeficit = StrategicHpDeficit(root, posterior);
-            int primaryDeficit = StrategicHpDeficit(root, primary);
-            if (posteriorWon
-                && (posteriorDeficit < primaryDeficit
-                    || posteriorDeficit == primaryDeficit
-                        && (posterior.PotionCount < primary.PotionCount
-                            || posterior.PotionCount == primary.PotionCount
-                                && posterior.BestNode.Score > primary.BestNode.Score)))
-            {
-                selected = posterior;
-            }
-            policy.Diagnostics.Info(
-                $"[CombatSolver/Test] SMART_POTION_POSTERIOR prefix_actions={posteriorPrefix.Length} " +
-                $"won={posteriorWon} hp_deficit={posteriorDeficit} " +
-                $"selected={ReferenceEquals(selected, posterior)}");
-        }
-        PlanAction? selectedFirstPotion = primary.BestNode.Actions
-            .FirstOrDefault(action => action.Kind == PlanActionKind.UsePotion);
-        PlanAction? fullRedrawAction = selectedFirstPotion == null
-            ? null
-            : new CombatBeamSolver(
-                    root,
-                    displayNames,
-                    battleDamage,
-                    policy,
-                    cancellationToken,
-                    progressCallback,
-                    profile,
-                    shortCheckpointMilliseconds,
-                    SolverPotionPolicy.Smart,
-                    baseline,
-                    maximumPotionUses: primary.PotionCount)
-                .BuildOpeningFullRedrawPotionAction(selectedFirstPotion);
-        if (fullRedrawAction != null)
-        {
-            SolverResult fullRedrawPosterior = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.RequireAtLeastOne,
-                baseline,
-                maximumPotionUses: primary.PotionCount,
-                fixedPrefixActions: [fullRedrawAction]).Solve();
-            bool fullRedrawDeepTriggered = shortCheckpointMilliseconds is { } redrawCheckpoint
-                && fullRedrawPosterior.Elapsed.TotalMilliseconds > redrawCheckpoint;
-            fullRedrawPosterior.SearchPhase = fullRedrawDeepTriggered
-                ? SolverSearchPhase.Deep
-                : SolverSearchPhase.Short;
-            fullRedrawPosterior.DeepSearchTriggered = fullRedrawDeepTriggered;
-            fullRedrawPosterior.DeepSearchImprovedResult = false;
-            fullRedrawPosterior.SingleSessionSearch = true;
-            PopulateSingleSessionTotals(
-                fullRedrawPosterior,
-                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                fullRedrawDeepTriggered);
-            searches.Add(fullRedrawPosterior);
-
-            bool redrawWon = fullRedrawPosterior.Snapshot.AllEnemiesDead
-                && !fullRedrawPosterior.Snapshot.PlayerDead
-                && fullRedrawPosterior.Snapshot.ProjectedPlayerHp > 0;
-            bool selectedWon = selected.Snapshot.AllEnemiesDead
-                && !selected.Snapshot.PlayerDead
-                && selected.Snapshot.ProjectedPlayerHp > 0;
-            int redrawDeficit = StrategicHpDeficit(root, fullRedrawPosterior);
-            int selectedDeficit = StrategicHpDeficit(root, selected);
-            if (redrawWon
-                && (!selectedWon
-                    || redrawDeficit < selectedDeficit
-                    || redrawDeficit == selectedDeficit
-                        && (fullRedrawPosterior.PotionCount < selected.PotionCount
-                            || fullRedrawPosterior.PotionCount == selected.PotionCount
-                                && fullRedrawPosterior.BestNode.Score > selected.BestNode.Score)))
-            {
-                selected = fullRedrawPosterior;
-            }
-            policy.Diagnostics.Info(
-                $"[CombatSolver/Test] SMART_POTION_FULL_REDRAW_POSTERIOR " +
-                $"won={redrawWon} hp_deficit={redrawDeficit} " +
-                $"selected={ReferenceEquals(selected, fullRedrawPosterior)}");
-
-            if (primary.PotionCount > 1)
-            {
-                SolverResult singlePotionPosterior = new CombatBeamSolver(
-                    root,
-                    displayNames,
-                    battleDamage,
-                    policy,
-                    cancellationToken,
-                    progressCallback,
-                    profile,
-                    shortCheckpointMilliseconds,
-                    SolverPotionPolicy.RequireAtLeastOne,
-                    baseline,
-                    maximumPotionUses: 1,
-                    fixedPrefixActions: [fullRedrawAction]).Solve();
-                bool singlePotionDeepTriggered = shortCheckpointMilliseconds is { } singleCheckpoint
-                    && singlePotionPosterior.Elapsed.TotalMilliseconds > singleCheckpoint;
-                singlePotionPosterior.SearchPhase = singlePotionDeepTriggered
-                    ? SolverSearchPhase.Deep
-                    : SolverSearchPhase.Short;
-                singlePotionPosterior.DeepSearchTriggered = singlePotionDeepTriggered;
-                singlePotionPosterior.DeepSearchImprovedResult = false;
-                singlePotionPosterior.SingleSessionSearch = true;
-                PopulateSingleSessionTotals(
-                    singlePotionPosterior,
-                    shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                    singlePotionDeepTriggered);
-                searches.Add(singlePotionPosterior);
-
-                bool singleWon = singlePotionPosterior.Snapshot.AllEnemiesDead
-                    && !singlePotionPosterior.Snapshot.PlayerDead
-                    && singlePotionPosterior.Snapshot.ProjectedPlayerHp > 0;
-                selectedWon = selected.Snapshot.AllEnemiesDead
-                    && !selected.Snapshot.PlayerDead
-                    && selected.Snapshot.ProjectedPlayerHp > 0;
-                int singleDeficit = StrategicHpDeficit(root, singlePotionPosterior);
-                selectedDeficit = StrategicHpDeficit(root, selected);
-                if (singleWon
-                    && (!selectedWon
-                        || singleDeficit < selectedDeficit
-                        || singleDeficit == selectedDeficit
-                            && (singlePotionPosterior.PotionCount < selected.PotionCount
-                                || singlePotionPosterior.PotionCount == selected.PotionCount
-                                    && singlePotionPosterior.BestNode.Score > selected.BestNode.Score)))
-                {
-                    selected = singlePotionPosterior;
-                }
-                policy.Diagnostics.Info(
-                    $"[CombatSolver/Test] SMART_POTION_FULL_REDRAW_SINGLE_POSTERIOR " +
-                    $"won={singleWon} hp_deficit={singleDeficit} " +
-                    $"selected={ReferenceEquals(selected, singlePotionPosterior)}");
-            }
-        }
-        IReadOnlyList<PlanAction> openingPotions = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.Smart,
-                baseline,
-                maximumPotionUses: primary.PotionCount)
-            .BuildPreferredOpeningPotionActions();
-        foreach (PlanAction openingPotion in openingPotions)
-        {
-            if (posteriorPrefix.Length == 1 && openingPotion.Equals(posteriorPrefix[0]))
-                continue;
-
-            List<PlanAction> openingPrefix = [openingPotion];
-            SolverResult? openingPosterior = null;
-            for (int attempt = 0; attempt < 3; attempt++)
-            {
-                try
-                {
-                    openingPosterior = new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: primary.PotionCount,
-                        fixedPrefixActions: openingPrefix).Solve();
-                    break;
-                }
-                catch (PotionPolicyUnsatisfiedException)
-                {
-                    if (attempt == 2
-                        || openingPotion.PotionId == null
-                        || !PotionUsePolicy.RequiresOpeningUse(openingPotion.PotionId))
-                    {
-                        break;
-                    }
-
-                    PlanAction? defensiveFollowUp = new CombatBeamSolver(
-                            root,
-                            displayNames,
-                            battleDamage,
-                            policy,
-                            cancellationToken,
-                            progressCallback,
-                            profile,
-                            shortCheckpointMilliseconds,
-                            SolverPotionPolicy.RequireAtLeastOne,
-                            baseline,
-                            maximumPotionUses: primary.PotionCount)
-                        .BuildOpeningDefensiveFollowUp(openingPrefix);
-                    if (defensiveFollowUp == null)
-                        break;
-                    openingPrefix.Add(defensiveFollowUp);
-                }
-            }
-            if (openingPosterior == null)
-            {
-                policy.Diagnostics.Info(
-                    $"[CombatSolver/Test] SMART_OPENING_POTION_POSTERIOR " +
-                    $"potion={openingPotion.PotionId} prefix_actions={openingPrefix.Count} " +
-                    $"qualified=false");
-                continue;
-            }
-            bool openingDeepTriggered = shortCheckpointMilliseconds is { } openingCheckpoint
-                && openingPosterior.Elapsed.TotalMilliseconds > openingCheckpoint;
-            openingPosterior.SearchPhase = openingDeepTriggered
-                ? SolverSearchPhase.Deep
-                : SolverSearchPhase.Short;
-            openingPosterior.DeepSearchTriggered = openingDeepTriggered;
-            openingPosterior.DeepSearchImprovedResult = false;
-            openingPosterior.SingleSessionSearch = true;
-            PopulateSingleSessionTotals(
-                openingPosterior,
-                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                openingDeepTriggered);
-            searches.Add(openingPosterior);
-
-            bool openingWon = openingPosterior.Snapshot.AllEnemiesDead
-                && !openingPosterior.Snapshot.PlayerDead
-                && openingPosterior.Snapshot.ProjectedPlayerHp > 0;
-            bool selectedWon = selected.Snapshot.AllEnemiesDead
-                && !selected.Snapshot.PlayerDead
-                && selected.Snapshot.ProjectedPlayerHp > 0;
-            int openingDeficit = StrategicHpDeficit(root, openingPosterior);
-            int selectedDeficit = StrategicHpDeficit(root, selected);
-            if (openingWon
-                && (!selectedWon
-                    || openingDeficit < selectedDeficit
-                    || openingDeficit == selectedDeficit
-                        && (openingPosterior.PotionCount < selected.PotionCount
-                            || openingPosterior.PotionCount == selected.PotionCount
-                                && openingPosterior.BestNode.Score > selected.BestNode.Score)))
-            {
-                selected = openingPosterior;
-            }
-            policy.Diagnostics.Info(
-                $"[CombatSolver/Test] SMART_OPENING_POTION_POSTERIOR " +
-                $"potion={openingPotion.PotionId} " +
-                $"target={openingPotion.TargetCombatId?.ToString() ?? "-"} " +
-                $"prefix_actions={openingPrefix.Count} " +
-                $"won={openingWon} hp_deficit={openingDeficit} " +
-                $"selected={ReferenceEquals(selected, openingPosterior)}");
-
-            selectedDeficit = StrategicHpDeficit(root, selected);
-            if (openingPotion.PotionId == null
-                || !PotionUsePolicy.RequiresOpeningUse(openingPotion.PotionId)
-                || openingDeficit <= selectedDeficit)
-            {
-                continue;
-            }
-
-            PlanAction? setupFollowUp = new CombatBeamSolver(
-                    root,
-                    displayNames,
-                    battleDamage,
-                    policy,
-                    cancellationToken,
-                    progressCallback,
-                    profile,
-                    shortCheckpointMilliseconds,
-                    SolverPotionPolicy.RequireAtLeastOne,
-                    baseline,
-                    maximumPotionUses: primary.PotionCount)
-                .BuildOpeningSetupFollowUp(openingPrefix);
-            if (setupFollowUp == null)
-                continue;
-
-            PlanAction[] setupPrefix = [.. openingPrefix, setupFollowUp];
-            SolverResult setupPosterior;
+            SolverResult candidate;
             try
             {
-                setupPosterior = new CombatBeamSolver(
+                candidate = new CombatBeamSolver(
                     root,
                     displayNames,
                     battleDamage,
@@ -1367,478 +1050,62 @@ internal static class CombatSearchCoordinator
                     shortCheckpointMilliseconds,
                     SolverPotionPolicy.RequireAtLeastOne,
                     baseline,
-                    maximumPotionUses: primary.PotionCount,
-                    fixedPrefixActions: setupPrefix).Solve();
+                    maximumPotionUses: potionCount,
+                    minimumPotionUses: potionCount).Solve();
             }
             catch (PotionPolicyUnsatisfiedException)
             {
                 policy.Diagnostics.Info(
-                    $"[CombatSolver/Test] SMART_OPENING_POTION_SETUP_POSTERIOR " +
-                    $"potion={openingPotion.PotionId} setup={setupFollowUp.CardId} qualified=false");
+                    $"[CombatSolver/Test] SMART_POTION_GRADIENT layer={potionCount} route_missing=true");
                 continue;
             }
-            bool setupDeepTriggered = shortCheckpointMilliseconds is { } setupCheckpoint
-                && setupPosterior.Elapsed.TotalMilliseconds > setupCheckpoint;
-            setupPosterior.SearchPhase = setupDeepTriggered
+
+            bool candidateDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
+                && candidate.Elapsed.TotalMilliseconds > checkpoint;
+            candidate.SearchPhase = candidateDeepTriggered
                 ? SolverSearchPhase.Deep
                 : SolverSearchPhase.Short;
-            setupPosterior.DeepSearchTriggered = setupDeepTriggered;
-            setupPosterior.DeepSearchImprovedResult = false;
-            setupPosterior.SingleSessionSearch = true;
+            candidate.DeepSearchTriggered = candidateDeepTriggered;
+            candidate.DeepSearchImprovedResult = false;
+            candidate.SingleSessionSearch = true;
             PopulateSingleSessionTotals(
-                setupPosterior,
+                candidate,
                 shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                setupDeepTriggered);
-            searches.Add(setupPosterior);
+                candidateDeepTriggered);
+            searches.Add(candidate);
 
-            bool setupWon = setupPosterior.Snapshot.AllEnemiesDead
-                && !setupPosterior.Snapshot.PlayerDead
-                && setupPosterior.Snapshot.ProjectedPlayerHp > 0;
-            selectedWon = selected.Snapshot.AllEnemiesDead
-                && !selected.Snapshot.PlayerDead
-                && selected.Snapshot.ProjectedPlayerHp > 0;
-            int setupDeficit = StrategicHpDeficit(root, setupPosterior);
-            selectedDeficit = StrategicHpDeficit(root, selected);
-            if (setupWon
-                && (!selectedWon
-                    || setupDeficit < selectedDeficit
-                    || setupDeficit == selectedDeficit
-                        && (setupPosterior.PotionCount < selected.PotionCount
-                            || setupPosterior.PotionCount == selected.PotionCount
-                                && setupPosterior.BestNode.Score > selected.BestNode.Score)))
-            {
-                selected = setupPosterior;
-            }
+            bool candidateWon = candidate.Snapshot.AllEnemiesDead
+                && !candidate.Snapshot.PlayerDead
+                && candidate.Snapshot.ProjectedPlayerHp > 0;
+            int candidateDeficit = StrategicHpDeficit(root, candidate);
+            int hpSaved = potionFreeWon
+                ? Math.Max(0, potionFreeDeficit - candidateDeficit)
+                : candidateWon
+                    ? Math.Max(0, candidate.Snapshot.PlayerHp - potionFree.Snapshot.PlayerHp)
+                    : 0;
+            int hpRequired = SmartPotionHpRequired(root, candidate);
+            bool protectsLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
+                && candidate.OutstandingStolenResource < potionFree.OutstandingStolenResource;
+            bool acceptable = protectsLoot
+                || candidateWon && (!potionFreeWon || hpSaved >= hpRequired);
             policy.Diagnostics.Info(
-                $"[CombatSolver/Test] SMART_OPENING_POTION_SETUP_POSTERIOR " +
-                $"potion={openingPotion.PotionId} setup={setupFollowUp.CardId} " +
-                $"won={setupWon} hp_deficit={setupDeficit} " +
-                $"selected={ReferenceEquals(selected, setupPosterior)}");
-        }
-        selected.PotionHpRequired = SmartPotionHpRequired(root, selected);
-        for (int maximumPotionUses = selected.PotionCount - 1;
-             potionFreeWon && maximumPotionUses >= 1 && selected.PotionCount > 1;
-             maximumPotionUses--)
-        {
-            SolverResult fewerPotions = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.Smart,
-                baseline,
-                maximumPotionUses).Solve();
-            bool fewerPotionsDeepTriggered = shortCheckpointMilliseconds is { } marginalCheckpoint
-                && fewerPotions.Elapsed.TotalMilliseconds > marginalCheckpoint;
-            fewerPotions.SearchPhase = fewerPotionsDeepTriggered
-                ? SolverSearchPhase.Deep
-                : SolverSearchPhase.Short;
-            fewerPotions.DeepSearchTriggered = fewerPotionsDeepTriggered;
-            fewerPotions.DeepSearchImprovedResult = false;
-            fewerPotions.SingleSessionSearch = true;
-            PopulateSingleSessionTotals(
-                fewerPotions,
-                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                fewerPotionsDeepTriggered);
-            searches.Add(fewerPotions);
-
-            bool fewerPotionsWon = fewerPotions.Snapshot.AllEnemiesDead
-                && !fewerPotions.Snapshot.PlayerDead
-                && fewerPotions.Snapshot.ProjectedPlayerHp > 0;
-            if (!fewerPotionsWon || fewerPotions.PotionCount >= selected.PotionCount)
+                $"[CombatSolver/Test] SMART_POTION_GRADIENT layer={potionCount} " +
+                $"won={candidateWon} hp_deficit={candidateDeficit} saved={hpSaved} " +
+                $"required={hpRequired} protects_loot={protectsLoot} acceptable={acceptable}");
+            if (!acceptable)
                 continue;
 
-            int marginalHpSaved = Math.Max(
-                0,
-                StrategicHpDeficit(root, fewerPotions) - StrategicHpDeficit(root, selected));
-            int marginalHpRequired = Math.Max(
-                0,
-                selected.PotionHpRequired - fewerPotions.PotionHpRequired);
-            bool additionalPotionsProtectLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
-                && selected.OutstandingStolenResource < fewerPotions.OutstandingStolenResource;
-            policy.Diagnostics.Info(
-                $"[CombatSolver/Test] SMART_POTION_MARGINAL_AUDIT " +
-                $"more={selected.PotionCount} fewer={fewerPotions.PotionCount} " +
-                $"marginal_saved={marginalHpSaved} marginal_required={marginalHpRequired} " +
-                $"protects_more_loot={additionalPotionsProtectLoot} " +
-                $"selected={(additionalPotionsProtectLoot || marginalHpSaved >= marginalHpRequired ? "more" : "fewer")}");
-            if (!additionalPotionsProtectLoot && marginalHpSaved < marginalHpRequired)
-                selected = fewerPotions;
+            candidate.PotionHpSaved = hpSaved;
+            candidate.PotionHpRequired = hpRequired;
+            MergeAuditTotals(candidate, [.. searches]);
+            return candidate;
         }
 
-        selected.PotionHpRequired = SmartPotionHpRequired(root, selected);
-        int correctedSaved = CorrectedPotionHpSaved(root, selected, potionFree);
-        bool potionProtectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
-            && selected.OutstandingStolenResource < potionFree.OutstandingStolenResource;
-        bool potionImprovesHp = StrategicHpDeficit(root, selected) < StrategicHpDeficit(root, potionFree);
-        if (!potionProtectsMoreLoot
-            && potionFreeWon
-            && (!potionImprovesHp || correctedSaved < selected.PotionHpRequired))
-        {
-            selected = potionFree;
-        }
-        else
-        {
-            selected.PotionHpSaved = potionFreeWon ? correctedSaved : selected.PotionHpSaved;
-        }
-        MergeAuditTotals(selected, [.. searches]);
+        MergeAuditTotals(potionFree, [.. searches]);
         policy.Diagnostics.Info(
-            $"[CombatSolver/Test] SMART_POTION_AUDIT result potion_free_won={potionFreeWon} " +
-            $"corrected_saved={correctedSaved} required={selected.PotionHpRequired} " +
-            $"potion_protects_more_loot={potionProtectsMoreLoot} " +
-            $"selected={(ReferenceEquals(selected, potionFree) ? "potion_free" : "potion_route")}");
-        return selected;
-    }
-
-    private static SolverResult AuditMissedSmartPotionUse(
-        CombatRootSnapshot root,
-        SolverDisplayNames displayNames,
-        BattleDamageSnapshot battleDamage,
-        SearchPolicySnapshot policy,
-        CancellationToken cancellationToken,
-        Action<SolverProgress>? progressCallback,
-        SolverSearchProfile profile,
-        int? shortCheckpointMilliseconds,
-        SolverResult primary)
-    {
-        bool primaryWon = primary.Snapshot.AllEnemiesDead
-            && !primary.Snapshot.PlayerDead
-            && primary.Snapshot.ProjectedPlayerHp > 0;
-        int primaryHpDeficit = StrategicHpDeficit(root, primary);
-        if (root.SearchablePotionCount == 0
-            || primaryWon && primaryHpDeficit == 0)
-        {
-            return primary;
-        }
-
-        PotionFreePolicyBaseline baseline = new(
-            primaryWon,
-            primaryHpDeficit,
-            primary.Snapshot.PlayerHp);
-        policy.Diagnostics.Info(
-            $"[CombatSolver/Test] SMART_POTION_INTERVENTION start " +
-            $"potion_free_won={primaryWon} hp_deficit={primaryHpDeficit} " +
-            $"searchable_potions={root.SearchablePotionCount}");
-        SolverResult forcedPotion;
-        try
-        {
-            forcedPotion = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.RequireAtLeastOne,
-                baseline,
-                maximumPotionUses: 1).Solve();
-        }
-        catch (PotionPolicyUnsatisfiedException)
-        {
-            policy.Diagnostics.Info(
-                "[CombatSolver/Test] SMART_POTION_INTERVENTION result forced_route_missing=true selected=potion_free");
-            return primary;
-        }
-
-        bool forcedDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
-            && forcedPotion.Elapsed.TotalMilliseconds > checkpoint;
-        forcedPotion.SearchPhase = forcedDeepTriggered
-            ? SolverSearchPhase.Deep
-            : SolverSearchPhase.Short;
-        forcedPotion.DeepSearchTriggered = forcedDeepTriggered;
-        forcedPotion.DeepSearchImprovedResult = false;
-        forcedPotion.SingleSessionSearch = true;
-        PopulateSingleSessionTotals(
-            forcedPotion,
-            shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-            forcedDeepTriggered);
-
-        SolverResult audited = AuditSmartPotionUse(
-            root,
-            displayNames,
-            battleDamage,
-            policy,
-            cancellationToken,
-            progressCallback,
-            profile,
-            shortCheckpointMilliseconds,
-            forcedPotion);
-        List<SolverResult> searches = [primary, audited];
-        SolverResult selected = IsBetterCompletedResult(root, audited, primary)
-            ? audited
-            : primary;
-        IReadOnlyList<PlanAction> enablers = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.RequireAtLeastOne,
-                baseline,
-                maximumPotionUses: 1)
-            .BuildOpeningResourceActions();
-        foreach (PlanAction enabler in enablers)
-        {
-            IReadOnlyList<PlanAction> potions = new CombatBeamSolver(
-                    root,
-                    displayNames,
-                    battleDamage,
-                    policy,
-                    cancellationToken,
-                    progressCallback,
-                    profile,
-                    shortCheckpointMilliseconds,
-                    SolverPotionPolicy.RequireAtLeastOne,
-                    baseline,
-                    maximumPotionUses: 1)
-                .BuildPreferredPotionActionsAfterPrefix([enabler]);
-            foreach (PlanAction potion in potions)
-            {
-                SolverResult? posterior = SolveOptionalPotionPosterior(
-                    new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: 1,
-                        fixedPrefixActions: [enabler, potion]),
-                    policy,
-                    $"SMART_POTION_ENABLER_POSTERIOR card={enabler.CardId} potion={potion.PotionId}");
-                if (posterior == null)
-                    continue;
-                bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
-                    && posterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
-                posterior.SearchPhase = posteriorDeepTriggered
-                    ? SolverSearchPhase.Deep
-                    : SolverSearchPhase.Short;
-                posterior.DeepSearchTriggered = posteriorDeepTriggered;
-                posterior.DeepSearchImprovedResult = false;
-                posterior.SingleSessionSearch = true;
-                PopulateSingleSessionTotals(
-                    posterior,
-                    shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                    posteriorDeepTriggered);
-                searches.Add(posterior);
-
-                if (IsBetterCompletedResult(root, posterior, selected))
-                    selected = posterior;
-                policy.Diagnostics.Info(
-                    $"[CombatSolver/Test] SMART_POTION_ENABLER_POSTERIOR " +
-                    $"card={enabler.CardId} potion={potion.PotionId} " +
-                    $"won={posterior.Snapshot.AllEnemiesDead && !posterior.Snapshot.PlayerDead} " +
-                    $"hp_deficit={StrategicHpDeficit(root, posterior)} " +
-                    $"selected={ReferenceEquals(selected, posterior)}");
-
-                if (posterior.Snapshot.AllEnemiesDead && !posterior.Snapshot.PlayerDead)
-                    continue;
-                PlanAction[] pairPrefix = [enabler, potion];
-                PlanAction? defensiveFollowUp = new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: 1)
-                    .BuildOpeningDefensiveFollowUp(pairPrefix);
-                if (defensiveFollowUp == null)
-                    continue;
-
-                SolverResult? defensivePosterior = SolveOptionalPotionPosterior(
-                    new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: 1,
-                        fixedPrefixActions: [enabler, potion, defensiveFollowUp]),
-                    policy,
-                    $"SMART_POTION_ENABLER_DEFENSIVE_POSTERIOR card={enabler.CardId} " +
-                    $"potion={potion.PotionId} follow_up={defensiveFollowUp.CardId}");
-                if (defensivePosterior == null)
-                    continue;
-                bool defensiveDeepTriggered = shortCheckpointMilliseconds is { } defensiveCheckpoint
-                    && defensivePosterior.Elapsed.TotalMilliseconds > defensiveCheckpoint;
-                defensivePosterior.SearchPhase = defensiveDeepTriggered
-                    ? SolverSearchPhase.Deep
-                    : SolverSearchPhase.Short;
-                defensivePosterior.DeepSearchTriggered = defensiveDeepTriggered;
-                defensivePosterior.DeepSearchImprovedResult = false;
-                defensivePosterior.SingleSessionSearch = true;
-                PopulateSingleSessionTotals(
-                    defensivePosterior,
-                    shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                    defensiveDeepTriggered);
-                searches.Add(defensivePosterior);
-
-                if (IsBetterCompletedResult(root, defensivePosterior, selected))
-                    selected = defensivePosterior;
-                policy.Diagnostics.Info(
-                    $"[CombatSolver/Test] SMART_POTION_ENABLER_DEFENSIVE_POSTERIOR " +
-                    $"card={enabler.CardId} potion={potion.PotionId} " +
-                    $"follow_up={defensiveFollowUp.CardId} " +
-                    $"won={defensivePosterior.Snapshot.AllEnemiesDead && !defensivePosterior.Snapshot.PlayerDead} " +
-                    $"hp_deficit={StrategicHpDeficit(root, defensivePosterior)} " +
-                    $"selected={ReferenceEquals(selected, defensivePosterior)}");
-
-                PlanAction? setupFollowUp = new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: 1)
-                    .BuildOpeningSetupFollowUp(pairPrefix);
-                if (setupFollowUp == null || setupFollowUp.Equals(defensiveFollowUp))
-                    continue;
-
-                SolverResult? setupPosterior = SolveOptionalPotionPosterior(
-                    new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: 1,
-                        fixedPrefixActions: [enabler, potion, setupFollowUp]),
-                    policy,
-                    $"SMART_POTION_ENABLER_SETUP_POSTERIOR card={enabler.CardId} " +
-                    $"potion={potion.PotionId} follow_up={setupFollowUp.CardId}");
-                if (setupPosterior == null)
-                    continue;
-                bool setupDeepTriggered = shortCheckpointMilliseconds is { } setupCheckpoint
-                    && setupPosterior.Elapsed.TotalMilliseconds > setupCheckpoint;
-                setupPosterior.SearchPhase = setupDeepTriggered
-                    ? SolverSearchPhase.Deep
-                    : SolverSearchPhase.Short;
-                setupPosterior.DeepSearchTriggered = setupDeepTriggered;
-                setupPosterior.DeepSearchImprovedResult = false;
-                setupPosterior.SingleSessionSearch = true;
-                PopulateSingleSessionTotals(
-                    setupPosterior,
-                    shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                    setupDeepTriggered);
-                searches.Add(setupPosterior);
-
-                if (IsBetterCompletedResult(root, setupPosterior, selected))
-                    selected = setupPosterior;
-                policy.Diagnostics.Info(
-                    $"[CombatSolver/Test] SMART_POTION_ENABLER_SETUP_POSTERIOR " +
-                    $"card={enabler.CardId} potion={potion.PotionId} " +
-                    $"follow_up={setupFollowUp.CardId} " +
-                    $"won={setupPosterior.Snapshot.AllEnemiesDead && !setupPosterior.Snapshot.PlayerDead} " +
-                    $"hp_deficit={StrategicHpDeficit(root, setupPosterior)} " +
-                    $"selected={ReferenceEquals(selected, setupPosterior)}");
-
-                if (setupPosterior.Snapshot.AllEnemiesDead && !setupPosterior.Snapshot.PlayerDead)
-                    continue;
-                PlanAction[] setupPrefix = [enabler, potion, setupFollowUp];
-                IReadOnlyList<PlanAction> offensiveFollowUps = new CombatBeamSolver(
-                        root,
-                        displayNames,
-                        battleDamage,
-                        policy,
-                        cancellationToken,
-                        progressCallback,
-                        profile,
-                        shortCheckpointMilliseconds,
-                        SolverPotionPolicy.RequireAtLeastOne,
-                        baseline,
-                        maximumPotionUses: 1)
-                    .BuildOpeningOffensiveFollowUps(setupPrefix);
-                foreach (PlanAction offensiveFollowUp in offensiveFollowUps)
-                {
-                    SolverResult? focusedPosterior = SolveOptionalPotionPosterior(
-                        new CombatBeamSolver(
-                            root,
-                            displayNames,
-                            battleDamage,
-                            policy,
-                            cancellationToken,
-                            progressCallback,
-                            profile,
-                            shortCheckpointMilliseconds,
-                            SolverPotionPolicy.RequireAtLeastOne,
-                            baseline,
-                            maximumPotionUses: 1,
-                            fixedPrefixActions: [enabler, potion, setupFollowUp, offensiveFollowUp]),
-                        policy,
-                        $"SMART_POTION_ENABLER_FOCUS_POSTERIOR card={enabler.CardId} " +
-                        $"potion={potion.PotionId} setup={setupFollowUp.CardId} " +
-                        $"attack={offensiveFollowUp.CardId}");
-                    if (focusedPosterior == null)
-                        continue;
-                    bool focusedDeepTriggered = shortCheckpointMilliseconds is { } focusedCheckpoint
-                        && focusedPosterior.Elapsed.TotalMilliseconds > focusedCheckpoint;
-                    focusedPosterior.SearchPhase = focusedDeepTriggered
-                        ? SolverSearchPhase.Deep
-                        : SolverSearchPhase.Short;
-                    focusedPosterior.DeepSearchTriggered = focusedDeepTriggered;
-                    focusedPosterior.DeepSearchImprovedResult = false;
-                    focusedPosterior.SingleSessionSearch = true;
-                    PopulateSingleSessionTotals(
-                        focusedPosterior,
-                        shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                        focusedDeepTriggered);
-                    searches.Add(focusedPosterior);
-
-                    if (IsBetterCompletedResult(root, focusedPosterior, selected))
-                        selected = focusedPosterior;
-                    policy.Diagnostics.Info(
-                        $"[CombatSolver/Test] SMART_POTION_ENABLER_FOCUS_POSTERIOR " +
-                        $"card={enabler.CardId} potion={potion.PotionId} setup={setupFollowUp.CardId} " +
-                        $"attack={offensiveFollowUp.CardId} " +
-                        $"target={offensiveFollowUp.TargetCombatId?.ToString() ?? "-"} " +
-                        $"won={focusedPosterior.Snapshot.AllEnemiesDead && !focusedPosterior.Snapshot.PlayerDead} " +
-                        $"hp_deficit={StrategicHpDeficit(root, focusedPosterior)} " +
-                        $"selected={ReferenceEquals(selected, focusedPosterior)}");
-                    if (focusedPosterior.Snapshot.AllEnemiesDead && !focusedPosterior.Snapshot.PlayerDead)
-                        break;
-                }
-            }
-        }
-
-        bool selectedPotion = selected.PotionCount > 0;
-        MergeAuditTotals(selected, [.. searches]);
-        policy.Diagnostics.Info(
-            $"[CombatSolver/Test] SMART_POTION_INTERVENTION result " +
-            $"selected={(selectedPotion ? "potion_route" : "potion_free")}");
-        return selected;
+            $"[CombatSolver/Test] SMART_POTION_GRADIENT result " +
+            $"stop=no_acceptable_potion maximum={maximumPotionUses} selected=potion_free");
+        return potionFree;
     }
 
     private static bool IsBetterCompletedResult(
@@ -1882,36 +1149,6 @@ internal static class CombatSearchCoordinator
         }
     }
 
-    private static PlanAction[] PrefixThroughFirstPotion(SolverResult result)
-    {
-        IReadOnlyList<PlanAction> actions = result.BestNode.Actions;
-        for (int index = 0; index < actions.Count; index++)
-        {
-            PlanAction action = actions[index];
-            if (action.Turn != result.StartTurnNumber
-                || action.Kind == PlanActionKind.EndTurn
-                || action.EndsPlayerTurn)
-            {
-                return [];
-            }
-            if (action.Kind == PlanActionKind.UsePotion)
-                return actions.Take(index + 1).ToArray();
-        }
-        return [];
-    }
-
-    private static int CorrectedPotionHpSaved(
-        CombatRootSnapshot root,
-        SolverResult potionRoute,
-        SolverResult potionFree)
-        => potionRoute.BestNode.Actions.Any(action =>
-                action.Kind == PlanActionKind.UsePotion
-                && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal))
-            ? Math.Max(0, potionRoute.Snapshot.PlayerHp - potionFree.Snapshot.PlayerHp)
-            : Math.Max(
-                0,
-                StrategicHpDeficit(root, potionFree) - StrategicHpDeficit(root, potionRoute));
-
     private static int SmartPotionHpRequired(CombatRootSnapshot root, SolverResult result)
     {
         int ambergrisCount = result.BestNode.Actions.Count(action =>
@@ -1927,6 +1164,28 @@ internal static class CombatSearchCoordinator
     private static int StrategicHpDeficit(CombatRootSnapshot root, SolverResult result)
         => result.Snapshot.CumulativePlayerHpLost
             + Math.Max(0, root.InitialPlayerMaxHp - result.Snapshot.PlayerMaxHp);
+
+    internal static bool CanAnySmartPotionQualify(
+        CombatRootSnapshot root,
+        SearchPolicySnapshot policy,
+        bool potionFreeWon,
+        int potionFreeHpDeficit)
+        => MaximumSmartPotionUses(root, policy, potionFreeWon, potionFreeHpDeficit) > 0;
+
+    internal static int MaximumSmartPotionUses(
+        CombatRootSnapshot root,
+        SearchPolicySnapshot policy,
+        bool potionFreeWon,
+        int potionFreeHpDeficit)
+    {
+        if (!potionFreeWon || policy.TheftPolicy == SolverTheftPolicy.PreserveResources)
+            return root.SearchablePotionCount;
+        int paidPotionCapacity = Math.Max(0, potionFreeHpDeficit)
+            / SolverWeights.PotionMinimumHpSaved;
+        return Math.Min(
+            root.SearchablePotionCount,
+            root.ZeroCostSearchablePotionCount + paidPotionCapacity);
+    }
 
     private static void MergeAuditTotals(
         SolverResult selected,

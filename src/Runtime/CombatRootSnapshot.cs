@@ -27,6 +27,8 @@ internal sealed class CombatRootSnapshot
     public int InitialPlayerMaxHp { get; }
     public int PotionSlotCount { get; }
     public int SearchablePotionCount { get; }
+    public int? MinimumSearchablePotionStrategicCost { get; }
+    public int ZeroCostSearchablePotionCount { get; }
     public ulong InitialAliveEnemyMask { get; }
     public CombatSide CurrentSide { get; }
     public PlayerTurnPhase PlayerPhase { get; }
@@ -55,6 +57,8 @@ internal sealed class CombatRootSnapshot
         int initialPlayerMaxHp,
         int potionSlotCount,
         int searchablePotionCount,
+        int? minimumSearchablePotionStrategicCost,
+        int zeroCostSearchablePotionCount,
         ulong initialAliveEnemyMask,
         CombatSide currentSide,
         PlayerTurnPhase playerPhase,
@@ -82,6 +86,8 @@ internal sealed class CombatRootSnapshot
         InitialPlayerMaxHp = initialPlayerMaxHp;
         PotionSlotCount = potionSlotCount;
         SearchablePotionCount = searchablePotionCount;
+        MinimumSearchablePotionStrategicCost = minimumSearchablePotionStrategicCost;
+        ZeroCostSearchablePotionCount = zeroCostSearchablePotionCount;
         InitialAliveEnemyMask = initialAliveEnemyMask;
         CurrentSide = currentSide;
         PlayerPhase = playerPhase;
@@ -140,6 +146,17 @@ internal sealed class CombatRootSnapshot
         bool hasRenewablePotionShapedRock = simulatedCombat.RelicsOf(player)
             .OfType<PetrifiedToad>()
             .Any(relic => !relic.IsMelted);
+        PotionModel[] searchablePotions = player.PotionSlots
+            .Where(potion => potion != null && PotionOnUseSupport.CanSearch(potion))
+            .Cast<PotionModel>()
+            .ToArray();
+        int? minimumSearchablePotionStrategicCost = searchablePotions.Length == 0
+            ? null
+            : searchablePotions.Min(potion => PotionUsePolicy.StrategicHpCost(
+                potion,
+                hasRenewablePotionShapedRock));
+        int zeroCostSearchablePotionCount = searchablePotions.Count(potion =>
+            PotionUsePolicy.StrategicHpCost(potion, hasRenewablePotionShapedRock) == 0);
         if (!string.Equals(
                 continuationBefore.StateText,
                 projected.StateText,
@@ -185,7 +202,9 @@ internal sealed class CombatRootSnapshot
             player.Creature.CurrentHp,
             player.Creature.MaxHp,
             player.PotionSlots.Count,
-            player.PotionSlots.Count(potion => potion != null && PotionOnUseSupport.CanSearch(potion)),
+            searchablePotions.Length,
+            minimumSearchablePotionStrategicCost,
+            zeroCostSearchablePotionCount,
             aliveEnemyMask,
             state.CurrentSide,
             playerState.Phase,

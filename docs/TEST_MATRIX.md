@@ -1,19 +1,21 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.24.4`（开发中；当前创意工坊稳定版为 `0.24.3`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.25.0`（准备发布；当前创意工坊稳定版为 `0.24.3`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
 
-## 0.24.4（开发中）
+## 0.25.0（准备发布）
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
 | `POTION-PERSISTENCE-BOUNDED-AUDIT-0244` | 通过（headless 设置、搜索与控制器生命周期） | 强制/保护策略按槽位 + 药水 ID 完成 JSON 往返，同槽新药仍为 Smart，恢复 Smart 后不保留覆盖项；Smart 主搜索和药水后验共享 `1.2 s` 请求预算，累计耗时与进度不倒退。runId `0911df45b8b34a04b761d9239f530e9f`。 | 2026-09-01 |
 | `PR25-RUNTIME-GC-INTEGRATION-0244` | 贡献者实测通过；本地集成门禁通过 | 默认关闭求解器 No-GC、补账回收与显式自动收集，保留玩家“手动 GC”入口。贡献者报告实机可行且内存占用下降；本轮不重复性能基准。合并态编译与结构门禁通过，药水/控制器夹具 runId `ffe6bad16592496ea1b02fbc6715930a`。 | 2026-09-01 |
 | `POTION-SLIM-SIDEBAR-ANCHOR-0244` | 通过（headless UI 结构与生命周期） | 药水策略为约 `184 px` 单列窄侧栏；展开侧栏时标题栏预留同宽区域，药水策略、设置和收起按钮仍锚定在主面板右缘。runId `7c0d24e7f3b9448da0e596651d853e15`。 | 2026-09-01 |
-| `POTION-SEARCH-MULTI-PHASE-LABELS-0244` | 通过（headless UI 文案与搜索阶段） | 战损提示包含完整说明和点击跳转提示；药水补查阶段覆盖无药、单药、双药和三药固定前缀，并在世界线统计区显示全部官方药水名。runId `6f3316dc1e884821b14682bc000ef4e0`。 | 2026-09-01 |
+| `POTION-SEARCH-MULTI-PHASE-LABELS-0244` | 通过（headless UI 文案与搜索阶段） | 战损提示包含完整说明和点击跳转提示；搜索阶段覆盖无药、恰好 `N` 瓶的智能梯度，以及固定政策的单药、双药和三药药名。runId `6f3316dc1e884821b14682bc000ef4e0`。 | 2026-09-01 |
+| `SMART-POTION-GRADIENT-EXACT-0244` | 通过（headless 搜索结构与阈值） | Smart 以无药为唯一基线，普通药按 `9/18/27 HP` 开放恰好 `1/2/3` 瓶额度，同层药水共同竞争并在第一条合格梯度停止。runId `406220b4b3b7482a97ebef4a16a330e9`。 | 2026-09-01 |
+| `SMART-POTION-LETHAL-GRADIENT-0244` | 通过（headless 完整自动战斗） | 无药路线死亡时进入恰好一瓶梯度，实际使用格挡药并以零战损生还，计划外重算 `0`。runId `aa7e15b86b3a412c9c8abdea72d6b375`。 | 2026-09-01 |
 
 ## 0.24.3（已发布）
 

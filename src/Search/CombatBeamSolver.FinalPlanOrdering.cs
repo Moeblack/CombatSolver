@@ -10,6 +10,7 @@ internal sealed partial class CombatBeamSolver
         SolverTheftPolicy? theftPolicy,
         PotionFreePolicyBaseline? potionFreePolicyBaseline,
         int initialPlayerMaxHp,
+        int minimumPotionUses,
         SearchDiagnosticsSink diagnostics,
         bool detailedDiagnostics,
         BattleDamageSnapshot battleDamage)
@@ -159,6 +160,7 @@ internal sealed partial class CombatBeamSolver
             var selected = policyCandidates
                 .Where(candidate =>
                     candidate.ForcedUsesSatisfied
+                    && candidate.PotionCount >= minimumPotionUses
                     && (PotionUsePolicy.IsEligible(
                          candidate.EffectivePotionPolicy,
                          candidate.OptionalPotionCount,
@@ -207,6 +209,7 @@ internal sealed partial class CombatBeamSolver
             int potionBranchesRejected = policyCandidates.Count(candidate =>
                 candidate.PotionCount > 0
                 && (!candidate.ForcedUsesSatisfied
+                    || candidate.PotionCount < minimumPotionUses
                     || !(PotionUsePolicy.IsEligible(
                           candidate.EffectivePotionPolicy,
                           candidate.OptionalPotionCount,

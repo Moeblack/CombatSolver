@@ -50,7 +50,7 @@ Entry / turn hooks
 - `SearchPolicySnapshot.cs`：主线程捕获的不可变搜索设置和逐槽药水策略；后台不读取 UI 或玩家设置。
 - `SearchDiagnosticsSink.cs`：搜索日志出口。
 - `SearchFramePressureSignal.cs`：Runtime 向 worker 提供的帧压力信号。
-- `CombatSearchCoordinator.cs`：一次请求的主搜索，以及 Disabled/Smart/RequireAtLeastOne 所需的无药或限药反事实审计；所有子搜索共享请求级时间余量，并合并总指标。
+- `CombatSearchCoordinator.cs`：一次请求的搜索编排；Smart 从无药基线按恰好 `N` 瓶逐层搜索，同层药水共同竞争并在首个合格层停止；Disabled/RequireAtLeastOne 保持各自政策。所有层共享请求级时间余量并合并总指标。
 - `CombatPlan.cs`：Runtime 消费的计划、结果和续用数据。结果不得保留历史 Simulator 对象图。
 
 ### 3.2 CombatBeamSolver 分片

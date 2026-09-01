@@ -28,6 +28,14 @@ internal sealed partial class CombatBeamSolver
     {
         using IDisposable notificationIsolation = SimulationNotificationIsolation.Enter();
         cancellationToken.ThrowIfCancellationRequested();
+        if (_minimumPotionUses < 0
+            || _maximumPotionUses is { } maximumPotionUses
+                && _minimumPotionUses > maximumPotionUses)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(_minimumPotionUses),
+                "最少用药数必须非负且不能超过最多用药数。");
+        }
         if (root.PlayerCount != 1)
             throw new NotSupportedException("第一版只支持单人战斗。");
         if (root.Enemies.Count > 64)

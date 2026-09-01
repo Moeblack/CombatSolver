@@ -583,28 +583,71 @@ internal sealed partial class UnattendedTestRunner
             PotionSlot: potion.Slot,
             PotionId: potion.Potion.Id.Entry);
         string potionName = displayNames.Potion(potion.Potion.Id.Entry);
+        int expectedMinimumPotionCost = PotionUsePolicy.StrategicHpCost(
+            potion.Potion,
+            root.HasRenewablePotionShapedRock);
+        if (root.MinimumSearchablePotionStrategicCost != expectedMinimumPotionCost
+            || CombatSearchCoordinator.CanAnySmartPotionQualify(
+                root,
+                policy,
+                potionFreeWon: true,
+                potionFreeHpDeficit: Math.Max(0, expectedMinimumPotionCost - 1))
+            || !CombatSearchCoordinator.CanAnySmartPotionQualify(
+                root,
+                policy,
+                potionFreeWon: true,
+                potionFreeHpDeficit: expectedMinimumPotionCost))
+        {
+            throw new InvalidOperationException("Smart 药水补查没有按最大可能省血收束。");
+        }
+        if (root.ZeroCostSearchablePotionCount == 0 && root.SearchablePotionCount >= 3
+            && (CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 8) != 0
+                || CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 9) != 1
+                || CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 17) != 1
+                || CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 18) != 2
+                || CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 26) != 2
+                || CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 27) != 3))
+        {
+            throw new InvalidOperationException("Smart 药水补查没有按每瓶 9 HP 限制多药层数。");
+        }
         if (CombatBeamSolver.DescribePotionProgressPhase(
                 displayNames,
                 SolverPotionPolicy.Disabled,
                 maximumPotionUses: 0,
+                minimumPotionUses: 0,
                 fixedPrefixActions: null) != "正在搜索无药路线"
             || CombatBeamSolver.DescribePotionProgressPhase(
                 displayNames,
                 SolverPotionPolicy.RequireAtLeastOne,
                 maximumPotionUses: 1,
+                minimumPotionUses: 1,
                 fixedPrefixActions: [potionAction]) != $"正在搜索使用 {potionName} 路线"
             || CombatBeamSolver.DescribePotionProgressPhase(
                 displayNames,
                 SolverPotionPolicy.RequireAtLeastOne,
                 maximumPotionUses: 2,
+                minimumPotionUses: 2,
                 fixedPrefixActions: [potionAction, potionAction])
                 != $"正在搜索使用 {potionName} 和 {potionName} 路线"
             || CombatBeamSolver.DescribePotionProgressPhase(
                 displayNames,
                 SolverPotionPolicy.RequireAtLeastOne,
                 maximumPotionUses: 3,
+                minimumPotionUses: 3,
                 fixedPrefixActions: [potionAction, potionAction, potionAction])
-                != $"正在搜索使用 {potionName}、{potionName} 和 {potionName} 路线")
+                != $"正在搜索使用 {potionName}、{potionName} 和 {potionName} 路线"
+            || CombatBeamSolver.DescribePotionProgressPhase(
+                displayNames,
+                SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: 2,
+                minimumPotionUses: 2,
+                fixedPrefixActions: null) != "正在搜索恰好 2 瓶药路线")
         {
             throw new InvalidOperationException("药水补查没有生成无药与任意多药阶段文案。");
         }
