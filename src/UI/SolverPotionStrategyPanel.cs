@@ -10,7 +10,8 @@ namespace CombatSolver;
 
 internal sealed partial class SolverPotionStrategyPanel : PanelContainer
 {
-    private const float CardMinimumWidth = 136f;
+    internal const float PreferredWidth = 184f;
+    private const float CardMinimumWidth = 152f;
     private readonly GridContainer _cards;
     private string? _renderedSignature;
 
@@ -19,7 +20,7 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         Name = "PotionStrategyPanel";
         Visible = false;
         MouseFilter = MouseFilterEnum.Stop;
-        CustomMinimumSize = new Vector2(300, 0);
+        CustomMinimumSize = new Vector2(PreferredWidth, 0);
         SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
         SizeFlagsVertical = SizeFlags.ExpandFill;
         AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
@@ -46,7 +47,7 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         _cards = new GridContainer
         {
             Name = "PotionCards",
-            Columns = 2,
+            Columns = 1,
             MouseFilter = MouseFilterEnum.Pass,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
@@ -73,6 +74,8 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
     internal int RowCountForTesting { get; private set; }
     internal bool RowsUseIconAndTextForTesting { get; private set; }
     internal bool UsesGridCardsForTesting { get; private set; }
+    internal bool IsSlimForTesting
+        => CustomMinimumSize.X == PreferredWidth && _cards.Columns == 1;
 
     public void Refresh(CombatState? state, bool controlsDisabled)
     {
@@ -143,7 +146,7 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         PanelContainer card = new()
         {
             Name = $"PotionStrategyCard{slot}",
-            CustomMinimumSize = new Vector2(CardMinimumWidth, 154),
+            CustomMinimumSize = new Vector2(CardMinimumWidth, 170),
             MouseFilter = MouseFilterEnum.Pass,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
@@ -213,14 +216,7 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
     }
 
     private void UpdateGridColumns()
-    {
-        float availableWidth = Math.Max(CustomMinimumSize.X, Size.X)
-            - SolverUiTokens.Spacing.Sm * 2f;
-        _cards.Columns = Math.Clamp(
-            (int)Math.Floor(availableWidth / (CardMinimumWidth + SolverUiTokens.Spacing.Sm)),
-            1,
-            4);
-    }
+        => _cards.Columns = 1;
 
     private static OptionButton CreateDirectiveInput()
     {

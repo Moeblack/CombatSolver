@@ -50,6 +50,7 @@ internal static class SolverOverlay
     private static Button? _settingsButton;
     private static Button? _potionStrategyButton;
     private static Button? _performanceHintButton;
+    private static Control? _headerPotionSpacer;
     private static SolverPotionStrategyPanel? _potionStrategyPanel;
     private static PanelContainer? _feedbackBanner;
     private static Label? _feedbackBannerLabel;
@@ -114,6 +115,7 @@ internal static class SolverOverlay
                 RowCountForTesting: > 0,
                 RowsUseIconAndTextForTesting: true,
                 UsesGridCardsForTesting: true,
+                IsSlimForTesting: true,
             };
     internal static bool PerformanceHintVisibleForTesting => _performanceHintButton?.Visible == true;
     internal static string? ReviewSummaryTextForTesting => _reviewText?.Text;
@@ -137,7 +139,9 @@ internal static class SolverOverlay
         bool original = _potionStrategyVisible;
         if (!original)
             TogglePotionStrategy();
-        bool opened = _potionStrategyVisible && _potionStrategyPanel.Visible;
+        bool opened = _potionStrategyVisible
+            && _potionStrategyPanel.Visible
+            && _headerPotionSpacer?.Visible == true;
         if (!original)
             TogglePotionStrategy();
         return opened && _potionStrategyVisible == original;
@@ -966,6 +970,14 @@ internal static class SolverOverlay
             _collapseButton.AddThemeColorOverride("font_pressed_color", Danger);
         }
         header.AddChild(_collapseButton);
+
+        _headerPotionSpacer = new Control
+        {
+            Name = "PotionHeaderAnchorSpacer",
+            Visible = false,
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
+        header.AddChild(_headerPotionSpacer);
         return header;
     }
 
@@ -1474,6 +1486,18 @@ internal static class SolverOverlay
             _settingsPanel.Visible = !_collapsed && _settingsVisible;
         if (_potionStrategyPanel != null)
             _potionStrategyPanel.Visible = !_collapsed && !_settingsVisible && _potionStrategyVisible;
+        if (_headerPotionSpacer != null)
+        {
+            bool reservePotionSidebar = !_collapsed && !_settingsVisible && _potionStrategyVisible;
+            _headerPotionSpacer.Visible = reservePotionSidebar;
+            _headerPotionSpacer.CustomMinimumSize = reservePotionSidebar
+                ? new Vector2(
+                    SolverPotionStrategyPanel.PreferredWidth
+                    + SolverUiTokens.Spacing.Md
+                    - SolverUiTokens.Spacing.Sm,
+                    0)
+                : Vector2.Zero;
+        }
         if (_settingsButton != null)
         {
             _settingsButton.Text = _settingsVisible ? "返回" : "设置";
@@ -1505,13 +1529,15 @@ internal static class SolverOverlay
         Vector2 viewportSize = _viewport.GetVisibleRect().Size;
         float availableWidth = Math.Max(360f, viewportSize.X - SolverUiTokens.Size.PanelMargin * 2f);
         float availableHeight = Math.Max(SolverUiTokens.Size.CollapsedHeight, viewportSize.Y - SolverUiTokens.Size.PanelMargin * 2f);
-        float expandedMaximumWidth = _potionStrategyVisible ? 1140f : SolverUiTokens.Size.ExpandedMaxWidth;
-        float expandedMinimumWidth = _potionStrategyVisible ? 900f : SolverUiTokens.Size.ExpandedMinWidth;
+        float primaryWidth = Math.Min(
+            SolverUiTokens.Size.ExpandedMaxWidth,
+            Math.Max(SolverUiTokens.Size.ExpandedMinWidth, viewportSize.X * 0.58f));
+        float potionSidebarWidth = _potionStrategyVisible
+            ? SolverPotionStrategyPanel.PreferredWidth + SolverUiTokens.Spacing.Md
+            : 0f;
         float width = _collapsed
             ? Math.Min(SolverUiTokens.Size.CollapsedWidth, availableWidth)
-            : Math.Min(
-                expandedMaximumWidth,
-                Math.Max(expandedMinimumWidth, viewportSize.X * (_potionStrategyVisible ? 0.76f : 0.58f)));
+            : primaryWidth + potionSidebarWidth;
         width = Math.Min(width, availableWidth);
         float desiredHeight = _collapsed
             ? SolverUiTokens.Size.CollapsedHeight
