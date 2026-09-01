@@ -1298,7 +1298,10 @@ internal static class CombatSearchCoordinator
         int correctedSaved = CorrectedPotionHpSaved(root, selected, potionFree);
         bool potionProtectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
             && selected.OutstandingStolenResource < potionFree.OutstandingStolenResource;
-        if (!potionProtectsMoreLoot && potionFreeWon && correctedSaved < selected.PotionHpRequired)
+        bool potionImprovesHp = StrategicHpDeficit(root, selected) < StrategicHpDeficit(root, potionFree);
+        if (!potionProtectsMoreLoot
+            && potionFreeWon
+            && (!potionImprovesHp || correctedSaved < selected.PotionHpRequired))
         {
             selected = potionFree;
         }
