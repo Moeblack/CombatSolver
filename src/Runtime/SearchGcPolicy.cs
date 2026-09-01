@@ -1238,7 +1238,7 @@ internal static class SearchGcPolicy
         Entry.Logger.Info(
             $"[CombatSolver/Test] MANUAL_GC forced_gen2=" +
             $"{GC.CollectionCount(GC.MaxGeneration)} " +
-            $"managed_live_bytes={GC.GetTotalMemory(forceFullCollection: true)}");
+            $"managed_live_bytes={GC.GetTotalMemory(forceFullCollection: false)}");
     }
 
     private sealed class SearchScope(

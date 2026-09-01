@@ -31,7 +31,7 @@ Entry / turn hooks
 | `src/Runtime/BaseLibCloneConcurrencyPatch.cs` | BaseLib 克隆扩展存在时，让原版 `MutableClone` 与内嵌模拟的模型深克隆共用窄串行边界，保护其全局弱表 | 整段搜索串行化、BaseLib 业务语义与候选政策 |
 | `src/Runtime/PowerDynamicVarWarmup.cs` | 主线程根捕获时物化规范 Power 与当前战斗 Power 的显示变量 | 搜索评分、Power 语义与 worker 本地化 |
 | `src/Runtime/PowerDynamicVarMaterializationGuardPatch.cs` | 搜索模拟惰性创建 Power 显示变量时立即报告根捕获缺失 | Power 语义、显示内容与搜索阶段串行化 |
-| `src/Runtime/SearchGcPolicy.cs` | 战斗级 No-GC、搜索内后台全代回收续搜、战斗结束后台回收、新搜索入口协调，以及“引用已释放/Gen2 已开始标记”的代际覆盖关系 | Beam 剪枝、候选评分与模拟语义 |
+| `src/Runtime/SearchGcPolicy.cs` | 默认交由 CLR 分代 GC；保留旧自动 GC 生命周期的关闭实现与兼容入口，并提供玩家显式触发的手动全代回收 | Beam 剪枝、候选评分与模拟语义 |
 | `src/Runtime/SearchMemoryPressureSignal.cs` | 将 Runtime 的进程分配边界和回收入口注入搜索；不让 Search 直接操作 GC 模式 | 设置读取与搜索评分 |
 | `src/Runtime/SolverSettings.cs` | 持久化性能、执行、搜索并行度、逐槽药水策略和搜索结束通知设置，并在主线程捕获不可变搜索 snapshot | 搜索期读取全局设置 |
 | `src/Runtime/PlayerTurnSetupPatches.cs` | 首回合原生页面出现后的 Start 根搜索；后续回合观察上一轮 `EndTurn.TurnStartChoices` 的原生页面，全自动直接可见重放，单步默认交还玩家并允许执行/全自动入口接管既有选择；进入 Play 后交给 continuation 核对；跨 Reset 的 Setup/部署延迟由 lifecycle token 取消 | 普通 Play 阶段搜索与动作部署 |
