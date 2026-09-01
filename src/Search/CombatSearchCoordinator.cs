@@ -10,8 +10,12 @@ internal static class CombatSearchCoordinator
         BattleDamageSnapshot battleDamage,
         SearchPolicySnapshot policy,
         CancellationToken cancellationToken,
-        Action<SolverProgress>? progressCallback)
+        Action<SolverProgress>? progressCallback,
+        Action<SolverResult>? bestResultCallback = null)
     {
+        void PublishBest(SolverResult result)
+            => bestResultCallback?.Invoke(result.CreatePublicationSnapshot());
+
         SolverSearchProfile shortProfile = policy.ShortProfile;
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
             shortProfile = shortProfile with { SoftTimeBudgetMilliseconds = shortBudget };
@@ -45,8 +49,10 @@ internal static class CombatSearchCoordinator
                 policy,
                 cancellationToken,
                 progressCallback,
-                shortProfile).Solve();
+                shortProfile,
+                bestResultCallback: bestResultCallback).Solve();
             PopulateSingleSessionTotals(shortResult, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered: false);
+            PublishBest(shortResult);
             if (!policy.PotionStrategy.HasForcedDirectives)
             {
                 shortResult = AuditRequiredPotionUse(
@@ -59,6 +65,7 @@ internal static class CombatSearchCoordinator
                     shortProfile,
                     shortCheckpointMilliseconds: null,
                     primary: shortResult);
+                PublishBest(shortResult);
                 shortResult = AuditSmartPotionUse(
                     root,
                     displayNames,
@@ -69,6 +76,7 @@ internal static class CombatSearchCoordinator
                     shortProfile,
                     shortCheckpointMilliseconds: null,
                     primary: shortResult);
+                PublishBest(shortResult);
                 shortResult = AuditOpeningPowerUse(
                     root,
                     displayNames,
@@ -79,6 +87,7 @@ internal static class CombatSearchCoordinator
                     shortProfile,
                     shortCheckpointMilliseconds: null,
                     primary: shortResult);
+                PublishBest(shortResult);
             }
             if (policy.MeasurePhasePerformance)
                 policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(shortResult));
@@ -106,7 +115,8 @@ internal static class CombatSearchCoordinator
             cancellationToken,
             progressCallback,
             deepProfile,
-            shortCheckpointMilliseconds: shortProfile.SoftTimeBudgetMilliseconds).Solve();
+            shortCheckpointMilliseconds: shortProfile.SoftTimeBudgetMilliseconds,
+            bestResultCallback: bestResultCallback).Solve();
         if (policy.MeasurePhasePerformance)
             policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(result));
         bool deepTriggered = result.Elapsed.TotalMilliseconds > shortProfile.SoftTimeBudgetMilliseconds;
@@ -115,6 +125,7 @@ internal static class CombatSearchCoordinator
         result.DeepSearchImprovedResult = false;
         result.SingleSessionSearch = true;
         PopulateSingleSessionTotals(result, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered);
+        PublishBest(result);
         if (!policy.PotionStrategy.HasForcedDirectives)
         {
             result = AuditRequiredPotionUse(
@@ -127,6 +138,7 @@ internal static class CombatSearchCoordinator
                 deepProfile,
                 shortProfile.SoftTimeBudgetMilliseconds,
                 result);
+            PublishBest(result);
             result = AuditSmartPotionUse(
                 root,
                 displayNames,
@@ -137,6 +149,7 @@ internal static class CombatSearchCoordinator
                 deepProfile,
                 shortProfile.SoftTimeBudgetMilliseconds,
                 result);
+            PublishBest(result);
             result = AuditOpeningPowerUse(
                 root,
                 displayNames,
@@ -147,6 +160,7 @@ internal static class CombatSearchCoordinator
                 deepProfile,
                 shortProfile.SoftTimeBudgetMilliseconds,
                 result);
+            PublishBest(result);
         }
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SEARCH_SESSION mode=single_anytime " +

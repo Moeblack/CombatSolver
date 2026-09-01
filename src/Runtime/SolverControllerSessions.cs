@@ -73,6 +73,10 @@ internal sealed class SolverSearchSession(
     public int MaxDegreeOfParallelism { get; set; } = 1;
     public SolverProgress? Progress;
     public SolverProgress? RenderedProgress { get; set; }
+    public SolverResult? BestResult;
+    public SolverResult? RenderedBestResult { get; set; }
+    public bool StopRequestedByUser { get; set; }
+    public SolverResult? StopResult { get; set; }
     public long LastProgressRenderAt { get; set; } = Environment.TickCount64;
     public int FrameCount { get; private set; }
     public int FramesOver33Milliseconds { get; private set; }

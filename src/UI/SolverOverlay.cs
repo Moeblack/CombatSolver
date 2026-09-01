@@ -66,6 +66,7 @@ internal static class SolverOverlay
     private static SolverButtonStyle? _renderedExecuteButtonStyle;
     private static SolverTheftPolicy? _renderedTheftPolicy;
     private static SolverOverlaySnapshot? _lastSnapshot;
+    private static SolverOverlaySnapshot? _searchBestSnapshot;
     private static string? _lastMessageText;
     private static int _lastSearchingTurn;
     private static bool _lastSearchDeployWhenReady;
@@ -187,6 +188,7 @@ internal static class SolverOverlay
     public static void ShowSearchStopped(Node host)
     {
         _lastSnapshot = null;
+        _searchBestSnapshot = null;
         _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;
@@ -202,7 +204,8 @@ internal static class SolverOverlay
     public static void ShowProgress(
         SolverProgress progress,
         bool deployWhenReady,
-        long reviewedWorldlinesBeforeSearch)
+        long reviewedWorldlinesBeforeSearch,
+        SolverOverlaySnapshot? bestSnapshot = null)
     {
         if (_layer == null || !GodotObject.IsInstanceValid(_layer) || !_layer.Visible)
             return;
@@ -210,6 +213,9 @@ internal static class SolverOverlay
         _lastSearchingTurn = progress.CurrentTurnNumber;
         _lastSearchDeployWhenReady = deployWhenReady;
         _lastReviewedWorldlinesBeforeSearch = reviewedWorldlinesBeforeSearch;
+        if (bestSnapshot != null)
+            _searchBestSnapshot = bestSnapshot;
+        SolverOverlaySnapshot? routeSnapshot = _searchBestSnapshot;
         SetStatus(
             "后台计算中",
             Accent,
@@ -218,7 +224,9 @@ internal static class SolverOverlay
                 : $"第 {progress.CurrentTurnNumber} 回合");
         if (_summaryText != null)
         {
-            _summaryText.Visible = false;
+            _summaryText.Visible = routeSnapshot != null;
+            if (routeSnapshot != null)
+                _summaryText.Text = SolverUiTokens.AdaptRichTextToActiveTheme(routeSnapshot.SummaryText);
         }
         if (_progressText != null)
         {
@@ -233,7 +241,47 @@ internal static class SolverOverlay
             _searchProgressBar.MaxValue = Math.Max(1, progress.MaxNodes);
             _searchProgressBar.Value = Math.Clamp(progress.ExpandedNodes, 0, progress.MaxNodes);
         }
+        if (routeSnapshot != null)
+            PopulateSearchRoute(routeSnapshot);
         RefreshControls();
+    }
+
+    private static void PopulateSearchRoute(SolverOverlaySnapshot snapshot)
+    {
+        SetRouteVisibility(true);
+        if (_potionOutcomeLabel != null)
+        {
+            _potionOutcomeLabel.Visible = snapshot.ProjectedBattlePotionCount > 0;
+            _potionOutcomeLabel.Text = $"预计用{snapshot.ProjectedBattlePotionCount}瓶药";
+        }
+        if (_hpOutcomeLabel != null)
+        {
+            _hpOutcomeLabel.Visible = true;
+            _hpOutcomeLabel.Text = snapshot.HpOutcomeText;
+            _hpOutcomeLabel.AddThemeColorOverride(
+                "font_color",
+                snapshot.ProjectedBattleHpLost > 0 ? Danger : Success);
+        }
+        if (_deathOutcomeLabel != null)
+            _deathOutcomeLabel.Visible = snapshot.OnlyDeathRoutesFound;
+        for (int index = 0; index < SolverWeights.UiTurnRows; index++)
+        {
+            SetRouteRowVisible(index, index < snapshot.Turns.Count);
+            if (index >= snapshot.Turns.Count)
+                continue;
+            SolverOverlayTurnSnapshot turn = snapshot.Turns[index];
+            RouteRows[index].TurnLabel.Text = $"第 {turn.Turn} 回合";
+            RouteRows[index].Populate(turn);
+            string outcome = turn.CombatEnded
+                ? "战斗结束"
+                : turn.HpLoss > 0
+                    ? $"-{turn.HpLoss} HP"
+                    : "0 HP";
+            RouteRows[index].SetOutcome(
+                outcome,
+                turn.CombatEnded ? Success : turn.HpLoss > 0 ? Danger : TextMuted,
+                $"余 {turn.EnergyLeft} 费");
+        }
     }
 
     public static void ShowSearching(
@@ -243,6 +291,7 @@ internal static class SolverOverlay
         long reviewedWorldlinesBeforeSearch)
     {
         _lastSnapshot = null;
+        _searchBestSnapshot = null;
         _lastMessageText = null;
         _lastSearchingTurn = turn;
         _lastSearchDeployWhenReady = deployWhenReady;
@@ -301,6 +350,7 @@ internal static class SolverOverlay
     public static void ShowResult(Node host, SolverOverlaySnapshot snapshot)
     {
         _lastSnapshot = snapshot;
+        _searchBestSnapshot = null;
         _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;

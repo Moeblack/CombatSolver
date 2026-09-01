@@ -33,7 +33,8 @@ internal sealed partial class CombatBeamSolver(
     SolverPotionPolicy? potionPolicyOverride = null,
     PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
     int? maximumPotionUses = null,
-    IReadOnlyList<PlanAction>? fixedPrefixActions = null)
+    IReadOnlyList<PlanAction>? fixedPrefixActions = null,
+    Action<SolverResult>? bestResultCallback = null)
 {
     private readonly SolverSearchProfile _profile = searchProfile ?? SolverSearchProfile.Short;
     private readonly SearchRunContext _run = new(

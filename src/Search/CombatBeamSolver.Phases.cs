@@ -56,6 +56,8 @@ internal sealed partial class CombatBeamSolver
         int gen2AtStart = GC.CollectionCount(2);
         TimeSpan gcPauseAtStart = GC.GetTotalPauseDuration();
         Stopwatch stopwatch = Stopwatch.StartNew();
+        int initialHp = root.InitialPlayerHp;
+        int sellThreshold = SoldHpThreshold();
         using ParallelExpansionExecutor? parallelExpansionExecutor = expansionParallelism > 1
             ? new ParallelExpansionExecutor(this, expansionParallelism)
             : null;
@@ -88,6 +90,55 @@ internal sealed partial class CombatBeamSolver
                 elapsedMs,
                 $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}"));
         }
+        long lastBestResultMs = -100;
+        void PublishBestResult(
+            IReadOnlyList<SearchNode> retained,
+            int searchedLayers,
+            bool budgetReached,
+            bool force = false)
+        {
+            if (bestResultCallback == null)
+                return;
+            long elapsedMs = stopwatch.ElapsedMilliseconds;
+            if (!force && elapsedMs - lastBestResultMs < 100)
+                return;
+            List<SearchNode> viable = retained
+                .Where(node => node.ActionCount > 0 && node.Snapshot.HasSimulator)
+                .DistinctBy(node => node.Snapshot)
+                .ToList();
+            if (viable.Count == 0)
+                return;
+            List<SearchNode> candidates = Retention.RankBest(viable, _profile.BeamWidth * 4);
+            List<(SearchNode Node, SimulationSnapshot Snapshot, RouteAnnotations Annotations)> evaluated = candidates
+                .Select(node => (Node: node, Snapshot: node.Snapshot, Annotations: BuildRouteAnnotations(node)))
+                .ToList();
+            FinalPlanSelection currentOrdering;
+            try
+            {
+                currentOrdering = FinalOrdering.Select(evaluated, initialHp, emitDiagnostics: false);
+            }
+            catch (PotionPolicyUnsatisfiedException)
+            {
+                return;
+            }
+            bool onlyDeathRoutesFound = evaluated.All(candidate =>
+                candidate.Snapshot.PlayerDead || candidate.Snapshot.ProjectedPlayerHp <= 0);
+            SolverResult current = MaterializeResult(
+                currentOrdering,
+                onlyDeathRoutesFound,
+                searchedLayers,
+                budgetReached,
+                stopwatch,
+                allocatedBytesAtStart,
+                gen0AtStart,
+                gen1AtStart,
+                gen2AtStart,
+                gcPauseAtStart,
+                sellThreshold);
+            lastBestResultMs = stopwatch.ElapsedMilliseconds;
+            bestResultCallback(current);
+        }
+
 
         PublishProgress(_startTurnNumber, 0, 0, 1, 0, "初始化", force: true);
         IReadOnlyList<(IReadOnlyList<PlanCardChoice> Choices, SimulationSnapshot Snapshot)> rootCandidates =
@@ -172,7 +223,6 @@ internal sealed partial class CombatBeamSolver
         double potionFreeBoundaryFallbackScore = double.NegativeInfinity;
         SearchNode? potionBoundaryFallback = null;
         double potionBoundaryFallbackScore = double.NegativeInfinity;
-        int initialHp = root.InitialPlayerHp;
         int searchedTurnLayers = 0;
         bool timeBudgetReached = false;
 
@@ -387,6 +437,10 @@ internal sealed partial class CombatBeamSolver
                 List<SearchNode> prunedPlays = Prune(nextPlays);
                 ReleaseDroppedSnapshots(nextPlays, prunedPlays);
                 active = prunedPlays;
+                PublishBestResult(
+                    [.. completed, .. active],
+                    searchedTurnLayers,
+                    timeBudgetReached);
                 if (_detailedDiagnostics && searchedTurnLayers == 0)
                 {
                     policy.Diagnostics.Info(
@@ -425,6 +479,11 @@ internal sealed partial class CombatBeamSolver
             List<SearchNode> retainedAfterRound = [.. completed, .. frontier];
             ReleaseDroppedSnapshots(ended, retainedAfterRound);
             searchedTurnLayers++;
+            PublishBestResult(
+                retainedAfterRound,
+                searchedTurnLayers,
+                timeBudgetReached,
+                force: true);
             if (_detailedDiagnostics)
             {
                 policy.Diagnostics.Info(
@@ -487,15 +546,43 @@ internal sealed partial class CombatBeamSolver
         bool onlyDeathRoutesFound = evaluated.All(candidate =>
             candidate.Snapshot.PlayerDead || candidate.Snapshot.ProjectedPlayerHp <= 0);
         _run.ReusedNodeSnapshots += evaluated.Count;
-        int sellThreshold = SoldHpThreshold();
         FinalPlanSelection ordering = FinalOrdering.Select(
             evaluated,
             initialHp,
             emitDiagnostics: true);
+        SolverResult result = MaterializeResult(
+            ordering,
+            onlyDeathRoutesFound,
+            searchedTurnLayers,
+            timeBudgetReached,
+            stopwatch,
+            allocatedBytesAtStart,
+            gen0AtStart,
+            gen1AtStart,
+            gen2AtStart,
+            gcPauseAtStart,
+            sellThreshold,
+            finalMeasurement);
+        foreach (SearchNode candidate in finalCandidates)
+            candidate.Snapshot.ReleaseSimulator();
+        return result;
+    }
+
+    private SolverResult MaterializeResult(
+        FinalPlanSelection ordering,
+        bool onlyDeathRoutesFound,
+        int searchedTurnLayers,
+        bool timeBudgetReached,
+        Stopwatch stopwatch,
+        long allocatedBytesAtStart,
+        int gen0AtStart,
+        int gen1AtStart,
+        int gen2AtStart,
+        TimeSpan gcPauseAtStart,
+        int sellThreshold,
+        SearchMeasurement? finalMeasurement = null)
+    {
         FinalPlanCandidate selectedCandidate = ordering.Candidate;
-        int potionBranchesRejected = ordering.PotionBranchesRejected;
-        int potionHpSaved = ordering.PotionHpSaved;
-        int potionHpRequired = ordering.PotionHpRequired;
         int annotatedFutureSold = selectedCandidate.Annotations.SoldHpByTurn.Values.Sum();
         if (annotatedFutureSold != selectedCandidate.FutureSold)
         {
@@ -503,7 +590,6 @@ internal sealed partial class CombatBeamSolver
                 $"卖血路径状态不一致：节点累计 {selectedCandidate.FutureSold}，逐回合累计 {annotatedFutureSold}。");
         }
         SearchNode best = selectedCandidate.Node with { Score = selectedCandidate.Score };
-
         SimulationSnapshot finalSnapshot = selectedCandidate.Snapshot;
         RouteAnnotations annotations = selectedCandidate.Annotations;
         IReadOnlyList<CachedContinuation> continuations = BuildContinuations(best);
@@ -573,8 +659,11 @@ internal sealed partial class CombatBeamSolver
                     .ToArray(),
             })
             .ToArray();
-        _run.Performance.End(SearchMetricPhase.FinalSelection, finalMeasurement);
-        stopwatch.Stop();
+        if (finalMeasurement is { } measurement)
+        {
+            _run.Performance.End(SearchMetricPhase.FinalSelection, measurement);
+            stopwatch.Stop();
+        }
         long workerAllocatedBytes =
             GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart
             + _run.OffThreadAllocatedBytes;
@@ -582,9 +671,8 @@ internal sealed partial class CombatBeamSolver
         int gen1Collections = GC.CollectionCount(1) - gen1AtStart;
         int gen2Collections = GC.CollectionCount(2) - gen2AtStart;
         TimeSpan gcPauseDuration = GC.GetTotalPauseDuration() - gcPauseAtStart;
-        // 必须在返回前把节点链和模拟器图压平成运行时真正需要的数据。
-        // Coordinator 会在深化期间保留短搜结果；这里若返回 SearchNode/SimulationSnapshot，
-        // 短搜的全部父链和每步模拟器都会成为长寿命 GC 根。
+        // Both final and live-best publications are flattened here. Nothing returned retains a
+        // SearchNode, SimulationSnapshot, or CombatPredictionSimulator from the pruning graph.
         SelectedSearchPlan selectedPlan = new(
             annotatedActions,
             best.ActionCount,
@@ -610,17 +698,29 @@ internal sealed partial class CombatBeamSolver
             finalSnapshot.ShufflesCrossed,
             finalSnapshot.BoundaryReason,
             finalSnapshot.PredictionGaps.ToArray());
-        foreach (SearchNode candidate in finalCandidates)
-            candidate.Snapshot.ReleaseSimulator();
+        bool deepTriggered = _shortCheckpointMilliseconds is { } shortCheckpoint
+            && stopwatch.ElapsedMilliseconds > shortCheckpoint;
+        double shortMilliseconds = deepTriggered
+            ? Math.Min(stopwatch.Elapsed.TotalMilliseconds, _shortCheckpointMilliseconds!.Value)
+            : stopwatch.Elapsed.TotalMilliseconds;
         return new SolverResult
         {
-            SearchPhase = _profile.Phase,
+            SearchPhase = deepTriggered ? SolverSearchPhase.Deep : SolverSearchPhase.Short,
+            DeepSearchTriggered = deepTriggered,
+            SingleSessionSearch = true,
+            ShortSearchElapsed = TimeSpan.FromMilliseconds(shortMilliseconds),
+            DeepSearchElapsed = stopwatch.Elapsed - TimeSpan.FromMilliseconds(shortMilliseconds),
             TotalSearchElapsed = stopwatch.Elapsed,
             TotalWorkerAllocatedBytes = workerAllocatedBytes,
+            ShortExpandedNodes = deepTriggered ? 0 : _run.Expanded,
+            DeepExpandedNodes = deepTriggered ? _run.Expanded : 0,
+            ShortTransitionCount = deepTriggered ? 0 : _run.TransitionCount,
+            DeepTransitionCount = deepTriggered ? _run.TransitionCount : 0,
             TotalGen0Collections = gen0Collections,
             TotalGen1Collections = gen1Collections,
             TotalGen2Collections = gen2Collections,
             TotalGcPauseDuration = gcPauseDuration,
+            TotalMaxObservedGcPause = _run.WorkPacer.MaxObservedGcPause,
             ForkMetric = _run.Performance.Snapshot(SearchMetricPhase.Fork),
             ActionMetric = _run.Performance.Snapshot(SearchMetricPhase.Action),
             CardExecutionMetric = _run.Performance.Snapshot(SearchMetricPhase.CardExecution),
@@ -692,9 +792,9 @@ internal sealed partial class CombatBeamSolver
             ProjectedBattleHpLost = battleDamage.HpLostSoFar + futureHpLost,
             BattlePotionsUsedSoFar = battleDamage.PotionsUsedSoFar,
             PotionCount = selectedCandidate.PotionCount,
-            PotionHpSaved = potionHpSaved,
-            PotionHpRequired = potionHpRequired,
-            PotionBranchesRejected = potionBranchesRejected,
+            PotionHpSaved = ordering.PotionHpSaved,
+            PotionHpRequired = ordering.PotionHpRequired,
+            PotionBranchesRejected = ordering.PotionBranchesRejected,
             TheftPolicy = _theftPolicy,
             OutstandingStolenResource = finalSnapshot.OutstandingStolenResource,
             SoldHpThreshold = sellThreshold,

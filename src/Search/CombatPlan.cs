@@ -476,6 +476,11 @@ internal sealed record CachedContinuation(
 
 internal sealed class SolverResult
 {
+    // Publication clones share only immutable arrays/read-only maps. Callers clone again before
+    // adding main-thread completion metrics so a worker-published instance is never mutated.
+    public SolverResult CreatePublicationSnapshot()
+        => (SolverResult)MemberwiseClone();
+
     public SolverSearchPhase SearchPhase { get; internal set; } = SolverSearchPhase.Short;
     public bool DeepSearchTriggered { get; internal set; }
     public bool DeepSearchImprovedResult { get; internal set; }

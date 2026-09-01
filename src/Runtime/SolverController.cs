@@ -68,7 +68,7 @@ internal static class SolverController
     private static CancellationTokenSource _combatDeferredOperationCancellation = new();
 
     public static bool IsSearching
-        => _search != null
+        => _search is { StopRequestedByUser: false }
            || _deferredSearchCts != null
            || PlayerTurnSetupCoordinator.IsSearching;
     public static bool IsDeploying => _deployment != null;
@@ -928,7 +928,8 @@ internal static class SolverController
                         battleDamage,
                         searchPolicy,
                         token,
-                        progress => PublishSearchProgress(search, progress));
+                        progress => PublishSearchProgress(search, progress),
+                        best => PublishSearchBest(search, best));
                 }
                 finally
                 {
@@ -1188,18 +1189,29 @@ internal static class SolverController
         if (!IsSearching)
             return;
 
-        bool controllerSearchCanceled = _search != null || _deferredSearchCts != null;
-        int? generation = _search?.Generation;
+        SolverSearchSession? search = _search;
+        bool controllerSearchCanceled = search != null || _deferredSearchCts != null;
+        int? generation = search?.Generation;
         _combat.FullAutoEnabled = false;
         _combat.AutomaticSearchPaused = true;
         CancelDeferredSearch();
-        CancelSearch();
+        if (search != null)
+        {
+            search.StopResult = Volatile.Read(ref search.BestResult);
+            search.StopRequestedByUser = true;
+            search.Cancellation.Cancel();
+        }
+        else
+        {
+            CancelSearch();
+        }
         bool stoppedTurnSetupSearch = PlayerTurnSetupCoordinator.StopSearchByUser();
         if (controllerSearchCanceled || stoppedTurnSetupSearch)
             SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
         _combat.PendingCompleteProjectionBaseline = null;
         _combat.PendingManualProjectionBaseline = null;
-        SolverOverlay.ShowSearchStopped(host);
+        if (search == null)
+            SolverOverlay.ShowSearchStopped(host);
         Entry.Logger.Info(
             $"[CombatSolver/Test] SEARCH_STOPPED_BY_USER generation={generation?.ToString() ?? "-"} " +
             $"turn_setup={stoppedTurnSetupSearch.ToString().ToLowerInvariant()} automatic_search_paused=true");
@@ -1550,20 +1562,31 @@ internal static class SolverController
     public static void RefreshSearchProgress()
     {
         AssertMainThread();
-        if (_search is not { } search)
+        if (_search is not { StopRequestedByUser: false } search)
             return;
         SolverProgress? progress = Volatile.Read(ref search.Progress);
-        if (progress == null || ReferenceEquals(progress, search.RenderedProgress))
+        SolverResult? best = Volatile.Read(ref search.BestResult);
+        if (progress == null
+            || ReferenceEquals(progress, search.RenderedProgress)
+                && ReferenceEquals(best, search.RenderedBestResult))
             return;
         long now = System.Environment.TickCount64;
         if (now - search.LastProgressRenderAt < SolverWeights.ProgressUiIntervalMilliseconds)
             return;
         search.LastProgressRenderAt = now;
+        SolverOverlaySnapshot? bestSnapshot = ReferenceEquals(best, search.RenderedBestResult) || best == null
+            ? null
+            : SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                best,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal + progress.ReviewedWorldlines);
         search.RenderedProgress = progress;
+        search.RenderedBestResult = best;
         SolverOverlay.ShowProgress(
             progress,
             search.DeployWhenReady,
-            _combat.ReviewedWorldlinesTotal);
+            _combat.ReviewedWorldlinesTotal,
+            bestSnapshot);
     }
 
     public static void ObserveMainThreadFrameGap(TimeSpan gap)
@@ -1590,6 +1613,12 @@ internal static class SolverController
     {
         if (ReferenceEquals(_search, search))
             Volatile.Write(ref search.Progress, progress);
+    }
+
+    private static void PublishSearchBest(SolverSearchSession search, SolverResult result)
+    {
+        if (ReferenceEquals(_search, search))
+            Volatile.Write(ref search.BestResult, result);
     }
 
     private static string DescribeReplanAudit()
@@ -1671,12 +1700,17 @@ internal static class SolverController
             $"p95_gap_ms={search.FramePercentile(0.95d):F1} p99_gap_ms={search.FramePercentile(0.99d):F1} " +
             $"max_gap_ms={search.MaxFrameGapMilliseconds:F1} over_33ms={search.FramesOver33Milliseconds} " +
             $"over_50ms={search.FramesOver50Milliseconds} over_100ms={search.FramesOver100Milliseconds}");
-
-        if (task.IsCanceled)
+        SolverResult? stoppedResult = search.StopRequestedByUser
+            ? search.StopResult
+            : null;
+        if (task.IsCanceled && stoppedResult == null)
         {
             _combat.PendingCompleteProjectionBaseline = null;
             _combat.PendingManualProjectionBaseline = null;
-            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
+            if (!search.StopRequestedByUser)
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
+            else
+                SolverOverlay.ShowSearchStopped(host);
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_CANCELED generation={generation}");
             return;
         }
@@ -1699,6 +1733,14 @@ internal static class SolverController
             Entry.Logger.Error($"[CombatSolver/Test] SEARCH_FAILURE generation={generation} exception={ex}");
             return;
         }
+        if (search.StopRequestedByUser && stoppedResult == null)
+        {
+            _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
+            SolverOverlay.ShowSearchStopped(host);
+            Entry.Logger.Info($"[CombatSolver/Test] SEARCH_STOPPED_WITHOUT_RESULT generation={generation}");
+            return;
+        }
 
         CombatState searchedState = search.State;
         LiveCombatStamp searchedStamp = search.Stamp;
@@ -1718,12 +1760,12 @@ internal static class SolverController
                 host,
                 "[b]战斗路线求解器[/b]\n战斗状态在计算期间发生变化，已丢弃过期结果。\n" +
                 SolverUiTokens.BugReportUploadInstructionRichText);
-            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale);
+            if (!search.StopRequestedByUser)
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Stale);
             Entry.Logger.Info($"[CombatSolver/Test] SEARCH_STALE generation={generation}");
             return;
         }
-
-        SolverResult result = task.Result;
+        SolverResult result = (stoppedResult ?? task.Result).CreatePublicationSnapshot();
         CompleteProjectionBaseline? recalculationBaseline = _combat.PendingCompleteProjectionBaseline;
         ManualProjectionBaseline? manualBaseline = _combat.PendingManualProjectionBaseline;
         _combat.PendingCompleteProjectionBaseline = null;
@@ -1765,27 +1807,32 @@ internal static class SolverController
         if (UnattendedTestRunner.IsActive)
             LastCompletedResultForTesting = result;
         _combat.ContinuationSource = result;
-        BattleDamageTracker.RegisterPlan(searchedState, result);
         CombatBugReportExporter.RecordCheckpoint(
             searchedState,
-            "search_completed",
+            search.StopRequestedByUser ? "search_stopped_best" : "search_completed",
             result,
             DescribeReplanAudit());
-        SolverOverlay.ShowResult(
-            host,
-            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-                result,
-                UnexpectedReplanCount > 0,
-                _combat.ReviewedWorldlinesTotal));
-        SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
-        Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
-        if (search.DeployWhenReady)
+        SolverOverlaySnapshot overlaySnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+            result,
+            UnexpectedReplanCount > 0,
+            _combat.ReviewedWorldlinesTotal);
+        if (search.StopRequestedByUser)
+            overlaySnapshot = overlaySnapshot with { StatusText = "计算已停止 · 当前最优" };
+        SolverOverlay.ShowResult(host, overlaySnapshot);
+        if (!search.StopRequestedByUser)
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
+        if (!search.StopRequestedByUser && search.DeployWhenReady)
         {
             StartDeployment(host, searchedState, result);
         }
-        else if (_combat.FullAutoEnabled)
+        else if (!search.StopRequestedByUser && _combat.FullAutoEnabled)
         {
             StartFullAutoDeployment(host, searchedState, result);
+        }
+        else if (search.StopRequestedByUser)
+        {
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] SEARCH_STOPPED_RESULT generation={generation} expanded={result.ExpandedNodes}");
         }
     }
 
