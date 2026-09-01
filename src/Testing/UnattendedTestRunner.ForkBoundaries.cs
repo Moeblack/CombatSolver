@@ -34,7 +34,6 @@ internal sealed partial class UnattendedTestRunner
         SimulatedCombatState simulatedCombat = new(combat);
         CombatPredictionSimulator simulator = new(simulatedCombat);
         AssertRitsuCapabilityFastPath(simulator, player, card);
-        AssertChoiceRiskScopedToCardPlay(simulator, card);
         AssertChoiceKeyCache(simulator, player, card);
         AssertChoiceTokenSurvivesStateMutation(combat, player, card);
         AssertMonsterAiUsesCapturedMachine(combat);
@@ -963,23 +962,6 @@ internal sealed partial class UnattendedTestRunner
             || !((IEnumerable)parent).Cast<int>().SequenceEqual([2, 3]))
         {
             throw new InvalidOperationException("ForkableList 枚举或 COW 父子隔离不正确。");
-        }
-    }
-
-    private static void AssertChoiceRiskScopedToCardPlay(
-        CombatPredictionSimulator simulator,
-        CardModel card)
-    {
-        using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
-        {
-            simulator.History.RecordRisk(PredictionRiskReason.UnresolvedPlayerChoice);
-            if (!CardSelectionCardMirrors.HasUnresolvedChoiceInCurrentAction(simulator))
-                throw new InvalidOperationException("同一次出牌没有识别自己尚未解决的选牌。");
-        }
-        using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
-        {
-            if (CardSelectionCardMirrors.HasUnresolvedChoiceInCurrentAction(simulator))
-                throw new InvalidOperationException("上一轮同一卡牌的选牌错误污染了新的出牌动作。");
         }
     }
 

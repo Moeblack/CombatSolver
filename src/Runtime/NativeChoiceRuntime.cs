@@ -19,6 +19,7 @@ using MegaCrit.Sts2.Core.Nodes.GodotExtensions;
 using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using STS2RitsuLib.Patching.Models;
+using CombatSolver.Engine.Common;
 
 namespace CombatSolver;
 
@@ -251,7 +252,8 @@ internal sealed class NativeChoiceSession : IDisposable
             $"[CombatSolver/Test] NATIVE_CHOICE_REQUEST owner={Owner} sequence={request.Sequence} " +
             $"surface={request.Surface} visible={request.RequiresSurface} source={request.SourceId} " +
             $"options={request.Options.Count} select={request.MinSelect}..{request.MaxSelect} " +
-            $"manual_confirmation={request.RequireManualConfirmation}");
+            $"manual_confirmation={request.RequireManualConfirmation} " +
+            $"card_selection_rng={request.Player.RunState.Rng.CombatCardSelection.Counter()}");
     }
 
     public async Task<bool> WaitForFirstVisibleSurfaceAsync(
@@ -469,7 +471,7 @@ internal sealed class NativeChoiceSession : IDisposable
             }
             Entry.Logger.Info(
                 $"[CombatSolver/Test] NATIVE_CHOICE_SELECTED owner={Owner} sequence={request.Sequence} " +
-                $"surface={request.Surface} source={plan.SourceId} " +
+                $"surface={request.Surface} source={plan.SourceId} context={plan.ContextId} " +
                 $"planned={string.Join(',', plan.Cards.Select(card =>
                     $"{card.CardId}+{card.UpgradeLevel}#src{card.SourceOccurrence}/opt{card.OptionOccurrence}"))} " +
                 $"selected={string.Join(',', selected.Select(CardChoiceSupport.ChoiceCardKey))}");

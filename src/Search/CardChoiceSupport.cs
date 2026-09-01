@@ -1,5 +1,6 @@
 using System.Text;
 using MegaCrit.Sts2.Core.Entities.Cards;
+using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
@@ -15,7 +16,8 @@ internal sealed record CardChoiceSpec(
     int MaxCount,
     IReadOnlyList<PredictedCard> Options,
     IReadOnlyList<PredictedCard> SourceCards,
-    double ReplacementValue);
+    double ReplacementValue,
+    string ContextId = "");
 
 internal static partial class CardChoiceSupport
 {
@@ -46,7 +48,7 @@ internal static partial class CardChoiceSupport
 
         CombatPredictionCardGenerationOptionsEntry? generated = simulator.History
             .OfType<CombatPredictionCardGenerationOptionsEntry>()
-            .LastOrDefault(entry => entry.Trace?.Source == playedCard.Original);
+            .LastOrDefault(entry => playedCard.References(entry.Trace?.Source));
         if (generated != null)
         {
             List<PredictedCard> options = generated.Options.Select(option => option.Clone()).ToList();
@@ -62,8 +64,7 @@ internal static partial class CardChoiceSupport
 
         return card switch
         {
-            SeekerStrike => Spec(owner, PlanChoiceEffect.MoveToHand, PileType.Draw, 1,
-                FilterSeekerOptions(simulator, playedCard, owner.DrawPile.Cards)),
+            SeekerStrike => BuildSeekerSpec(simulator, playedCard, owner),
             TrueGrit when card.IsUpgraded => Spec(owner, PlanChoiceEffect.Exhaust, PileType.Hand, 1, owner.Hand.Cards),
             Hologram => Spec(owner, PlanChoiceEffect.MoveToHand, PileType.Discard, 1, discardBeforeResolution),
             Graveblast => Spec(owner, PlanChoiceEffect.MoveToHand, PileType.Discard, 1, discardBeforeResolution),
@@ -140,7 +141,8 @@ internal static partial class CardChoiceSupport
         return new PlanCardChoice(
             spec.Effect,
             spec.SourcePile,
-            ToTokens(selection, spec.Options, spec.SourceCards, static card => card.Id.Entry));
+            ToTokens(selection, spec.Options, spec.SourceCards, static card => card.Id.Entry),
+            ContextId: spec.ContextId);
     }
 
     public static PlanCardChoice BuildVakuuChoice(CardChoiceSpec spec)
@@ -150,7 +152,8 @@ internal static partial class CardChoiceSupport
         return new PlanCardChoice(
             spec.Effect,
             spec.SourcePile,
-            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Id.Entry));
+            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Id.Entry),
+            ContextId: spec.ContextId);
     }
 
     public static bool RequiresAutomaticNestedChoice(
@@ -240,7 +243,8 @@ internal static partial class CardChoiceSupport
             .Select(selection => new PlanCardChoice(
                 spec.Effect,
                 spec.SourcePile,
-                ToTokens(selection, spec.Options, spec.SourceCards, displayNames.Card)))
+                ToTokens(selection, spec.Options, spec.SourceCards, displayNames.Card),
+                ContextId: spec.ContextId))
             .ToList();
     }
 
@@ -324,7 +328,8 @@ internal static partial class CardChoiceSupport
         return new PlanCardChoice(
             spec.Effect,
             spec.SourcePile,
-            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Id.Entry));
+            ToTokens(selected, spec.Options, spec.SourceCards, static card => card.Id.Entry),
+            ContextId: spec.ContextId);
     }
 
     public static IReadOnlyList<PredictedCard> ResolveStandaloneChoice(
@@ -342,14 +347,20 @@ internal static partial class CardChoiceSupport
             PredictedCard card = options.Where(candidate => MatchesToken(candidate, token))
                 .Skip(token.OptionOccurrence)
                 .FirstOrDefault()
-                ?? throw new InvalidOperationException(
+                ?? throw new InvalidPlannedChoiceBranchException(
                     $"回合开始选牌时找不到 {token.CardId}+{token.UpgradeLevel}#{token.OptionOccurrence}。");
             if (!source.Cards.Contains(card))
-                throw new InvalidOperationException($"回合开始选中的 {token.CardId} 已不在 {sourcePile} 中。");
+            {
+                throw new InvalidPlannedChoiceBranchException(
+                    $"回合开始选中的 {token.CardId} 已不在 {sourcePile} 中。");
+            }
             selected.Add(card);
         }
         if (selected.Count != expectedCount)
-            throw new InvalidOperationException($"回合开始计划选择 {selected.Count} 张牌，但当前要求 {expectedCount} 张。");
+        {
+            throw new InvalidPlannedChoiceBranchException(
+                $"回合开始计划选择 {selected.Count} 张牌，但当前要求 {expectedCount} 张。");
+        }
         return selected;
     }
 
@@ -382,31 +393,32 @@ internal static partial class CardChoiceSupport
         return new CardChoiceSpec(effect, source, minCount, maxCount, list, sourceCards, replacementValue);
     }
 
-    private static IReadOnlyList<PredictedCard> FilterSeekerOptions(
+    private static CardChoiceSpec? BuildSeekerSpec(
         CombatPredictionSimulator simulator,
         PredictedCard playedCard,
-        IReadOnlyList<PredictedCard> drawPile)
+        SimPlayerCombatState owner)
     {
-        CombatPredictionCardsSelectedEntry? entry = simulator.History
-            .OfType<CombatPredictionCardsSelectedEntry>()
-            .LastOrDefault(item => item.Trace?.Source == playedCard.Original);
-        if (entry == null)
-            return [];
-
-        List<(string Id, int Upgrade)> allowed = entry.Cards
-            .Select(item => (item.Id, item.UpgradeLevel))
+        List<PredictedCard> options = owner.DrawPile.Cards
+            .ToList()
+            .StableShuffle(simulator.Rng.CombatCardSelection)
+            .Take(playedCard.Preview.DynamicVars.Cards.IntValue)
             .ToList();
-        List<PredictedCard> result = [];
-        foreach (PredictedCard card in drawPile)
-        {
-            int index = allowed.FindIndex(item => item.Id == card.Preview.Id.Entry
-                && item.Upgrade == card.Preview.CurrentUpgradeLevel);
-            if (index < 0)
-                continue;
-            result.Add(card);
-            allowed.RemoveAt(index);
-        }
-        return result;
+        if (options.Count == 0)
+            return null;
+        simulator.History.CardsSelected(options);
+        simulator.History.RecordRisk(PredictionRiskReason.UnresolvedPlayerChoice);
+        string contextId = $"seeker:{simulator.Rng.CombatCardSelection.Counter()}:" +
+            string.Join(',', options.Select(card =>
+                $"{card.Preview.Id.Entry}+{card.Preview.CurrentUpgradeLevel}"));
+        return new CardChoiceSpec(
+            PlanChoiceEffect.MoveToHand,
+            PileType.Draw,
+            1,
+            1,
+            options,
+            owner.DrawPile.Cards,
+            ReplacementValue: 0d,
+            contextId);
     }
 
     private static void BuildCombinations(

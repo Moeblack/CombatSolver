@@ -631,7 +631,15 @@ internal sealed partial class CombatBeamSolver
                 SimulationSnapshot probeSnapshot = ReplayAction(node, action);
 
                 CombatPredictionSimulator probeSimulator = (CombatPredictionSimulator)probeSnapshot.Simulator;
-                CardChoiceSpec? choiceSpec = CardChoiceSupport.GetSpec(probeSimulator, card);
+                SimulatedCombatState probeCombat =
+                    (SimulatedCombatState)probeSnapshot.Simulator.State.CombatState;
+                CardChoiceSpec? choiceSpec = probeCombat.PendingTurnStartChoice is { } pendingChoice
+                    && string.IsNullOrEmpty(pendingChoice.SourceId)
+                        ? TurnStartChoiceSupport.BuildPendingSpec(
+                            probeSimulator,
+                            probeCombat,
+                            _player)
+                        : null;
                 if (choiceSpec == null && CardChoiceSupport.RequiresUnsupportedExistingChoice(card.Preview))
                 {
                     probeSnapshot.ReleaseSimulator();
@@ -1130,7 +1138,7 @@ internal sealed partial class CombatBeamSolver
         CardChoiceSpec? primaryChoiceSpec)
         => primaryChoiceSpec != null
             && string.IsNullOrEmpty(request.SourceId)
-            && string.IsNullOrEmpty(request.ContextId)
+            && string.Equals(request.ContextId, primaryChoiceSpec.ContextId, StringComparison.Ordinal)
             && request.Effect == primaryChoiceSpec.Effect
             && request.SourcePile == primaryChoiceSpec.SourcePile
             && request.Count == primaryChoiceSpec.MinCount;
@@ -1202,7 +1210,9 @@ internal sealed partial class CombatBeamSolver
                     || snapshot.Turn > node.Turn;
                 bool primaryChoice = !turnResolution
                     && action.Choice == null
-                    && MatchesPrimaryChoice(request, unresolvedPrimaryChoice);
+                    && string.IsNullOrEmpty(request.SourceId)
+                    && (unresolvedPrimaryChoice == null
+                        || MatchesPrimaryChoice(request, unresolvedPrimaryChoice));
                 IReadOnlyList<PlanCardChoice> existing = turnResolution
                     ? action.TurnStartChoices ?? []
                     : action.NestedChoices ?? [];
