@@ -119,6 +119,7 @@ internal static class SolverOverlay
             };
     internal static bool PerformanceHintVisibleForTesting => _performanceHintButton?.Visible == true;
     internal static string? ReviewSummaryTextForTesting => _reviewText?.Text;
+    internal static string? SearchSummaryTextForTesting => _summaryText?.Text;
     internal static double SearchProgressRatioForTesting => _lastSearchProgressRatio;
     internal static bool ExercisePerformanceHintForTesting()
     {
@@ -253,15 +254,20 @@ internal static class SolverOverlay
             _progressText.Text = $"已用 {progress.ElapsedMilliseconds / 1000d:F1} s";
         }
         string potionSearchPhase = progress.Phase.StartsWith("正在搜索", StringComparison.Ordinal)
-            ? progress.Phase + " · "
+            ? progress.Phase
             : string.Empty;
         string currentBest = progress.CurrentBestResult is { } result
             ? $"当前可采用：用 {result.ProjectedBattlePotionCount} 瓶药，" +
               $"预计战损 {result.ProjectedBattleHpLost} · "
             : string.Empty;
-        SetReviewText(
-            $"{potionSearchPhase}{currentBest}已查阅 " +
-            $"{reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线");
+        SetReviewText(potionSearchPhase);
+        if (_summaryText != null)
+        {
+            _summaryText.Visible = true;
+            _summaryText.Text =
+                $"{currentBest}已查阅 " +
+                $"{reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线";
+        }
         if (_searchProgressBar != null)
         {
             _searchProgressBar.Visible = true;
@@ -301,7 +307,7 @@ internal static class SolverOverlay
         }
         if (_progressText != null)
             _progressText.Visible = false;
-        SetReviewText($"已查阅 {reviewedWorldlinesBeforeSearch:N0} 条世界线");
+        SetReviewText(null);
         SetPerformanceHintVisible(false);
         if (_searchProgressBar != null)
         {
@@ -1075,7 +1081,7 @@ internal static class SolverOverlay
     {
         _summaryPanel = CreateSectionPanel("SummaryPanel");
         _summaryPanel.MouseFilter = Control.MouseFilterEnum.Pass;
-        _summaryPanel.CustomMinimumSize = new Vector2(0, 42);
+        _summaryPanel.CustomMinimumSize = new Vector2(0, 64);
         VBoxContainer layout = new() { MouseFilter = Control.MouseFilterEnum.Pass };
         layout.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Xxs);
         HBoxContainer statusRow = new()

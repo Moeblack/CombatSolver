@@ -18,6 +18,7 @@
 | `SMART-POTION-LETHAL-GRADIENT-0244` | 通过（headless 完整自动战斗） | 无药路线死亡时进入恰好一瓶梯度，实际使用格挡药并以零战损生还，计划外重算 `0`。runId `aa7e15b86b3a412c9c8abdea72d6b375`。 | 2026-09-01 |
 | `SMART-POTION-CHECKPOINT-ADOPTION-0250` | 通过（headless 搜索与控制器生命周期） | 单个 solver 的回合层检查点持续发布当前可执行路线；用药数与预计战损按每瓶 `9 HP` 战略成本严格递增优，玩家采纳后正常收束并采用同一结果。战损提示点击后持久关闭且不再跳转。runId `c273a77c45f446d59d435a98f9a1e8dd`。 | 2026-09-01 |
 | `TURN-SETUP-INTERIM-ADOPTION-0250` | 通过（headless 烘焙手套开局搜索） | 回合准备 solver 完成前显示当前路线；点击采纳后从安全检查点生成 `23` 动作完整计划，执行/重算接管队列继续正常工作。runId `0c29c9807cfb477f9e9e36f69a8cb626`。 | 2026-09-01 |
+| `SEARCH-STATUS-TWO-LINE-0250` | 通过（headless UI 与控制器生命周期） | 搜索状态区使用 `64 px` 双行高度和正常字号；阶段保留在第一行，当前用药/战损及累计世界线显示在横跨面板的第二行。runId `f26539fb24a040c09705fb9f72947198`。 | 2026-09-01 |
 
 ## 0.24.3（已发布）
 

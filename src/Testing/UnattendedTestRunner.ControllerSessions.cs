@@ -99,7 +99,7 @@ internal sealed partial class UnattendedTestRunner
                 Phase: "test"),
             deployWhenReady: false,
             reviewedWorldlinesBeforeSearch: 5);
-        if (SolverOverlay.ReviewSummaryTextForTesting != "已查阅 42 条世界线")
+        if (SolverOverlay.SearchSummaryTextForTesting != "已查阅 42 条世界线")
             throw new InvalidOperationException("搜索进度区没有独立显示累计查阅世界线数量。");
         double progressRatio = SolverOverlay.SearchProgressRatioForTesting;
         SolverOverlay.ShowProgress(
@@ -130,7 +130,7 @@ internal sealed partial class UnattendedTestRunner
             || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
                 "正在搜索无药路线",
                 StringComparison.Ordinal) != true
-            || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
+            || SolverOverlay.SearchSummaryTextForTesting?.Contains(
                 "当前可采用：用 0 瓶药，预计战损 9",
                 StringComparison.Ordinal) != true)
         {
