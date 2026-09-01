@@ -511,7 +511,16 @@ internal sealed partial class CombatBeamSolver
                 null,
                 rootSnapshot,
                 CombatProgressState.Capture(rootSnapshot));
-            PlanAction baseAction = selectedPotionAction with { Choice = null };
+            PlanAction baseAction = selectedPotionAction with
+            {
+                Turn = _startTurnNumber,
+                Choice = null,
+                NestedChoices = null,
+                NestedChoicesBeforePrimary = 0,
+                TurnStartChoices = null,
+                RelicEffects = null,
+                EndsPlayerTurn = false,
+            };
             probeSnapshot = ReplayAction(seed, baseAction);
             CardChoiceSpec spec = PotionChoiceSupport.GetSpec(
                 (CombatPredictionSimulator)probeSnapshot.Simulator,

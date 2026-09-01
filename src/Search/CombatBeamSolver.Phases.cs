@@ -724,7 +724,10 @@ internal sealed partial class CombatBeamSolver
                 || action.Turn != node.Turn)
             {
                 throw new InvalidOperationException(
-                    "固定搜索前缀目前只接受当前回合内、不结束回合的动作。");
+                    $"固定搜索前缀动作无效：kind={action.Kind} actionTurn={action.Turn} " +
+                    $"nodeTurn={node.Turn} endsPlayerTurn={action.EndsPlayerTurn} " +
+                    $"card={(string.IsNullOrEmpty(action.CardId) ? "-" : action.CardId)} " +
+                    $"potion={(string.IsNullOrEmpty(action.PotionId) ? "-" : action.PotionId)}。");
             }
 
             if (!CanApplyFixedPrefixAction(node, action))
