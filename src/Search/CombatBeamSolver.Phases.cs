@@ -1053,6 +1053,7 @@ internal sealed partial class CombatBeamSolver
             DeathTurn = annotations.DeathTurn,
             OnlyDeathRoutesFound = onlyDeathRoutesFound,
             IsActEndingBoss = _isActEndingBoss,
+            BossHpRelief = _bossHpRelief,
             Elapsed = stopwatch.Elapsed,
             Continuations = continuations,
         };

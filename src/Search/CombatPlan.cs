@@ -606,6 +606,7 @@ internal sealed class SolverResult
     public required int? DeathTurn { get; init; }
     public required bool OnlyDeathRoutesFound { get; init; }
     public required bool IsActEndingBoss { get; init; }
+    public required BossHpRelief BossHpRelief { get; init; }
     public required TimeSpan Elapsed { get; init; }
     public required IReadOnlyList<CachedContinuation> Continuations { get; init; }
     public bool WasReused { get; init; }
@@ -724,6 +725,7 @@ internal sealed class SolverResult
             DeathTurn = DeathTurn,
             OnlyDeathRoutesFound = OnlyDeathRoutesFound,
             IsActEndingBoss = IsActEndingBoss,
+            BossHpRelief = BossHpRelief,
             Elapsed = TimeSpan.Zero,
             Continuations = Continuations.Where(item => item.StartTurnNumber > cached.StartTurnNumber).ToList(),
             WasReused = true,

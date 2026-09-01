@@ -204,6 +204,7 @@ internal static class SolverDiagnostics
             .Append(" death_turn=").Append(result.DeathTurn?.ToString() ?? "-")
             .Append(" only_death_routes=").Append(result.OnlyDeathRoutesFound)
             .Append(" act_ending_boss=").Append(result.IsActEndingBoss)
+            .Append(" boss_hp_relief=").Append(result.BossHpRelief)
             .Append(" engine_risk=").Append(result.Snapshot.HasRisk)
             .Append(" unsupported_intent=").Append(result.Forecast.HasUnsupportedIntent)
             .Append(" modeled_damage_exact=").Append(result.Forecast.IsExactForModeledDamage)

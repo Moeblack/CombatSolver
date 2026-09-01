@@ -8,6 +8,7 @@ internal sealed partial class CombatBeamSolver
         bool enforcePotionDirectives,
         bool renewablePotionShapedRock,
         SolverTheftPolicy? theftPolicy,
+        BossHpRelief bossHpRelief,
         PotionFreePolicyBaseline? potionFreePolicyBaseline,
         int initialPlayerMaxHp,
         int minimumPotionUses,
@@ -15,6 +16,27 @@ internal sealed partial class CombatBeamSolver
         bool detailedDiagnostics,
         BattleDamageSnapshot battleDamage)
     {
+        /// <summary>
+        /// Quarters of a normal fight's HP weight. A boss whose act clear refunds most of the damage is worth a
+        /// quarter; the run's last fight is worth nothing beyond surviving it.
+        /// </summary>
+        private readonly int _hpWeightQuarters = bossHpRelief switch
+        {
+            BossHpRelief.RunEnding => 0,
+            BossHpRelief.ActClearHeal => 1,
+            _ => 4,
+        };
+
+        /// <summary>
+        /// The HP a potion must save to be worth spending, scaled by how much HP is worth in this fight. When HP
+        /// buys nothing, no amount of saved HP justifies a potion and only the win/lose escape in
+        /// <see cref="PotionUsePolicy.IsEligible"/> can still admit one.
+        /// </summary>
+        private int ScalePotionCost(int strategicHpCost)
+            => _hpWeightQuarters == 0
+                ? int.MaxValue / 4
+                : strategicHpCost * 4 / _hpWeightQuarters;
+
         public FinalPlanSelection Select(
             IReadOnlyList<(SearchNode Node, SimulationSnapshot Snapshot)> evaluated,
             int initialHp,
@@ -175,7 +197,7 @@ internal sealed partial class CombatBeamSolver
                     && (PotionUsePolicy.IsEligible(
                          candidate.EffectivePotionPolicy,
                          candidate.OptionalPotionCount,
-                         candidate.OptionalPotionStrategicCost,
+                         ScalePotionCost(candidate.OptionalPotionStrategicCost),
                          potionFreeWon,
                          potionFreeStrategicHpDeficit,
                          anyRouteWon,
@@ -192,11 +214,17 @@ internal sealed partial class CombatBeamSolver
                         potionFreePlayerHp,
                         candidate.Snapshot.PlayerHp))
                 .OrderByDescending(candidate => candidate.Features.AllEnemiesDead)
+                // Survival used to be implied by the HP deficit being maximal on a death route. Once HP can be
+                // weighted down to nothing it has to be stated, or a run-ending boss would rank a lethal route.
+                .ThenBy(candidate => candidate.Snapshot.PlayerDead
+                    || candidate.Snapshot.ProjectedPlayerHp <= 0
+                        ? 1
+                        : 0)
                 .ThenBy(candidate => theftPolicy == SolverTheftPolicy.PreserveResources
                     ? candidate.Features.OutstandingStolenResource
                     : 0)
-                .ThenBy(candidate => candidate.PolicyHpDeficit)
-                .ThenBy(candidate => candidate.HealthResourceCost)
+                .ThenBy(candidate => candidate.PolicyHpDeficit * _hpWeightQuarters)
+                .ThenBy(candidate => candidate.HealthResourceCost * _hpWeightQuarters)
                 .ThenByDescending(candidate => candidate.Features.LongTermResourceValue)
                 .ThenBy(candidate => candidate.Features.AngerCopiesGenerated)
                 .ThenBy(candidate => CombatBeamSolver.PolicyBoundaryRank(candidate.Features.BoundaryReason))
@@ -223,7 +251,7 @@ internal sealed partial class CombatBeamSolver
                     || !(PotionUsePolicy.IsEligible(
                           candidate.EffectivePotionPolicy,
                           candidate.OptionalPotionCount,
-                          candidate.OptionalPotionStrategicCost,
+                          ScalePotionCost(candidate.OptionalPotionStrategicCost),
                           potionFreeWon,
                           potionFreeStrategicHpDeficit,
                           anyRouteWon,
