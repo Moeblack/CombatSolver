@@ -92,6 +92,21 @@ internal sealed class PlayerTurnAutoPrePlayPatch : IPatchMethod
     }
 }
 
+internal sealed class PlayerTurnSetupSceneExitPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_player_turn_setup_scene_exit";
+    public static string Description => "返回主菜单前取消仍在等待的回合开始原生选牌";
+
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        new(typeof(NGame), nameof(NGame.ReturnToMainMenu), Type.EmptyTypes),
+    ];
+
+    [HarmonyPriority(Priority.First)]
+    public static void Prefix()
+        => PlayerTurnSetupCoordinator.PrepareForSceneExit();
+}
+
 internal static class PlayerTurnSetupCoordinator
 {
     private sealed record InitialSearchContext(
@@ -127,6 +142,7 @@ internal static class PlayerTurnSetupCoordinator
         public int ManualRecalculationCompletedCount { get; set; }
         public bool ReplayDrivingStarted { get; set; }
         public bool ReplaySurfacePrepared { get; set; }
+        public bool TakeoverRequested { get; set; }
         public bool DeployAfterSetup { get; set; }
         public int DisposeState;
         public IReadOnlyList<PlanCardChoice>? PlannedChoices
@@ -271,27 +287,45 @@ internal static class PlayerTurnSetupCoordinator
     internal static int ManualRecalculationCompletedCountForTesting
         => _active?.ManualRecalculationCompletedCount ?? 0;
 
+    internal static bool IsInitialChoiceSearchPendingForTesting(CombatState combat)
+        => _active is { Result: null, SearchState: 1 } active
+           && IsCurrentActivePlan(active)
+           && ReferenceEquals(active.Combat, combat)
+           && active.Choices.HasVisibleRequest;
+
+    internal static bool TakeoverRequestedForTesting
+        => _active?.TakeoverRequested == true;
+
     public static bool HasPendingPlannedChoice(CombatState combat)
         => _active is { PlannedChoices: not null } active
            && IsCurrentActivePlan(active)
            && ReferenceEquals(active.Combat, combat)
-           && active.Choices.IsVisibleSurfaceOpen;
+           && active.Choices.IsVisibleChoicePending;
+
+    public static bool CanTakeOverTurnSetup(CombatState combat)
+        => _active is { } active
+           && IsCurrentActivePlan(active)
+           && ReferenceEquals(active.Combat, combat)
+           && HasUnresolvedVisibleChoice(active);
 
     public static bool TryContinuePlannedChoice(
         NGame host,
         CombatState combat,
         bool deployAfterSetup)
     {
-        if (_active is not { PlannedChoices: not null } active
+        if (_active is not { } active
             || !IsCurrentActivePlan(active)
             || !ReferenceEquals(active.Combat, combat)
-            || !active.Choices.IsVisibleSurfaceOpen)
+            || !HasUnresolvedVisibleChoice(active))
         {
             return false;
         }
 
         active.DeployAfterSetup |= deployAfterSetup;
-        StartReplayDriver(active, host);
+        active.TakeoverRequested = true;
+        IReadOnlyList<PlanCardChoice>? plannedChoices = active.PlannedChoices;
+        if (plannedChoices != null)
+            StartReplayDriver(active, host);
         string takeoverMode = deployAfterSetup
             ? "single_step"
             : SolverController.FullAutoEnabled
@@ -299,7 +333,8 @@ internal static class PlayerTurnSetupCoordinator
                 : "route_only";
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_TAKEOVER turn={active.Player.PlayerCombatState!.TurnNumber} " +
-            $"mode={takeoverMode} choices={active.PlannedChoices.Count}");
+            $"mode={takeoverMode} choices={plannedChoices?.Count ?? 0} " +
+            $"queued={(plannedChoices == null).ToString().ToLowerInvariant()}");
         return true;
     }
 
@@ -324,8 +359,9 @@ internal static class PlayerTurnSetupCoordinator
         if (_active is not { InitialSearch: not null } active
             || !IsCurrentActivePlan(active)
             || !ReferenceEquals(active.Combat, combat)
-            || !active.Choices.IsVisibleSurfaceOpen
-            || active.ReplayDrivingStarted)
+            || !HasUnresolvedVisibleChoice(active)
+            || active.ReplayDrivingStarted
+            || active.TakeoverRequested)
         {
             return false;
         }
@@ -349,7 +385,7 @@ internal static class PlayerTurnSetupCoordinator
         if (_active is not { PlannedChoices: not null } active
             || !IsCurrentActivePlan(active)
             || !ReferenceEquals(active.Combat, combat)
-            || !active.Choices.IsVisibleSurfaceOpen)
+            || !active.Choices.IsVisibleChoicePending)
         {
             throw new InvalidOperationException("回合开始选择尚未准备好，无法模拟玩家跳过。");
         }
@@ -359,6 +395,20 @@ internal static class PlayerTurnSetupCoordinator
             [],
             active.Token);
     }
+
+    public static void PrepareForSceneExit()
+    {
+        if (_active == null)
+            return;
+        _cancellation?.Cancel();
+        NativeChoiceRuntime.CancelActiveHandSelectionForSceneExit();
+    }
+
+    private static bool HasUnresolvedVisibleChoice(ActivePlan active)
+        => active.Choices.IsVisibleChoicePending
+           || (active.Result == null
+               && active.SearchState == 1
+               && active.Choices.HasVisibleRequest);
 
     public static Task Reset(string reason)
     {
@@ -954,6 +1004,8 @@ internal static class PlayerTurnSetupCoordinator
             active.ManualRecalculationCompletedCount++;
             active.Choices.RecordPlanReady();
             SolverController.ShowTurnSetupResultPreview(host, result);
+            if (active.TakeoverRequested)
+                StartReplayDriver(active, host);
             Entry.Logger.Info(
                 $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_RESULT turn={turn} " +
                 $"choices={result.TurnSetupChoices.Count} expanded={result.ExpandedNodes} " +
@@ -973,7 +1025,8 @@ internal static class PlayerTurnSetupCoordinator
         finally
         {
             Interlocked.Exchange(ref active.ManualSearchState, 0);
-            active.Choices.ReleaseVisibleSurface();
+            if (!active.ReplayDrivingStarted)
+                active.Choices.ReleaseVisibleSurface();
         }
     }
 
@@ -1100,7 +1153,10 @@ internal static class PlayerTurnSetupCoordinator
         active.Result = result;
         active.Choices.RecordPlanReady();
         SolverController.ShowTurnSetupResultPreview(host, result);
-        active.Choices.ReleaseVisibleSurface();
+        if (active.TakeoverRequested)
+            StartReplayDriver(active, host);
+        else
+            active.Choices.ReleaseVisibleSurface();
         active.PlanReady.TrySetResult();
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_PLAN turn={turn} choices={result.TurnSetupChoices.Count} " +

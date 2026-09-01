@@ -149,6 +149,8 @@ param(
     [switch]$VerifyInitialSetupWaitsForUserStart,
     [switch]$VerifyTurnSetupManualRecalculate,
     [switch]$VerifyTurnSetupManualRefresh,
+    [switch]$VerifyTurnSetupControlsDuringInitialSearch,
+    [switch]$VerifyTurnSetupSceneExitCancellation,
     [switch]$StopAfterInitialSetupAssertion,
     [switch]$StopAfterInitialSolverResultAssertion,
     [switch]$ExpectedFullAutoPausedAtDeathTurn,
@@ -734,6 +736,8 @@ $request = [ordered]@{
     verifyInitialSetupWaitsForUserStart = $VerifyInitialSetupWaitsForUserStart.IsPresent
     verifyTurnSetupManualRecalculate = $VerifyTurnSetupManualRecalculate.IsPresent
     verifyTurnSetupManualRefresh = $VerifyTurnSetupManualRefresh.IsPresent
+    verifyTurnSetupControlsDuringInitialSearch = $VerifyTurnSetupControlsDuringInitialSearch.IsPresent
+    verifyTurnSetupSceneExitCancellation = $VerifyTurnSetupSceneExitCancellation.IsPresent
     stopAfterInitialSetupAssertion = $StopAfterInitialSetupAssertion.IsPresent
     stopAfterInitialSolverResultAssertion = $StopAfterInitialSolverResultAssertion.IsPresent
     expectedFullAutoPausedAtDeathTurn = $ExpectedFullAutoPausedAtDeathTurn.IsPresent

@@ -1,12 +1,19 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.24.0`（发布准备；创意工坊稳定版为 `0.22.9`）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.24.0`（已发布；当前创意工坊稳定版）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
 
-## 0.24.0（开发中）
+## 下一版本（版本待定）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `INITIAL-TOASTY-MITTENS-SEARCH-CONTROLS-NEXT` | 通过（headless 开局搜索控件） | 烘焙手套首次搜索未发布计划时依次请求“执行”和“重算”；执行进入回合准备接管队列，后续重算等待实际选牌完成并在 Play 阶段产生新的第 `1` 回合 `28` 动作路线，没有普通阶段拒绝。runId `f5b7c0a4749c4baba471d58f0c5fb676`。 | 2026-09-01 |
+| `INITIAL-TOASTY-MITTENS-SCENE-EXIT-NEXT` | 通过（headless 场景退出边界） | 原生手牌选择等待期间返回主菜单，场景拆除前取消选择 `1` 次；原报告的 `NPlayerHand.SelectCards / AfterCardsSelected / move_child` 栈未再出现。测试结束后的 RitsuLib 设置页焦点链另有独立离树节点日志，不属于本项。runId `1868ed8d9b3a4de19715438060db287f`。 | 2026-09-01 |
+
+## 0.24.0（已发布）
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |

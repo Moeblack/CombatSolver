@@ -133,6 +133,8 @@ internal sealed class UnattendedTestRequest
     public bool VerifyInitialSetupWaitsForUserStart { get; init; }
     public bool VerifyTurnSetupManualRecalculate { get; init; }
     public bool VerifyTurnSetupManualRefresh { get; init; }
+    public bool VerifyTurnSetupControlsDuringInitialSearch { get; init; }
+    public bool VerifyTurnSetupSceneExitCancellation { get; init; }
     public bool StopAfterInitialSetupAssertion { get; init; }
     public bool StopAfterInitialSolverResultAssertion { get; init; }
     public bool ExpectedFullAutoPausedAtDeathTurn { get; init; }

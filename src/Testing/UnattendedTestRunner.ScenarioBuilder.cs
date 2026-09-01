@@ -91,6 +91,29 @@ internal sealed partial class UnattendedTestRunner
                 mutableEncounter);
 
             runner.SetStage("wait_player_turn");
+            if (request.VerifyTurnSetupSceneExitCancellation)
+            {
+                CombatState = await runner.WaitForPendingTurnSetupChoiceAsync();
+                Player sceneExitPlayer = LocalContext.GetMe(CombatState)
+                    ?? throw new InvalidOperationException("场景退出测试找不到本地玩家。");
+                StartedTurn = sceneExitPlayer.PlayerCombatState!.TurnNumber;
+                int cancellationCount = NativeChoiceRuntime.SceneExitCancellationCountForTesting;
+                runner.SetStage("turn_setup_scene_exit");
+                await runner._host.ReturnToMainMenu();
+                if (NativeChoiceRuntime.SceneExitCancellationCountForTesting != cancellationCount + 1)
+                    throw new InvalidOperationException("返回主菜单前没有取消仍在等待的回合开始手牌选择。");
+                runner._completedChecks.Add(
+                    $"TurnSetupSceneExitCancellation:Turn={StartedTurn}:Canceled=1");
+                return new ScenarioContext(
+                    character,
+                    encounter,
+                    CombatState,
+                    sceneExitPlayer,
+                    StartedTurn,
+                    [],
+                    [],
+                    []);
+            }
             CombatState = await runner.WaitForPlayableCombatAsync();
             Player player = LocalContext.GetMe(CombatState)
                 ?? throw new InvalidOperationException("进入战斗后找不到本地玩家。");

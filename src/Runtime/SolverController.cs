@@ -1057,7 +1057,7 @@ internal static class SolverController
             return;
         }
 
-        if (PlayerTurnSetupCoordinator.HasPendingPlannedChoice(state))
+        if (PlayerTurnSetupCoordinator.CanTakeOverTurnSetup(state))
         {
             _combat.FullAutoEnabled = true;
             Entry.Logger.Info(

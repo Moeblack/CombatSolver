@@ -34,6 +34,10 @@ internal sealed partial class UnattendedTestRunner
             bool expectedPotionUsed = request.ExpectedUsedPotionId == null;
             bool expectedPlayerPowerObserved = request.ExpectedObservedPlayerPowerId == null;
 
+            if (request.VerifyTurnSetupSceneExitCancellation
+                || request.VerifyTurnSetupControlsDuringInitialSearch)
+                return Observation(combatEnded: false);
+
             if (scenario.OrbChecks.Count > 0)
             {
                 for (int index = 0; index < scenario.OrbChecks.Count; index++)

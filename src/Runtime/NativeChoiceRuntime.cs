@@ -60,11 +60,19 @@ internal sealed record NativeChoiceTrace(
 
 internal static class NativeChoiceRuntime
 {
+    private static readonly MethodInfo CancelHandSelectionMethod = AccessTools.Method(
+        typeof(NPlayerHand),
+        "CancelHandSelectionIfNecessary")
+        ?? throw new MissingMethodException(typeof(NPlayerHand).FullName, "CancelHandSelectionIfNecessary");
     private static readonly List<NativeChoiceSession> Sessions = [];
     private static readonly List<NativeChoiceTrace> Traces = [];
     private static readonly object TraceSync = new();
     private static long _nextSequence;
     private static long _nextTraceOrder;
+    private static int _sceneExitCancellationCountForTesting;
+
+    internal static int SceneExitCancellationCountForTesting
+        => _sceneExitCancellationCountForTesting;
 
     internal static IReadOnlyList<NativeChoiceTrace> TraceSnapshotForTesting
     {
@@ -81,6 +89,7 @@ internal static class NativeChoiceRuntime
         {
             Traces.Clear();
             _nextTraceOrder = 0;
+            _sceneExitCancellationCountForTesting = 0;
         }
     }
 
@@ -146,6 +155,23 @@ internal static class NativeChoiceRuntime
         Sessions.RemoveAt(index);
     }
 
+    internal static bool CancelActiveHandSelectionForSceneExit()
+    {
+        if (Sessions.Count == 0
+            || NPlayerHand.Instance is not { IsInCardSelection: true } hand
+            || !hand.IsInsideTree())
+        {
+            return false;
+        }
+
+        Sessions[^1].ReleaseVisibleSurface();
+        CancelHandSelectionMethod.Invoke(hand, null);
+        _sceneExitCancellationCountForTesting++;
+        Entry.Logger.Info(
+            "[CombatSolver/Test] NATIVE_CHOICE_CANCELED reason=scene_exit surface=Hand");
+        return true;
+    }
+
     internal static void RecordTrace(
         NativeChoiceSession session,
         NativeChoiceRequest request,
@@ -199,6 +225,18 @@ internal sealed class NativeChoiceSession : IDisposable
     public bool IsVisibleSurfaceOpen
         => _firstVisibleRequest.Task.IsCompletedSuccessfully
            && NativeChoiceSurface.IsVisible(_firstVisibleRequest.Task.Result.Surface);
+    public bool IsVisibleChoicePending
+    {
+        get
+        {
+            if (!_firstVisibleRequest.Task.IsCompletedSuccessfully)
+                return false;
+            NativeChoiceSurfaceKind surface = _firstVisibleRequest.Task.Result.Surface;
+            return surface is NativeChoiceSurfaceKind.Hand or NativeChoiceSurfaceKind.HandUpgrade
+                ? NPlayerHand.Instance?.IsInCardSelection == true
+                : NativeChoiceSurface.IsVisible(surface);
+        }
+    }
 
     public void Enqueue(NativeChoiceRequest request)
     {

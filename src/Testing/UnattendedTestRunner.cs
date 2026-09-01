@@ -433,11 +433,30 @@ internal sealed partial class UnattendedTestRunner
         bool manualRefreshRequested = false;
         bool manualRefreshCompleted = false;
         int manualRefreshCompletedAtRequest = 0;
+        bool initialSearchControlsSubmitted = false;
         while (true)
         {
             EnsureWithinDeadline();
             CombatState? state = CombatManager.Instance.DebugOnlyGetState();
             Player? player = state == null ? null : LocalContext.GetMe(state);
+            if (_request.VerifyTurnSetupControlsDuringInitialSearch
+                && !initialSearchControlsSubmitted
+                && state != null
+                && PlayerTurnSetupCoordinator.IsInitialChoiceSearchPendingForTesting(state))
+            {
+                int turn = player?.PlayerCombatState?.TurnNumber
+                    ?? throw new InvalidOperationException("开局搜索控件测试找不到玩家回合。");
+                SolverController.RequestDeploy(_host, state);
+                if (!PlayerTurnSetupCoordinator.TakeoverRequestedForTesting)
+                    throw new InvalidOperationException("开局搜索期间的执行请求没有进入回合准备接管队列。");
+                SolverController.RequestSearch(_host, state, SearchReason.Manual);
+                if (!SolverController.ManualSearchAfterTurnSetupRequested)
+                    throw new InvalidOperationException("开局搜索期间执行后的重算请求没有等待实际选牌完成。");
+                initialSearchControlsSubmitted = true;
+                turnSetupPlanAccepted = true;
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] TURN_SETUP_INITIAL_SEARCH_CONTROLS_SUBMITTED turn={turn}");
+            }
             if (!turnSetupPlanAccepted
                 && state != null
                 && PlayerTurnSetupCoordinator.HasPendingPlannedChoice(state))
@@ -563,6 +582,48 @@ internal sealed partial class UnattendedTestRunner
                     await NextFrameAsync();
                     continue;
                 }
+                if (_request.VerifyTurnSetupControlsDuringInitialSearch)
+                {
+                    if (!initialSearchControlsSubmitted)
+                    {
+                        await NextFrameAsync();
+                        continue;
+                    }
+                    if (SolverController.LastSearchFailureForTesting is { } failure)
+                    {
+                        throw new InvalidOperationException(
+                            $"开局搜索期间的执行/重算请求失败：{failure.GetType().Name}: {failure.Message}",
+                            failure);
+                    }
+                    SolverResult? recalculated = SolverController.LastCompletedResultForTesting;
+                    if (SolverController.IsSearching
+                        || recalculated == null
+                        || recalculated.StartTurnNumber != player.PlayerCombatState.TurnNumber)
+                    {
+                        await NextFrameAsync();
+                        continue;
+                    }
+                    if (SolverController.ManualSearchAfterTurnSetupRequested)
+                        throw new InvalidOperationException("进入出牌阶段后，开局搜索期间请求的重算仍未消费。");
+                    _completedChecks.Add(
+                        $"TurnSetupInitialSearchControls:Turn={recalculated.StartTurnNumber}:Actions={recalculated.BestNode.Actions.Count}");
+                }
+                return state;
+            }
+            await NextFrameAsync();
+        }
+    }
+
+    private async Task<CombatState> WaitForPendingTurnSetupChoiceAsync()
+    {
+        while (true)
+        {
+            EnsureWithinDeadline();
+            CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+            if (state != null
+                && PlayerTurnSetupCoordinator.IsInitialChoiceSearchPendingForTesting(state)
+                && NPlayerHand.Instance?.IsInCardSelection == true)
+            {
                 return state;
             }
             await NextFrameAsync();
