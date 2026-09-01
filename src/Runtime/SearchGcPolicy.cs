@@ -153,6 +153,7 @@ internal static class SearchGcPolicy
         Started,
         InsufficientMemory,
         RegionSizeUnsupported,
+        PlatformUnsupported,
     }
 
     private readonly record struct BackgroundGen2Completion(
@@ -162,6 +163,11 @@ internal static class SearchGcPolicy
     internal readonly record struct CombatLifecyclePressure(
         long AllocatedBytes,
         bool RequiresCollection);
+
+    // Mobile .NET runtimes (Android/iOS) do not support GC.TryStartNoGCRegion; skip straight to the
+    // SustainedLowLatency fallback instead of calling into it.
+    private static readonly bool NoGcRegionSupported =
+        !OperatingSystem.IsAndroid() && !OperatingSystem.IsIOS();
 
     internal static void ResetCountersForTesting()
     {
@@ -1151,6 +1157,8 @@ internal static class SearchGcPolicy
         long totalSize,
         long lohSize)
     {
+        if (!NoGcRegionSupported)
+            return NoGcRegionStartOutcome.PlatformUnsupported;
         try
         {
             return GC.TryStartNoGCRegion(
@@ -1173,6 +1181,7 @@ internal static class SearchGcPolicy
             NoGcRegionStartOutcome.Started => "started",
             NoGcRegionStartOutcome.InsufficientMemory => "insufficient_memory",
             NoGcRegionStartOutcome.RegionSizeUnsupported => "region_size_unsupported",
+            NoGcRegionStartOutcome.PlatformUnsupported => "platform_unsupported",
             _ => throw new ArgumentOutOfRangeException(nameof(outcome)),
         };
 
