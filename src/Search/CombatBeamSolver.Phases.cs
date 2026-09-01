@@ -74,10 +74,12 @@ internal sealed partial class CombatBeamSolver
 
         void ConsiderCurrentResult(SearchNode node)
         {
-            if (node.ActionCount == 0
-                || node.PotionCount < _minimumPotionUses
-                || node.Snapshot.PlayerDead
-                || node.Snapshot.ProjectedPlayerHp <= 0)
+            if (node.PotionCount < _minimumPotionUses
+                || !SolverInterimResultOrdering.IsCompleteVictory(
+                    node.ActionCount,
+                    node.Snapshot.AllEnemiesDead,
+                    node.Snapshot.PlayerDead,
+                    node.Snapshot.ProjectedPlayerHp))
             {
                 return;
             }
@@ -86,7 +88,7 @@ internal sealed partial class CombatBeamSolver
                 action.Kind == PlanActionKind.UsePotion
                 && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
             SolverInterimResult candidate = new(
-                Won: node.Snapshot.AllEnemiesDead,
+                Won: true,
                 OutstandingStolenResource: node.Snapshot.OutstandingStolenResource,
                 ProjectedBattleHpLost: battleDamage.HpLostSoFar
                     + node.Snapshot.CumulativePlayerHpLost,

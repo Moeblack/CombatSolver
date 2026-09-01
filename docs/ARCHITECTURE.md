@@ -50,7 +50,7 @@ Entry / turn hooks
 - `SearchPolicySnapshot.cs`：主线程捕获的不可变搜索设置和逐槽药水策略；后台不读取 UI 或玩家设置。
 - `SearchDiagnosticsSink.cs`：搜索日志出口。
 - `SearchFramePressureSignal.cs`：Runtime 向 worker 提供的帧压力信号。
-- `CombatSearchCoordinator.cs`：一次请求的搜索编排；Smart 从无药基线按恰好 `N` 瓶逐层搜索，同层药水共同竞争并在首个合格层停止；跨 solver 合并严格单调改善的当前路线摘要，并在玩家采纳后返回对应完整结果。Disabled/RequireAtLeastOne 保持各自政策。所有层共享请求级时间余量并合并总指标。
+- `CombatSearchCoordinator.cs`：一次请求的搜索编排；Smart 从无药基线按恰好 `N` 瓶逐层搜索，同层药水共同竞争并在首个合格层停止；跨 solver 只合并严格单调改善的完整获胜路线摘要，并在玩家采纳后返回对应完整结果。Disabled/RequireAtLeastOne 保持各自政策。所有层共享请求级时间余量并合并总指标。
 - `CombatPlan.cs`：Runtime 消费的计划、结果和续用数据。结果不得保留历史 Simulator 对象图。
 
 ### 3.2 CombatBeamSolver 分片
@@ -59,7 +59,7 @@ Entry / turn hooks
 |---|---|
 | `CombatBeamSolver.cs` | 构造参数、不可变根配置、`SearchRunContext` 与两个策略对象接线 |
 | `CombatBeamSolver.Models.cs` | `SearchNode`、`SimulationSnapshot`、转置标签、`SearchFeatures`、单次运行 `SearchRunContext` |
-| `CombatBeamSolver.Phases.cs` | `Solve`、阶段循环、预算边界、回合层当前路线发布与玩家采纳收束检查点 |
+| `CombatBeamSolver.Phases.cs` | `Solve`、阶段循环、预算边界、回合层完整获胜路线发布与玩家采纳收束检查点 |
 | `CombatBeamSolver.Expansion.cs` | 可执行卡牌/药水/结束回合候选展开和动作回放入口 |
 | `CombatBeamSolver.ParallelExpansion.cs` | 固定 worker lane、父节点原始候选并发物化、按输入顺序串行提交与快照所有权 |
 | `CombatBeamSolver.Retention.cs` | prune/retention 调用边界与相关小型辅助 |

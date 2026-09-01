@@ -31,10 +31,12 @@ internal static class CombatSearchCoordinator
 
         void PublishAdoptableResult(SolverResult result)
         {
-            if (result.BestNode.ActionCount == 0
-                || result.OnlyDeathRoutesFound
-                || result.Snapshot.PlayerDead
-                || result.Snapshot.ProjectedPlayerHp <= 0)
+            if (result.OnlyDeathRoutesFound
+                || !SolverInterimResultOrdering.IsCompleteVictory(
+                    result.BestNode.ActionCount,
+                    result.Snapshot.AllEnemiesDead,
+                    result.Snapshot.PlayerDead,
+                    result.Snapshot.ProjectedPlayerHp))
             {
                 return;
             }

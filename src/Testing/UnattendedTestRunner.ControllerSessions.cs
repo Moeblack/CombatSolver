@@ -646,6 +646,19 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("搜索中间路线没有按每瓶 9 HP 成本保持严格递增优。");
         }
+        if (SolverInterimResultOrdering.IsCompleteVictory(
+                actionCount: 1,
+                allEnemiesDead: false,
+                playerDead: false,
+                projectedPlayerHp: 80)
+            || !SolverInterimResultOrdering.IsCompleteVictory(
+                actionCount: 1,
+                allEnemiesDead: true,
+                playerDead: false,
+                projectedPlayerHp: 69))
+        {
+            throw new InvalidOperationException("未结束战斗的回合边界被错误发布为可采用路线。");
+        }
         if (CombatBeamSolver.DescribePotionProgressPhase(
                 displayNames,
                 SolverPotionPolicy.Disabled,

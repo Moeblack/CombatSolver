@@ -2,6 +2,16 @@ namespace CombatSolver;
 
 internal static class SolverInterimResultOrdering
 {
+    public static bool IsCompleteVictory(
+        int actionCount,
+        bool allEnemiesDead,
+        bool playerDead,
+        int projectedPlayerHp)
+        => actionCount > 0
+            && allEnemiesDead
+            && !playerDead
+            && projectedPlayerHp > 0;
+
     public static bool IsBetter(SolverInterimResult candidate, SolverInterimResult current)
     {
         if (candidate.Won != current.Won)
