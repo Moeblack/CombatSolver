@@ -86,7 +86,8 @@ internal sealed partial class CombatBeamSolver
                 frontierNodes,
                 endedNodes,
                 elapsedMs,
-                $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}"));
+                _progressPhaseOverride
+                ?? $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}"));
         }
 
         PublishProgress(_startTurnNumber, 0, 0, 1, 0, "初始化", force: true);

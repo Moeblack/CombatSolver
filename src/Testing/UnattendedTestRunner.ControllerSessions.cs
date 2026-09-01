@@ -114,11 +114,16 @@ internal sealed partial class UnattendedTestRunner
                 FrontierNodes: 0,
                 EndedNodes: 0,
                 ElapsedMilliseconds: 600,
-                Phase: "potion-audit-test"),
+                Phase: "正在搜索无药路线"),
             deployWhenReady: false,
             reviewedWorldlinesBeforeSearch: 5);
-        if (SolverOverlay.SearchProgressRatioForTesting < progressRatio)
+        if (SolverOverlay.SearchProgressRatioForTesting < progressRatio
+            || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
+                "正在搜索无药路线",
+                StringComparison.Ordinal) != true)
+        {
             throw new InvalidOperationException("药水补查开始后搜索进度条倒退。");
+        }
         if (SolverOverlay.ExecuteButtonTextForTesting != "停止计算")
             throw new InvalidOperationException("搜索期间执行按钮没有切换为停止计算。");
         if (!SolverOverlay.MessageWrappingEnabledForTesting)
@@ -565,6 +570,44 @@ internal sealed partial class UnattendedTestRunner
         };
         CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
+        Player player = LocalContext.GetMe(combat)
+            ?? throw new InvalidOperationException("药水阶段文案测试找不到本地玩家。");
+        (int Slot, PotionModel Potion) potion = Enumerable.Range(0, player.PotionSlots.Count)
+            .Select(slot => (Slot: slot, Potion: player.GetPotionAtSlotIndex(slot)))
+            .Where(item => item.Potion != null && PotionOnUseSupport.CanSearch(item.Potion))
+            .Select(item => (item.Slot, item.Potion!))
+            .First();
+        PlanAction potionAction = new(
+            PlanActionKind.UsePotion,
+            player.PlayerCombatState!.TurnNumber,
+            PotionSlot: potion.Slot,
+            PotionId: potion.Potion.Id.Entry);
+        string potionName = displayNames.Potion(potion.Potion.Id.Entry);
+        if (CombatBeamSolver.DescribePotionProgressPhase(
+                displayNames,
+                SolverPotionPolicy.Disabled,
+                maximumPotionUses: 0,
+                fixedPrefixActions: null) != "正在搜索无药路线"
+            || CombatBeamSolver.DescribePotionProgressPhase(
+                displayNames,
+                SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: 1,
+                fixedPrefixActions: [potionAction]) != $"正在搜索使用 {potionName} 路线"
+            || CombatBeamSolver.DescribePotionProgressPhase(
+                displayNames,
+                SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: 2,
+                fixedPrefixActions: [potionAction, potionAction])
+                != $"正在搜索使用 {potionName} 和 {potionName} 路线"
+            || CombatBeamSolver.DescribePotionProgressPhase(
+                displayNames,
+                SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: 3,
+                fixedPrefixActions: [potionAction, potionAction, potionAction])
+                != $"正在搜索使用 {potionName}、{potionName} 和 {potionName} 路线")
+        {
+            throw new InvalidOperationException("药水补查没有生成无药与任意多药阶段文案。");
+        }
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
         List<long> elapsedSamples = [];
         Stopwatch stopwatch = Stopwatch.StartNew();

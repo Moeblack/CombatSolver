@@ -49,6 +49,11 @@ internal sealed partial class CombatBeamSolver(
     private readonly bool _detailedDiagnostics = policy.DetailedDiagnostics;
     private readonly int? _maximumPotionUses = maximumPotionUses;
     private readonly IReadOnlyList<PlanAction> _fixedPrefixActions = fixedPrefixActions ?? [];
+    private readonly string? _progressPhaseOverride = DescribePotionProgressPhase(
+        displayNames,
+        potionPolicyOverride,
+        maximumPotionUses,
+        fixedPrefixActions);
     private readonly SolverTheftPolicy? _theftPolicy = policy.TheftPolicy;
     private readonly PotionStrategySnapshot _potionStrategy = policy.PotionStrategy;
     private readonly bool _forceAllPotionsDisabled = potionPolicyOverride == SolverPotionPolicy.Disabled;
@@ -89,5 +94,35 @@ internal sealed partial class CombatBeamSolver(
             potionId,
             _potionPolicy,
             _forceAllPotionsDisabled);
+
+    internal static string? DescribePotionProgressPhase(
+        SolverDisplayNames displayNames,
+        SolverPotionPolicy? potionPolicyOverride,
+        int? maximumPotionUses,
+        IReadOnlyList<PlanAction>? fixedPrefixActions)
+    {
+        if (potionPolicyOverride == SolverPotionPolicy.Disabled)
+            return "正在搜索无药路线";
+
+        string[] potionNames = (fixedPrefixActions ?? [])
+            .Where(action => action.Kind == PlanActionKind.UsePotion && action.PotionId != null)
+            .Select(action => displayNames.Potion(action.PotionId!))
+            .ToArray();
+        if (potionNames.Length == 1)
+            return $"正在搜索使用 {potionNames[0]} 路线";
+        if (potionNames.Length == 2)
+            return $"正在搜索使用 {potionNames[0]} 和 {potionNames[1]} 路线";
+        if (potionNames.Length > 2)
+        {
+            return $"正在搜索使用 {string.Join("、", potionNames[..^1])} " +
+                $"和 {potionNames[^1]} 路线";
+        }
+        if (potionPolicyOverride == SolverPotionPolicy.RequireAtLeastOne
+            || potionPolicyOverride == SolverPotionPolicy.Smart && maximumPotionUses.HasValue)
+        {
+            return "正在搜索用药路线";
+        }
+        return null;
+    }
 
 }

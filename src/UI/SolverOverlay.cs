@@ -127,8 +127,11 @@ internal static class SolverOverlay
         bool original = _performanceHintButton.Visible;
         SetPerformanceHintVisible(true);
         bool visible = _performanceHintButton.Visible
+            && _performanceHintButton.Text.Contains("本场战斗出现战损", StringComparison.Ordinal)
+            && _performanceHintButton.Text.Contains("若对结果不满意", StringComparison.Ordinal)
             && _performanceHintButton.Text.Contains("设置 > 性能", StringComparison.Ordinal)
-            && _performanceHintButton.Text.Contains("高或极高", StringComparison.Ordinal);
+            && _performanceHintButton.Text.Contains("高或极高", StringComparison.Ordinal)
+            && _performanceHintButton.Text.Contains("点击本提示可直接跳转", StringComparison.Ordinal);
         SetPerformanceHintVisible(original);
         return visible;
     }
@@ -232,8 +235,12 @@ internal static class SolverOverlay
             _progressText.Visible = true;
             _progressText.Text = $"已用 {progress.ElapsedMilliseconds / 1000d:F1} s";
         }
+        string potionSearchPhase = progress.Phase.StartsWith("正在搜索", StringComparison.Ordinal)
+            ? progress.Phase + " · "
+            : string.Empty;
         SetReviewText(
-            $"已查阅 {reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线");
+            $"{potionSearchPhase}已查阅 " +
+            $"{reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线");
         if (_searchProgressBar != null)
         {
             _searchProgressBar.Visible = true;
@@ -1012,12 +1019,13 @@ internal static class SolverOverlay
     private static Control CreatePerformanceHint()
     {
         _performanceHintButton = SolverUiTokens.CreateButton(
-            "有战损：前往 设置 > 性能，将性能预设调为高或极高后重试",
+            "本场战斗出现战损，若对结果不满意可以前往 设置 > 性能，将性能预设调为高或极高后重试。点击本提示可直接跳转",
             SolverButtonStyle.Secondary);
         _performanceHintButton.Name = "PerformanceHint";
         _performanceHintButton.Visible = false;
         _performanceHintButton.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        _performanceHintButton.CustomMinimumSize = new Vector2(0, 30);
+        _performanceHintButton.CustomMinimumSize = new Vector2(0, 44);
+        _performanceHintButton.AutowrapMode = TextServer.AutowrapMode.WordSmart;
         _performanceHintButton.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
             SolverUiTokens.IsLightTheme ? Warning.Lightened(0.82f) : Warning.Darkened(0.78f),
             Warning,
