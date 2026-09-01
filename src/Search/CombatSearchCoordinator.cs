@@ -1,5 +1,4 @@
 using MegaCrit.Sts2.Core.Combat;
-using MegaCrit.Sts2.Core.Models.Relics;
 
 namespace CombatSolver;
 
@@ -1306,93 +1305,22 @@ internal static class CombatSearchCoordinator
             shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
             forcedDeepTriggered);
 
-        List<SolverResult> searches = [primary, forcedPotion];
-        PlanAction[] prefix = PrefixThroughFirstPotion(forcedPotion);
-        if (prefix.Length > 0)
-        {
-            SolverResult posterior = new CombatBeamSolver(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                profile,
-                shortCheckpointMilliseconds,
-                SolverPotionPolicy.RequireAtLeastOne,
-                baseline,
-                maximumPotionUses: 1,
-                fixedPrefixActions: prefix).Solve();
-            bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
-                && posterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
-            posterior.SearchPhase = posteriorDeepTriggered
-                ? SolverSearchPhase.Deep
-                : SolverSearchPhase.Short;
-            posterior.DeepSearchTriggered = posteriorDeepTriggered;
-            posterior.DeepSearchImprovedResult = false;
-            posterior.SingleSessionSearch = true;
-            PopulateSingleSessionTotals(
-                posterior,
-                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
-                posteriorDeepTriggered);
-            searches.Add(posterior);
-
-            bool posteriorWon = posterior.Snapshot.AllEnemiesDead
-                && !posterior.Snapshot.PlayerDead
-                && posterior.Snapshot.ProjectedPlayerHp > 0;
-            bool forcedSearchWon = forcedPotion.Snapshot.AllEnemiesDead
-                && !forcedPotion.Snapshot.PlayerDead
-                && forcedPotion.Snapshot.ProjectedPlayerHp > 0;
-            int posteriorDeficit = StrategicHpDeficit(root, posterior);
-            int forcedDeficit = StrategicHpDeficit(root, forcedPotion);
-            if (posteriorWon
-                && (!forcedSearchWon
-                    || posteriorDeficit < forcedDeficit
-                    || posteriorDeficit == forcedDeficit && posterior.BestNode.Score > forcedPotion.BestNode.Score))
-            {
-                forcedPotion = posterior;
-            }
-            policy.Diagnostics.Info(
-                $"[CombatSolver/Test] SMART_POTION_POSTERIOR prefix_actions={prefix.Length} " +
-                $"won={posteriorWon} hp_deficit={posteriorDeficit} " +
-                $"selected={ReferenceEquals(forcedPotion, posterior)}");
-        }
-
-        bool forcedWon = forcedPotion.Snapshot.AllEnemiesDead
-            && !forcedPotion.Snapshot.PlayerDead
-            && forcedPotion.Snapshot.ProjectedPlayerHp > 0;
-        int hpSaved = CorrectedPotionHpSaved(root, forcedPotion, primary);
-        int ambergrisCount = forcedPotion.BestNode.Actions.Count(action =>
-            action.Kind == PlanActionKind.UsePotion
-            && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
-        bool renewablePotionShapedRock = root.PlayerIdentity.Relics
-            .OfType<PetrifiedToad>()
-            .Any(static relic => !relic.IsMelted);
-        int strategicHpCost = forcedPotion.BestNode.Actions
-            .Where(action => action.Kind == PlanActionKind.UsePotion && action.PotionId != null)
-            .Sum(action => PotionUsePolicy.StrategicHpCost(
-                action.PotionId!,
-                renewablePotionShapedRock));
-        int hpRequired = PotionUsePolicy.EffectiveStrategicHpCost(
-            strategicHpCost,
-            ambergrisCount,
-            root.InitialPlayerMaxHp);
-        if (ambergrisCount == 0 && primaryWon)
-            hpRequired = PotionUsePolicy.SmartRequiredHpSaved(hpRequired, primaryHpDeficit);
-        bool protectsMoreLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
-            && forcedPotion.OutstandingStolenResource < primary.OutstandingStolenResource;
-        bool selectPotion = forcedWon
-            && (!primaryWon || protectsMoreLoot || hpSaved >= hpRequired);
-        forcedPotion.PotionHpSaved = hpSaved;
-        forcedPotion.PotionHpRequired = hpRequired;
-        SolverResult selected = selectPotion ? forcedPotion : primary;
-        MergeAuditTotals(selected, [.. searches]);
+        SolverResult audited = AuditSmartPotionUse(
+            root,
+            displayNames,
+            battleDamage,
+            policy,
+            cancellationToken,
+            progressCallback,
+            profile,
+            shortCheckpointMilliseconds,
+            forcedPotion);
+        bool selectedPotion = audited.PotionCount > 0;
+        MergeAuditTotals(audited, primary, audited);
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SMART_POTION_INTERVENTION result " +
-            $"forced_won={forcedWon} saved={hpSaved} required={hpRequired} " +
-            $"protects_more_loot={protectsMoreLoot} " +
-            $"selected={(selectPotion ? "potion_route" : "potion_free")}");
-        return selected;
+            $"selected={(selectedPotion ? "potion_route" : "potion_free")}");
+        return audited;
     }
 
     private static PlanAction[] PrefixThroughFirstPotion(SolverResult result)
