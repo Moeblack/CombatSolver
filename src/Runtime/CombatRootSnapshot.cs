@@ -31,7 +31,8 @@ internal sealed class CombatRootSnapshot
     public CombatSide CurrentSide { get; }
     public PlayerTurnPhase PlayerPhase { get; }
     public RoomType? EncounterRoomType { get; }
-    public bool IsActEndingBoss { get; }
+    public BossHpRelief BossHpRelief { get; }
+    public bool IsActEndingBoss => BossHpRelief != BossHpRelief.None;
     public double CaptureElapsedMilliseconds { get; }
     public int CapturedCardCount { get; }
     public int CapturedPowerCount { get; }
@@ -59,7 +60,7 @@ internal sealed class CombatRootSnapshot
         CombatSide currentSide,
         PlayerTurnPhase playerPhase,
         RoomType? encounterRoomType,
-        bool isActEndingBoss,
+        BossHpRelief bossHpRelief,
         double captureElapsedMilliseconds,
         int capturedCardCount,
         int capturedPowerCount,
@@ -86,7 +87,7 @@ internal sealed class CombatRootSnapshot
         CurrentSide = currentSide;
         PlayerPhase = playerPhase;
         EncounterRoomType = encounterRoomType;
-        IsActEndingBoss = isActEndingBoss;
+        BossHpRelief = bossHpRelief;
         CaptureElapsedMilliseconds = captureElapsedMilliseconds;
         CapturedCardCount = capturedCardCount;
         CapturedPowerCount = capturedPowerCount;
@@ -190,7 +191,7 @@ internal sealed class CombatRootSnapshot
             state.CurrentSide,
             playerState.Phase,
             state.Encounter?.RoomType,
-            ActEndingBossPolicy.IsRecoveryFight(state),
+            ActEndingBossPolicy.ResolveHpRelief(state),
             stopwatch.Elapsed.TotalMilliseconds,
             cardCount,
             powerCount,
