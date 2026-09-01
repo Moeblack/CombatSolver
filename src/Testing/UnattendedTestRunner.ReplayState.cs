@@ -95,8 +95,12 @@ internal sealed partial class UnattendedTestRunner
             RequiredString(root, "exactContinuationState"));
         ReloadRunSnapshotRng((RunState)combatState.RunState, player, runSnapshotPath);
 
-        ContinuationStamp expected = new(RequiredString(root, "exactContinuationState"));
-        ContinuationStamp actual = ContinuationStamp.CaptureLive(combatState);
+        string expectedState = RequiredString(root, "exactContinuationState");
+        string actualState = ContinuationStamp.CaptureLive(combatState).StateText;
+        if (!expectedState.Contains("/baselib=", StringComparison.Ordinal))
+            actualState = actualState.Replace("/baselib=-", "", StringComparison.Ordinal);
+        ContinuationStamp expected = new(expectedState);
+        ContinuationStamp actual = new(actualState);
         if (!ReplayContinuationMatches(expected.StateText, actual.StateText))
         {
             throw new InvalidOperationException(
