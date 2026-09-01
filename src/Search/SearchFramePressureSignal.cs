@@ -16,6 +16,7 @@ internal sealed class SearchFramePressureSignal
     private long _frameSequence;
     private int _pressureEpoch;
     private int _recoveryEnabled = 1;
+    private int _frameRecoveryAllowed = 1;
     private double _baselineFrameGapMilliseconds = DefaultBaselineFrameGapMilliseconds;
     private double _pressureFrameGapMilliseconds = MinimumPressureFrameGapMilliseconds;
 
@@ -26,6 +27,7 @@ internal sealed class SearchFramePressureSignal
         => Volatile.Read(ref _pressureFrameGapMilliseconds);
 
     public bool RecoveryEnabled => Volatile.Read(ref _recoveryEnabled) != 0;
+    public bool FrameRecoveryAllowed => Volatile.Read(ref _frameRecoveryAllowed) != 0;
 
     public int BaselineSampleCount => _idleFrameGapCount;
     internal int PressureEpochForTesting => Volatile.Read(ref _pressureEpoch);
@@ -39,11 +41,18 @@ internal sealed class SearchFramePressureSignal
             Math.Max(MinimumPressureFrameGapMilliseconds, baseline * RelativePressureFactor));
         Volatile.Write(ref _pressureEpoch, 0);
         Volatile.Write(ref _recoveryEnabled, recoveryEnabled ? 1 : 0);
+        Volatile.Write(ref _frameRecoveryAllowed, recoveryEnabled ? 1 : 0);
     }
 
-    public void ObserveFrame(double milliseconds, bool searchActive)
+    public void ObserveFrame(
+        double milliseconds,
+        bool searchActive,
+        bool frameRecoveryAllowed = true)
     {
         Interlocked.Increment(ref _frameSequence);
+        Volatile.Write(ref _frameRecoveryAllowed, frameRecoveryAllowed ? 1 : 0);
+        if (!frameRecoveryAllowed)
+            return;
         if (!searchActive)
         {
             RecordIdleFrame(milliseconds);
@@ -56,8 +65,15 @@ internal sealed class SearchFramePressureSignal
 
     public bool WaitForRecovery(ref int observedPressureEpoch)
     {
-        if (Volatile.Read(ref _recoveryEnabled) == 0)
+        if (Volatile.Read(ref _recoveryEnabled) == 0
+            || Volatile.Read(ref _frameRecoveryAllowed) == 0)
+        {
+            // Consume any pressure raised before the window lost focus. Otherwise every
+            // persistent worker would pay one stale recovery wait while the game is
+            // intentionally background-capped.
+            observedPressureEpoch = Volatile.Read(ref _pressureEpoch);
             return false;
+        }
         int pressureEpoch = Volatile.Read(ref _pressureEpoch);
         if (pressureEpoch == observedPressureEpoch)
             return false;

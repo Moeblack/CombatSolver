@@ -12,12 +12,16 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
-| `INFESTED-PRISMS-V0251-FULL-SMART-DOP8-A/B` | 通过（最终 DLL、最新上游同根完整搜索） | 上游/候选阶段墙钟 `112798.755 → 16637.581 ms`，加速 `6.78×`；候选峰值工作集 `12,251,885,568 B`。请求累计 `24109/157893/69006` 展开/转移/选牌分支，选中 solver 为 `5861/31244/12125`；保持 `42 HP`、预计战损 `18`、第 `7` 回合和同一动作路线。候选 runId `1d06fe91c3854fb2aa70dd7c66ead7fd`。 | 2026-09-02 |
+| `INFESTED-PRISMS-V0251-FULL-SMART-DOP8-A/B` | 通过（最终安全 admission、最新上游同根完整搜索） | 上游/最终阶段墙钟 `112798.755 → 9238.272 ms`，加速 `12.21×`；外部采样峰值 RSS `11,408,240,640 B`。请求累计 `24109/157893/69006` 展开/转移/选牌分支，选中 solver 为 `5861/31244/12125`；保持 `42 HP`、预计战损 `18`、第 `7` 回合和同一动作路线。runId `9223295dad4e43fe9b85f053cdc6b026`。 | 2026-09-02 |
 | `LONG-LINE-V0251-FULL-SMART-DOP8-A/B` | 通过（四个公开合成长线根） | Silent 396、Necrobinder、Mecha、Queen 的上游→候选阶段墙钟为 `120464.516→55984.737`、`120399.236→29898.891`、`23853.522→8034.665`、`67789.142→29062.616 ms`，加速 `2.15×/4.03×/2.97×/2.33×`；胜负、战损、回合与动作语义不退化。 | 2026-09-02 |
 | `SILENT-396-NOGC-BUDGET-BALANCE` | 通过（同根 16/4/2 GB） | `4 GB` 为 `53440.887 ms`、峰值工作集 `4.60 GB`，同 16 GB 路线和工作量且相对上游加速 `2.25×`；`2 GB` 为 `54006.365 ms`、峰值约 `3.4 GB`，同路线且加速 `2.23×`。证明预算是玩家可见的速度/内存权衡，不被预设改写或静默钳制。runId `86b10633dd78400fb9176877855074d3` / `fb93590ed2c04cc7b602fe16ea33f824`。 | 2026-09-02 |
 | `PERF-NOGC-TOGGLE-DOP-LIFECYCLE-V0251` | 通过（headless GC/DOP 时序门） | 实际覆盖 NoGC→常规 GC→NoGC、切换中手动回收、关闭模式活动计数、搜索检查点吸收手动回收、引用释放后生命周期补账、`1→2 GB` 重建、取消工作量精确一次、节点快照释放及 DOP1/DOP2 全字段等价和真实并发。runId `df0ab7f8f52c41a2b856aea39c411f49`。 | 2026-09-02 |
 | `SEARCH-GC-CLR-UPSTREAM-SHORT-FINAL` | 通过（关闭态端到端） | 配置保留 `false / 17,000,000,000 B`，实际为区域未激活、预算 `0 B`、latency `Interactive`；CLR 可自主回收，不把 GC 次数或 pause 错断言为零。runId `6473c714239b4f63a8735b9291d47629`。 | 2026-09-02 |
 | `NOGC-SETTINGS-CONTROLLER-LIFECYCLE-FINAL` | 通过（设置页与 Reset 生命周期） | 新装默认开关与 16 GB、旧 JSON、关闭后预算保留、UI 控件归属均通过；全程关闭的 Reset 不建立自动 GC 根屏障，已启用模式的旧义务仍安全结清。runId `50b51af7a92f42948862686001b1b2cb`。 | 2026-09-02 |
+| `PARALLEL-WAVE-ROUND-CHOICE-FINAL` | 通过（安全准入、玩家根与并行指标） | 每个并发 parent 按全局高水位 `1.5×` 预约，never-fit 纯串行，仅 multi-parent 成功 wave 扩宽；自然 singleton action replay、round-choice 唯一所有权及原序合并均实际命中。EXOSKELETONS DOP8 为 `5,686 / 199,522 / 175,150`、`44.608 s`、T4/掉 1；`max parent/action/round = 8/8/5`，runId `6ae1570a41054d369669d65895d285db`。最终 DOP1/DOP2 全政策字段等价、Fork/根快照边界通过，runId `66ca91f7b0934ea6aefd69d4ff563826`。 | 2026-09-02 |
+| `PERF-PLAYER-ROOTS-FINAL` | 通过（最终安全 admission 的 3 个性能根） | INFESTED `24,109 / 157,893 / 69,006`、`9.238 s`、42 HP/T7，runId `9223295dad4e43fe9b85f053cdc6b026`；PHANTASMAL `24,526 / 477,315 / 353,923`、`79.593 s`、4 HP/T7，runId `cb626b16229c4e98b26052848b2031cd`；EXOSKELETONS 如上通过。AEONGLASS 已转独立质量分支，未用开发期激进 admission 的数字冒充最终性能验收。 | 2026-09-02 |
+| `PERF-EXOSKELETONS-DOP-SWEEP` | 通过（最终安全 admission、同结果并行扩展） | DOP4/8/12/16 均返回同一 `5,686 / 199,522 / 175,150`、96 HP/T4 路线，墙钟为 `44.896 / 44.608 / 43.157 / 43.082 s`；runId `53c14038d4984e9cac9c0113c6861991`、`6ae1570a41054d369669d65895d285db`、`d2029212067941978790f232ff126680`、`e53770540a464f4e94dec64d830e17d0`。DOP4→16 只快 `4.0%`，12→16 仅 `0.2%`，因此开放 16 但仍默认 DOP4。 | 2026-09-02 |
+| `PERF-NOGC-LONG-ROOT-CHECKPOINTS` | 通过（安全点与峰值内存） | 最终 INFESTED/PHANTASMAL/EXOSKELETONS 分别跨越 `1/5/10` 个 `SEARCH_MEMORY_CHECKPOINT/RESUMED` 成对边界；长线可退出区域、回收并继续。外部 `/proc` 采样峰值 RSS：`11,408,240,640 / 12,475,080,704 / 8,715,677,696 B`。 | 2026-09-02 |
 | `PERF-V0251-VISIBLE-STEAM` | 未验证（Steam 客户端阻断） | 可见门已尝试三次，最近一次仍未在 `60 s` 内启动游戏；没有留下游戏进程，协议文件已恢复。当前数据来自隔离 Linux headless，不替代完整 Mod 组合下的主线程 p95/p99/max 和可见搜索吞吐。 | 2026-09-02 |
 
 ## 0.25.1（已发布）

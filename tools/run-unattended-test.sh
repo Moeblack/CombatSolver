@@ -347,8 +347,8 @@ done
 
 ((option_value[ascension] >= 0 && option_value[ascension] <= 10)) || die "--ascension must be between 0 and 10"
 search_max_dop="${option_value[search-max-degree-of-parallelism-for-test]}"
-((search_max_dop == -1 || (search_max_dop >= 1 && search_max_dop <= 8))) || \
-    die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 8"
+((search_max_dop == -1 || (search_max_dop >= 1 && search_max_dop <= 16))) || \
+    die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 16"
 for name in expected-initial-deep-search-triggered expected-initial-deep-search-improved-result \
     expected-initial-only-death-routes-found expected-initial-act-ending-boss \
     enable-no-gc-region-for-test enable-detailed-diagnostic-logs-for-test; do

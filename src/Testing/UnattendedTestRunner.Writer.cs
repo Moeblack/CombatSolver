@@ -49,6 +49,22 @@ internal sealed partial class UnattendedTestRunner
                 TotalGcPauseMilliseconds = result.TotalGcPauseDuration.TotalMilliseconds,
                 MaxGcPauseMilliseconds = result.TotalMaxObservedGcPause.TotalMilliseconds,
                 MaxParallelConcurrency = result.MaxParallelExpansionConcurrency,
+                ParallelActionReplayWaves = result.ParallelActionReplayWaves,
+                ParallelActionReplayWorkItems = result.ParallelActionReplayWorkItems,
+                MaxParallelActionReplayConcurrency = result.MaxParallelActionReplayConcurrency,
+                DeferredRoundChoiceActions = result.DeferredRoundChoiceActions,
+                DeferredRoundChoiceLayerWidthTotal = result.DeferredRoundChoiceLayerWidthTotal,
+                MaxDeferredRoundChoiceLayerWidth = result.MaxDeferredRoundChoiceLayerWidth,
+                DeferredRoundChoiceFiniteQuotaFallbacks =
+                    result.DeferredRoundChoiceFiniteQuotaFallbacks,
+                DeferredRoundChoiceFinitePrimaryLayers =
+                    result.DeferredRoundChoiceFinitePrimaryLayers,
+                DeferredRoundChoiceFinitePendingFallbacks =
+                    result.DeferredRoundChoiceFinitePendingFallbacks,
+                ParallelRoundChoiceReplayWaves = result.ParallelRoundChoiceReplayWaves,
+                ParallelRoundChoiceReplayWorkItems = result.ParallelRoundChoiceReplayWorkItems,
+                MaxParallelRoundChoiceReplayConcurrency =
+                    result.MaxParallelRoundChoiceReplayConcurrency,
                 SearchedTurns = result.SearchedTurns,
                 ShufflesCrossed = result.Snapshot.ShufflesCrossed,
                 Score = result.BestNode.Score,

@@ -50,8 +50,13 @@ public static class Entry
         patcher.RegisterPatch<RitsuFreePlayResolveIsolationPatch>();
         patcher.RegisterPatch<RitsuDefaultCapabilityRegistrationPatch>();
         patcher.RegisterPatch<RitsuEmptyCardTypeFastPathPatch>();
+        patcher.RegisterPatch<RitsuEmptyCardRarityFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyEnergyContributorFastPathPatch>();
         patcher.RegisterPatch<RitsuEmptyEnergyCostFastPathPatch>();
+        patcher.RegisterPatch<RitsuEmptyStarContributorFastPathPatch>();
+        patcher.RegisterPatch<RitsuEmptyStarCostFastPathPatch>();
+        patcher.RegisterPatch<RitsuEmptyCanPlayFastPathPatch>();
+        patcher.RegisterPatch<SimulationCardPileLookupPatch>();
         patcher.RegisterPatch<BaseLibCloneConcurrencyPatch>();
         patcher.RegisterPatch<PowerDynamicVarMaterializationGuardPatch>();
         patcher.RegisterPatch<UnattendedTestIsolationPatch>();

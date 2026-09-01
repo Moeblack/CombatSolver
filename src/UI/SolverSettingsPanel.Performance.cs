@@ -78,7 +78,7 @@ internal sealed partial class SolverSettingsPanel
             budgetGrid,
             "搜索并行度",
             CreateSearchParallelismInput(),
-            "关闭时使用单线程搜索；2–8 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。默认按可用逻辑处理器自动选择 4、2 或单线程；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
+            "关闭时使用单线程搜索；2–16 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力；超过物理核心数通常只有小幅收益。默认按可用逻辑处理器自动选择 4、2 或单线程；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
         _noGcRegionEnabled = CreateToggle();
         _noGcRegionEnabled.Toggled += OnNoGcRegionEnabledToggled;
         AddBasicRow(

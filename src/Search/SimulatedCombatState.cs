@@ -37,7 +37,8 @@ internal sealed partial class SimulatedCombatState
       ICombatPredictionCreatureSemantics, ICombatPredictionMonsterStateSink,
       ICombatPredictionCardExecutionSink, ICombatPredictionEnemyDeathSink,
       ICombatPredictionPendingChoiceState,
-      ICombatPredictionRunSnapshot, ICombatPredictionPlayerLimits, ICombatPredictionPlayerCardRules,
+      ICombatPredictionRunSnapshot, ICombatPredictionCardGenerationPoolSnapshot,
+      ICombatPredictionPlayerLimits, ICombatPredictionPlayerCardRules,
       ICombatPredictionPetState,
       ICombatPredictionStateOwner, ICombatPredictionRootCaptureBoundary,
       ICombatPredictionRootMaterializable, IPredictionForkBoundary
@@ -69,6 +70,7 @@ internal sealed partial class SimulatedCombatState
     private readonly CardMultiplayerConstraint _cardMultiplayerConstraint;
     private readonly PredictionModHookSubscriberCapture _modHookSubscribers;
     private readonly IReadOnlyDictionary<Player, int> _rootMaxHandSizes;
+    private readonly RootCombatCardGenerationPoolSnapshot _rootCardGenerationPools;
 
     private sealed class CombinedRosterView(
         IReadOnlyList<Creature> first,
@@ -216,6 +218,9 @@ internal sealed partial class SimulatedCombatState
         _cardMultiplayerConstraint = inner.RunState.CardMultiplayerConstraint;
         _playerCreatures = inner.PlayerCreatures.ToArray();
         _players = inner.Players.ToArray();
+        _rootCardGenerationPools = RootCombatCardGenerationPoolSnapshot.Capture(
+            _players,
+            _cardMultiplayerConstraint);
         _encounter = inner.Encounter;
         _encounterSlots = inner.Encounter?.Slots.ToArray() ?? [];
         _rootHistory = RootCombatHistorySnapshot.Capture();
@@ -390,6 +395,7 @@ internal sealed partial class SimulatedCombatState
         _cardMultiplayerConstraint = source._cardMultiplayerConstraint;
         _modHookSubscribers = source._modHookSubscribers;
         _rootMaxHandSizes = source._rootMaxHandSizes;
+        _rootCardGenerationPools = source._rootCardGenerationPools;
         _playerCreatures = source._playerCreatures;
         _players = source._players;
         _modifiers = source._modifiers;
@@ -420,6 +426,29 @@ internal sealed partial class SimulatedCombatState
     internal RoomType? CurrentRoomType => _currentRoomType;
     internal MapCoord? CurrentMapCoord => _currentMapCoord;
     public CardMultiplayerConstraint CardMultiplayerConstraint => _cardMultiplayerConstraint;
+
+    bool ICombatPredictionCardGenerationPoolSnapshot.TryGetRootEligibleCards(
+        Player player,
+        CardPoolModel cardPool,
+        CardMultiplayerConstraint multiplayerConstraint,
+        out IReadOnlyList<CardModel> cards)
+        => _rootCardGenerationPools.TryGetEligibleCards(
+            player,
+            cardPool,
+            multiplayerConstraint,
+            out cards);
+
+    bool ICombatPredictionCardGenerationPoolSnapshot.TryGetRootEligibleCharacterAttackCards(
+        Player player,
+        CardPoolModel cardPool,
+        CardMultiplayerConstraint multiplayerConstraint,
+        out IReadOnlyList<CardModel> cards)
+        => _rootCardGenerationPools.TryGetEligibleCharacterAttackCards(
+            player,
+            cardPool,
+            multiplayerConstraint,
+            out cards);
+
     public IReadOnlyList<Creature> Allies => _allies;
     public IReadOnlyList<Creature> Enemies => _enemies;
     public IReadOnlyList<Creature> KnownEnemies => _knownEnemies;

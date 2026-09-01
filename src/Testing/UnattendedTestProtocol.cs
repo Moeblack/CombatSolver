@@ -455,6 +455,18 @@ internal sealed class UnattendedSolverMetrics
     public double TotalGcPauseMilliseconds { get; init; }
     public double MaxGcPauseMilliseconds { get; init; }
     public int MaxParallelConcurrency { get; init; }
+    public int ParallelActionReplayWaves { get; init; }
+    public int ParallelActionReplayWorkItems { get; init; }
+    public int MaxParallelActionReplayConcurrency { get; init; }
+    public int DeferredRoundChoiceActions { get; init; }
+    public int DeferredRoundChoiceLayerWidthTotal { get; init; }
+    public int MaxDeferredRoundChoiceLayerWidth { get; init; }
+    public int DeferredRoundChoiceFiniteQuotaFallbacks { get; init; }
+    public int DeferredRoundChoiceFinitePrimaryLayers { get; init; }
+    public int DeferredRoundChoiceFinitePendingFallbacks { get; init; }
+    public int ParallelRoundChoiceReplayWaves { get; init; }
+    public int ParallelRoundChoiceReplayWorkItems { get; init; }
+    public int MaxParallelRoundChoiceReplayConcurrency { get; init; }
     public int SearchedTurns { get; init; }
     public int ShufflesCrossed { get; init; }
     public double Score { get; init; }

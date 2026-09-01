@@ -554,6 +554,18 @@ internal sealed class SolverResult
     public int ParallelExpansionWaves { get; init; }
     public int ParallelExpansionWorkItems { get; init; }
     public int MaxParallelExpansionConcurrency { get; init; }
+    public int ParallelActionReplayWaves { get; init; }
+    public int ParallelActionReplayWorkItems { get; init; }
+    public int MaxParallelActionReplayConcurrency { get; init; }
+    public int DeferredRoundChoiceActions { get; init; }
+    public int DeferredRoundChoiceLayerWidthTotal { get; init; }
+    public int MaxDeferredRoundChoiceLayerWidth { get; init; }
+    public int DeferredRoundChoiceFiniteQuotaFallbacks { get; init; }
+    public int DeferredRoundChoiceFinitePrimaryLayers { get; init; }
+    public int DeferredRoundChoiceFinitePendingFallbacks { get; init; }
+    public int ParallelRoundChoiceReplayWaves { get; init; }
+    public int ParallelRoundChoiceReplayWorkItems { get; init; }
+    public int MaxParallelRoundChoiceReplayConcurrency { get; init; }
     public int NodeLimitSnapshotsReleased { get; init; }
     public required int TransitionCacheHits { get; init; }
     public required long WorkerAllocatedBytes { get; init; }

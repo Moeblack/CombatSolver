@@ -20,7 +20,7 @@ param(
     [string]$OutputDirectory,
     [string[]]$ReportId,
     [string[]]$ExcludeReportId = @("52911e5d91de488aa8a7f51512314bf4"),
-    [ValidateRange(1, 8)]
+    [ValidateRange(1, 16)]
     [int]$SearchParallelism = 4,
     [ValidateSet("Disabled", "Smart", "RequireAtLeastOne")]
     [string]$PotionPolicy = "Smart",

@@ -1626,15 +1626,11 @@ internal static class SolverController
         if (_search is not { } search)
             return;
         SolverProgress? progress = Volatile.Read(ref search.Progress);
-        if (progress == null || ReferenceEquals(progress, search.RenderedProgress))
-            return;
         long now = System.Environment.TickCount64;
-        if (now - search.LastProgressRenderAt < SolverWeights.ProgressUiIntervalMilliseconds)
+        if (!search.ProgressDisplay.TryCreate(progress, now, out SolverProgress displayProgress))
             return;
-        search.LastProgressRenderAt = now;
-        search.RenderedProgress = progress;
         SolverOverlay.ShowProgress(
-            progress,
+            displayProgress,
             search.DeployWhenReady,
             _combat.ReviewedWorldlinesTotal);
     }
@@ -1644,7 +1640,15 @@ internal static class SolverController
         AssertMainThread();
         double milliseconds = gap.TotalMilliseconds;
         SolverSearchSession? search = _search;
-        FramePressureSignal.ObserveFrame(milliseconds, searchActive: IsSearching);
+        bool frameRecoveryAllowed = !string.Equals(
+                DisplayServer.GetName(),
+                "headless",
+                StringComparison.OrdinalIgnoreCase)
+            && DisplayServer.WindowIsFocused();
+        FramePressureSignal.ObserveFrame(
+            milliseconds,
+            searchActive: IsSearching,
+            frameRecoveryAllowed);
         if (search == null)
             return;
         search.ObserveFrame(milliseconds);
@@ -1736,7 +1740,6 @@ internal static class SolverController
             return;
         _search = null;
         Volatile.Write(ref search.Progress, null);
-        search.RenderedProgress = null;
         int generation = search.Generation;
         Entry.Logger.Info($"[CombatSolver/Test] SEARCH_CALLBACK generation={generation} thread={System.Environment.CurrentManagedThreadId} main_thread={NGame.IsMainThread()}");
         Entry.Logger.Info(

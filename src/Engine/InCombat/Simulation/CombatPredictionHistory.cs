@@ -295,7 +295,10 @@ internal sealed class CombatPredictionHistory(PredictionTrace trace)
         Record(new CombatPredictionCardGenerationOptionsEntry
         {
             Cards = SnapshotCards(cards),
-            Options = cards.Select(card => card.Clone()).ToArray(),
+            // Choice generators hand ownership of these prediction-only cards to history.
+            // The entry is immutable after publication; a selected option is cloned only
+            // when it is materialized into a branch's combat state.
+            Options = cards.ToArray(),
         });
     }
 

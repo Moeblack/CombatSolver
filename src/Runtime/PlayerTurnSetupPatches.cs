@@ -133,7 +133,7 @@ internal static class PlayerTurnSetupCoordinator
         public IReadOnlyList<PlanCardChoice>? ReplayChoices { get; } = replayChoices;
         public SolverResult? Result { get; set; }
         public SolverProgress? Progress;
-        public SolverProgress? RenderedProgress;
+        public SearchProgressDisplayState ProgressDisplay { get; } = new();
         public int SearchState;
         public int AdoptCurrentResultRequestState;
         public TaskCompletionSource ManualRecalculationRequested { get; set; } = new(
@@ -972,7 +972,7 @@ internal static class PlayerTurnSetupCoordinator
             original.RootSnapshot);
         int turn = active.Player.PlayerCombatState!.TurnNumber;
         active.Progress = null;
-        active.RenderedProgress = null;
+        active.ProgressDisplay.Restart(System.Environment.TickCount64);
         Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
         Interlocked.Exchange(ref active.ManualSearchState, 1);
         SolverOverlay.ShowSearching(
@@ -1014,13 +1014,14 @@ internal static class PlayerTurnSetupCoordinator
             while (!solveTask.IsCompleted)
             {
                 SolverProgress? progress = Volatile.Read(ref active.Progress);
-                if (progress != null
-                    && IsCurrentActivePlan(active)
-                    && !ReferenceEquals(progress, active.RenderedProgress))
-                {
-                    active.RenderedProgress = progress;
-                    SolverOverlay.ShowProgress(
+                if (IsCurrentActivePlan(active)
+                    && active.ProgressDisplay.TryCreate(
                         progress,
+                        System.Environment.TickCount64,
+                        out SolverProgress displayProgress))
+                {
+                    SolverOverlay.ShowProgress(
+                        displayProgress,
                         deployWhenReady: false,
                         SolverController.ReviewedWorldlinesTotal);
                 }
@@ -1087,6 +1088,7 @@ internal static class PlayerTurnSetupCoordinator
         }
         int turn = active.Player.PlayerCombatState!.TurnNumber;
         active.Choices.RecordSearchStarted();
+        active.ProgressDisplay.Restart(System.Environment.TickCount64);
         SolverOverlay.ShowSearching(
             host,
             turn,
@@ -1127,13 +1129,14 @@ internal static class PlayerTurnSetupCoordinator
             while (!solveTask.IsCompleted)
             {
                 SolverProgress? progress = Volatile.Read(ref active.Progress);
-                if (progress != null
-                    && IsCurrentActivePlan(active)
-                    && !ReferenceEquals(progress, active.RenderedProgress))
-                {
-                    active.RenderedProgress = progress;
-                    SolverOverlay.ShowProgress(
+                if (IsCurrentActivePlan(active)
+                    && active.ProgressDisplay.TryCreate(
                         progress,
+                        System.Environment.TickCount64,
+                        out SolverProgress displayProgress))
+                {
+                    SolverOverlay.ShowProgress(
+                        displayProgress,
                         deployWhenReady: false,
                         SolverController.ReviewedWorldlinesTotal);
                 }

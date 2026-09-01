@@ -135,6 +135,28 @@ internal sealed class RitsuEmptyCardTypeFastPathPatch : IPatchMethod
     }
 }
 
+internal sealed class RitsuEmptyCardRarityFastPathPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_ritsu_empty_card_rarity_fast_path";
+    public static string Description => "求解模拟跳过空 Ritsu capability 的卡牌稀有度贡献管线";
+
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        RitsuEmptyCapabilityFastPath.CardHostTarget(
+            "ApplyCardRarity",
+            typeof(CardModel),
+            typeof(CardRarity)),
+    ];
+
+    public static bool Prefix(CardModel card, CardRarity current, ref CardRarity __result)
+    {
+        if (!RitsuEmptyCapabilityFastPath.CanSkip(card))
+            return true;
+        __result = current;
+        return false;
+    }
+}
+
 internal sealed class RitsuEmptyEnergyContributorFastPathPatch : IPatchMethod
 {
     public static string PatchId => "combat_solver_ritsu_empty_energy_contributor_fast_path";
@@ -171,6 +193,71 @@ internal sealed class RitsuEmptyEnergyCostFastPathPatch : IPatchMethod
     ];
 
     public static bool Prefix(CardModel card, int current, ref int __result)
+    {
+        if (!RitsuEmptyCapabilityFastPath.CanSkip(card))
+            return true;
+        __result = current;
+        return false;
+    }
+}
+
+internal sealed class RitsuEmptyStarContributorFastPathPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_ritsu_empty_star_contributor_fast_path";
+    public static string Description => "求解模拟跳过空 Ritsu capability 的星能费用贡献者查询";
+
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        RitsuEmptyCapabilityFastPath.CardHostTarget(
+            "HasStarCostContributors",
+            typeof(CardModel)),
+    ];
+
+    public static bool Prefix(CardModel card, ref bool __result)
+    {
+        if (!RitsuEmptyCapabilityFastPath.CanSkip(card))
+            return true;
+        __result = false;
+        return false;
+    }
+}
+
+internal sealed class RitsuEmptyStarCostFastPathPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_ritsu_empty_star_cost_fast_path";
+    public static string Description => "求解模拟跳过空 Ritsu capability 的星能费用修改管线";
+
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        RitsuEmptyCapabilityFastPath.CardHostTarget(
+            "ApplyStarCost",
+            typeof(CardModel),
+            typeof(int)),
+    ];
+
+    public static bool Prefix(CardModel card, int current, ref int __result)
+    {
+        if (!RitsuEmptyCapabilityFastPath.CanSkip(card))
+            return true;
+        __result = current;
+        return false;
+    }
+}
+
+internal sealed class RitsuEmptyCanPlayFastPathPatch : IPatchMethod
+{
+    public static string PatchId => "combat_solver_ritsu_empty_can_play_fast_path";
+    public static string Description => "求解模拟跳过空 Ritsu capability 的卡牌可打出状态贡献管线";
+
+    public static ModPatchTarget[] GetTargets() =>
+    [
+        RitsuEmptyCapabilityFastPath.CardHostTarget(
+            "ApplyCanPlay",
+            typeof(CardModel),
+            typeof(bool)),
+    ];
+
+    public static bool Prefix(CardModel card, bool current, ref bool __result)
     {
         if (!RitsuEmptyCapabilityFastPath.CanSkip(card))
             return true;

@@ -191,6 +191,30 @@ internal sealed partial class UnattendedTestRunner
         if (signal.PressureEpochForTesting != 1)
             throw new InvalidOperationException("相对基线明显退化的帧没有触发搜索帧压力。");
 
+        int backgroundObservedEpoch = 0;
+        signal.ObserveFrame(
+            500d,
+            searchActive: true,
+            frameRecoveryAllowed: false);
+        if (signal.FrameRecoveryAllowed
+            || signal.PressureEpochForTesting != 1
+            || signal.WaitForRecovery(ref backgroundObservedEpoch)
+            || backgroundObservedEpoch != 1)
+        {
+            throw new InvalidOperationException(
+                "窗口失焦后的后台帧仍触发或继承了搜索帧恢复等待。");
+        }
+        signal.ObserveFrame(
+            50d,
+            searchActive: true,
+            frameRecoveryAllowed: true);
+        if (!signal.FrameRecoveryAllowed
+            || signal.WaitForRecovery(ref backgroundObservedEpoch))
+        {
+            throw new InvalidOperationException(
+                "窗口重新聚焦后仍继承失焦前的过期帧压力。");
+        }
+
         SearchFramePressureSignal sixtyFpsSignal = new();
         for (int index = 0; index < 31; index++)
             sixtyFpsSignal.ObserveFrame(1000d / 60d, searchActive: false);
@@ -230,6 +254,41 @@ internal sealed partial class UnattendedTestRunner
         signal.ResetPressure();
         if (signal.PressureEpochForTesting != 0)
             throw new InvalidOperationException("新搜索继承了上一轮帧压力 epoch。");
+
+        SearchProgressDisplayState progressDisplay = new(startedAtTick: 10_000);
+        SolverProgress sameProgress = new(
+            StartTurnNumber: 1,
+            CurrentTurnNumber: 1,
+            CompletedTurnLayers: 0,
+            PlayDepth: 0,
+            ExpandedNodes: 7,
+            ReviewedWorldlines: 37,
+            MaxNodes: 100,
+            FrontierNodes: 0,
+            EndedNodes: 0,
+            ElapsedMilliseconds: 100,
+            Phase: "test");
+        if (progressDisplay.TryCreate(sameProgress, 10_199, out _)
+            || !progressDisplay.TryCreate(sameProgress, 10_200, out SolverProgress firstDisplay)
+            || progressDisplay.TryCreate(sameProgress, 10_399, out _)
+            || !progressDisplay.TryCreate(sameProgress, 10_400, out SolverProgress secondDisplay)
+            || firstDisplay.ElapsedMilliseconds != 200
+            || secondDisplay.ElapsedMilliseconds != 400
+            || secondDisplay.ExpandedNodes != sameProgress.ExpandedNodes
+            || secondDisplay.ReviewedWorldlines != sameProgress.ReviewedWorldlines
+            || !string.Equals(secondDisplay.Phase, sameProgress.Phase, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "搜索计时器没有在复用同一进度对象时按 200ms 间隔保持单调。");
+        }
+
+        progressDisplay.Restart(20_000);
+        SolverProgress publishedAhead = sameProgress with { ElapsedMilliseconds = 4_000 };
+        if (!progressDisplay.TryCreate(publishedAhead, 20_200, out SolverProgress aheadDisplay)
+            || aheadDisplay.ElapsedMilliseconds != 4_000)
+        {
+            throw new InvalidOperationException("搜索计时器覆盖了 worker 发布的更大耗时。");
+        }
     }
 
     private static void AssertFullRngStateIdentity(CombatState combat)

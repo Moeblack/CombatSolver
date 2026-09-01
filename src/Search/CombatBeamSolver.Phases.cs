@@ -28,19 +28,11 @@ internal sealed partial class CombatBeamSolver
     {
         try
         {
-            SolverResult result = SolveCore();
-            RecordRequestWork();
-            return result;
+            return SolveCore();
         }
-        catch (OperationCanceledException)
+        finally
         {
             RecordRequestWork();
-            throw;
-        }
-        catch (PotionPolicyUnsatisfiedException)
-        {
-            RecordRequestWork();
-            throw;
         }
     }
 
@@ -254,6 +246,10 @@ internal sealed partial class CombatBeamSolver
         int initialHp = root.InitialPlayerHp;
         int searchedTurnLayers = 0;
         bool timeBudgetReached = false;
+        // A cheap first parent is not a safe predictor for the rest of a later play depth.
+        // Retain the largest observed parent for the whole search so a new depth cannot
+        // immediately rematerialize a wide wave that exceeds the No-GC allocation budget.
+        long parentAllocatedHighWater = 64L * 1024 * 1024;
         int reservedTurnLayers = _profile.Phase == SolverSearchPhase.Deep
             && root.EncounterRoomType == RoomType.Boss
                 ? SolverWeights.BossEnemyStrengthSuppressionHorizon
@@ -324,7 +320,8 @@ internal sealed partial class CombatBeamSolver
                     break;
                 }
                 if (!policy.VerifyIncrementalSearch
-                    && policy.MemoryPressureSignal.IsLimitReached())
+                    && (policy.MemoryPressureSignal.HasUnexpectedNoGcLoss()
+                        || policy.MemoryPressureSignal.IsLimitReached()))
                 {
                     policy.Diagnostics.Info(
                         $"[CombatSolver/Test] SEARCH_MEMORY_CHECKPOINT " +
@@ -339,7 +336,9 @@ internal sealed partial class CombatBeamSolver
                         ended.Count,
                         "回收内存",
                         force: true);
-                    _run.ResetRebuildableCaches(active);
+                    // Preserve coordinator transposition order across a GC-only safe point.
+                    // Rebuilding it from a mid-search subset would change which later branches win.
+                    _run.ResetReclaimableCaches();
                     parallelExpansionExecutor?.ResetRebuildableCaches();
                     policy.MemoryPressureSignal.ReclaimAndContinue(cancellationToken);
                     policy.Diagnostics.Info(
@@ -420,20 +419,148 @@ internal sealed partial class CombatBeamSolver
                 }
 
                 int activeIndex = 0;
+                int parallelWaveCapacity = policy.MemoryPressureSignal.IsEnabled
+                    ? Math.Min(2, expansionParallelism)
+                    : expansionParallelism;
+
+                long ParentAllocationReserve()
+                {
+                    return parentAllocatedHighWater >= long.MaxValue / 3 * 2
+                        ? long.MaxValue
+                        : parentAllocatedHighWater + parentAllocatedHighWater / 2;
+                }
+
+                long ParallelWaveAllocationReserve(int parentCount)
+                {
+                    if (parentCount <= 0)
+                        return 0;
+                    long parentReserve = ParentAllocationReserve();
+                    return parentReserve > long.MaxValue / parentCount
+                        ? long.MaxValue
+                        : parentReserve * parentCount;
+                }
+
+                int MemorySafeParallelWaveCapacity(int desiredCapacity)
+                {
+                    SearchMemoryPressureSignal signal = policy.MemoryPressureSignal;
+                    if (!signal.IsEnabled)
+                        return desiredCapacity;
+                    long parentReserve = ParentAllocationReserve();
+                    long capacity = signal.AllocationLimitBytes / Math.Max(1, parentReserve);
+                    return Math.Max(
+                        1,
+                        Math.Min(
+                            desiredCapacity,
+                            capacity >= int.MaxValue ? int.MaxValue : (int)capacity));
+                }
+
+                void ObserveParentAllocation(long allocatedBytes)
+                {
+                    if (allocatedBytes > parentAllocatedHighWater)
+                        parentAllocatedHighWater = allocatedBytes;
+                }
+
+                void ReclaimAtCommittedBoundary(string reason)
+                {
+                    SearchMemoryPressureSignal signal = policy.MemoryPressureSignal;
+                    long allocated = signal.AllocatedBytes;
+                    policy.Diagnostics.Info(
+                        $"[CombatSolver/Test] SEARCH_MEMORY_CHECKPOINT " +
+                        $"reason={reason} allocated={allocated} " +
+                        $"limit={signal.AllocationLimitBytes} " +
+                        $"parent_reserve={ParentAllocationReserve()} expanded={_run.Expanded} " +
+                        $"turn_layer={searchedTurnLayers} play_depth={playDepth}");
+                    PublishProgress(
+                        _startTurnNumber + searchedTurnLayers,
+                        searchedTurnLayers,
+                        playDepth,
+                        Math.Max(0, active.Count - activeIndex) + nextPlays.Count,
+                        ended.Count,
+                        "回收内存",
+                        force: true);
+                    _run.ResetReclaimableCaches();
+                    parallelExpansionExecutor?.ResetRebuildableCaches();
+                    signal.ReclaimAndContinue(cancellationToken);
+                    policy.Diagnostics.Info(
+                        $"[CombatSolver/Test] SEARCH_MEMORY_RESUMED " +
+                        $"reason={reason} checkpoint={signal.ReclaimCount} " +
+                        $"frontier={Math.Max(0, active.Count - activeIndex) + nextPlays.Count} " +
+                        $"ended={ended.Count} expanded={_run.Expanded} " +
+                        $"turn_layer={searchedTurnLayers} play_depth={playDepth}");
+                    PublishProgress(
+                        _startTurnNumber + searchedTurnLayers,
+                        searchedTurnLayers,
+                        playDepth,
+                        Math.Max(0, active.Count - activeIndex) + nextPlays.Count,
+                        ended.Count,
+                        "继续搜索",
+                        force: true);
+                }
+
+                bool EnsureMemoryForNextCommit(long reservedBytes, string reason)
+                {
+                    SearchMemoryPressureSignal signal = policy.MemoryPressureSignal;
+                    if (!policy.VerifyIncrementalSearch && signal.HasUnexpectedNoGcLoss())
+                    {
+                        ReclaimAtCommittedBoundary("unexpected_no_gc_loss");
+                        return signal.IsEnabled;
+                    }
+                    if (policy.VerifyIncrementalSearch
+                        || !signal.IsEnabled
+                        || signal.CanReachCommit(reservedBytes))
+                    {
+                        return true;
+                    }
+                    bool reserveCanEverFit = reservedBytes <= signal.AllocationLimitBytes;
+                    if (signal.AllocatedBytes > 0
+                        && (reserveCanEverFit || signal.IsLimitReached()))
+                        ReclaimAtCommittedBoundary(reason);
+                    return signal.CanReachCommit(reservedBytes);
+                }
+
+                void ReclaimAfterCommittedWork(string reason)
+                {
+                    SearchMemoryPressureSignal signal = policy.MemoryPressureSignal;
+                    if (!policy.VerifyIncrementalSearch && signal.HasUnexpectedNoGcLoss())
+                    {
+                        ReclaimAtCommittedBoundary("unexpected_no_gc_loss");
+                        return;
+                    }
+                    bool hasMoreParents = activeIndex < active.Count
+                        && _run.Expanded < _profile.MaxExpandedNodes;
+                    if (policy.VerifyIncrementalSearch || !signal.IsEnabled || !hasMoreParents)
+                        return;
+                    long reserve = ParentAllocationReserve();
+                    bool reserveCanEverFit = reserve <= signal.AllocationLimitBytes;
+                    if (signal.IsLimitReached()
+                        || (reserveCanEverFit && !signal.CanReachCommit(reserve)))
+                        ReclaimAtCommittedBoundary(reason);
+                }
+
+                void ExpandNextSerially()
+                {
+                    SearchMemoryPressureSignal signal = policy.MemoryPressureSignal;
+                    EnsureMemoryForNextCommit(ParentAllocationReserve(), "before_serial_parent");
+                    long allocatedBefore = signal.AllocatedBytes;
+                    SearchNode node = active[activeIndex];
+                    foreach (SearchNode child in Expand(node))
+                    {
+                        AcceptExpandedChild(node, child);
+                        if (_run.Expanded >= _profile.MaxExpandedNodes)
+                            break;
+                    }
+                    FinishExpandedParent(node);
+                    activeIndex++;
+                    ObserveParentAllocation(Math.Max(0, signal.AllocatedBytes - allocatedBefore));
+                    ReclaimAfterCommittedWork("after_serial_parent");
+                }
+
                 if (expansionParallelism == 1)
                 {
                     while (activeIndex < active.Count)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
-                        SearchNode node = active[activeIndex];
-                        foreach (SearchNode child in Expand(node))
-                        {
-                            AcceptExpandedChild(node, child);
-                            if (_run.Expanded >= _profile.MaxExpandedNodes)
-                                break;
-                        }
-                        FinishExpandedParent(node);
-                        activeIndex++;
+                        ExpandNextSerially();
                         if (_run.Expanded >= _profile.MaxExpandedNodes)
                             break;
                     }
@@ -451,27 +578,31 @@ internal sealed partial class CombatBeamSolver
                             // final budget slot. Keep that edge case out of the materialized worker path.
                             while (activeIndex < active.Count)
                             {
-                                SearchNode node = active[activeIndex];
-                                foreach (SearchNode child in Expand(node))
-                                {
-                                    AcceptExpandedChild(node, child);
-                                    if (_run.Expanded >= _profile.MaxExpandedNodes)
-                                        break;
-                                }
-                                FinishExpandedParent(node);
-                                activeIndex++;
+                                ExpandNextSerially();
                                 if (_run.Expanded >= _profile.MaxExpandedNodes)
                                     break;
                             }
                             break;
                         }
+                        int desiredCapacity = Math.Min(
+                            parallelWaveCapacity,
+                            remainingBudget - 1);
+                        int acceptedCapacity = MemorySafeParallelWaveCapacity(desiredCapacity);
+                        bool materializedParentFits = EnsureMemoryForNextCommit(
+                            ParallelWaveAllocationReserve(acceptedCapacity),
+                            "before_parallel_wave");
+                        if (!materializedParentFits)
+                        {
+                            ExpandNextSerially();
+                            continue;
+                        }
 
-                        int acceptedCapacity = Math.Min(expansionParallelism, remainingBudget - 1);
                         List<(SearchNode Node, int WorkerIndex)> entries = [];
                         List<SearchNode> workerNodes = new(acceptedCapacity);
                         while (activeIndex < active.Count && workerNodes.Count < acceptedCapacity)
                         {
-                            SearchNode node = active[activeIndex++];
+                            SearchNode node = active[activeIndex];
+                            activeIndex++;
                             int workerIndex = -1;
                             if (TryPrepareParallelExpansion(node))
                             {
@@ -483,9 +614,15 @@ internal sealed partial class CombatBeamSolver
 
                         ExpansionWorkerOutcome[]? outcomes = null;
                         int finishedEntryCount = 0;
+                        long waveAllocatedBefore = policy.MemoryPressureSignal.AllocatedBytes;
                         try
                         {
-                            outcomes = parallelExpansionExecutor!.Evaluate(workerNodes);
+                            outcomes = parallelExpansionExecutor!.Evaluate(
+                                workerNodes,
+                                enableSingleParentActionReplay:
+                                    workerNodes.Count == 1);
+                            foreach (ExpansionWorkerOutcome outcome in outcomes)
+                                MergeExpansionWorker(outcome);
                             ExpansionWorkerOutcome? failed = outcomes.FirstOrDefault(
                                 outcome => outcome.Error != null);
                             failed?.Error!.Throw();
@@ -495,13 +632,13 @@ internal sealed partial class CombatBeamSolver
                                 if (workerIndex >= 0)
                                 {
                                     ExpansionWorkerOutcome outcome = outcomes[workerIndex];
-                                    MergeExpansionWorker(outcome);
                                     ExpansionBatch batch = outcome.Batch
                                         ?? throw new InvalidOperationException("并行展开没有返回候选批次。");
                                     CommitExpansionBatch(
                                         node,
                                         batch,
                                         child => AcceptExpandedChild(node, child));
+                                    batch.Dispose();
                                 }
                                 FinishExpandedParent(node);
                                 finishedEntryCount++;
@@ -517,6 +654,29 @@ internal sealed partial class CombatBeamSolver
                             for (int index = finishedEntryCount; index < entries.Count; index++)
                                 entries[index].Node.Snapshot.ReleaseSimulator();
                         }
+                        long waveAllocated = Math.Max(
+                            0,
+                            policy.MemoryPressureSignal.AllocatedBytes - waveAllocatedBefore);
+                        long reservedWaveBytes = ParallelWaveAllocationReserve(workerNodes.Count);
+                        bool waveStayedWithinReserve = waveAllocated <= reservedWaveBytes;
+                        if (workerNodes.Count > 0)
+                            ObserveParentAllocation(waveAllocated / workerNodes.Count);
+                        if (outcomes != null)
+                        {
+                            foreach (ExpansionWorkerOutcome outcome in outcomes)
+                                ObserveParentAllocation(outcome.AllocatedBytes);
+                        }
+                        if (workerNodes.Count > 1 && waveStayedWithinReserve)
+                        {
+                            parallelWaveCapacity = Math.Min(
+                                expansionParallelism,
+                                parallelWaveCapacity * 2);
+                        }
+                        else
+                        {
+                            parallelWaveCapacity = Math.Min(2, expansionParallelism);
+                        }
+                        ReclaimAfterCommittedWork("after_parallel_wave");
                     }
                 }
                 for (; activeIndex < active.Count; activeIndex++)
@@ -832,6 +992,22 @@ internal sealed partial class CombatBeamSolver
             ParallelExpansionWaves = _run.ParallelExpansionWaves,
             ParallelExpansionWorkItems = _run.ParallelExpansionWorkItems,
             MaxParallelExpansionConcurrency = _run.MaxParallelExpansionConcurrency,
+            ParallelActionReplayWaves = _run.ParallelActionReplayWaves,
+            ParallelActionReplayWorkItems = _run.ParallelActionReplayWorkItems,
+            MaxParallelActionReplayConcurrency = _run.MaxParallelActionReplayConcurrency,
+            DeferredRoundChoiceActions = _run.DeferredRoundChoiceActions,
+            DeferredRoundChoiceLayerWidthTotal = _run.DeferredRoundChoiceLayerWidthTotal,
+            MaxDeferredRoundChoiceLayerWidth = _run.MaxDeferredRoundChoiceLayerWidth,
+            DeferredRoundChoiceFiniteQuotaFallbacks =
+                _run.DeferredRoundChoiceFiniteQuotaFallbacks,
+            DeferredRoundChoiceFinitePrimaryLayers =
+                _run.DeferredRoundChoiceFinitePrimaryLayers,
+            DeferredRoundChoiceFinitePendingFallbacks =
+                _run.DeferredRoundChoiceFinitePendingFallbacks,
+            ParallelRoundChoiceReplayWaves = _run.ParallelRoundChoiceReplayWaves,
+            ParallelRoundChoiceReplayWorkItems = _run.ParallelRoundChoiceReplayWorkItems,
+            MaxParallelRoundChoiceReplayConcurrency =
+                _run.MaxParallelRoundChoiceReplayConcurrency,
             NodeLimitSnapshotsReleased = _run.NodeLimitSnapshotsReleased,
             TransitionCacheHits = 0,
             WorkerAllocatedBytes = workerAllocatedBytes,
