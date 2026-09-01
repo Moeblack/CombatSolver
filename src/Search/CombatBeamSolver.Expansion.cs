@@ -157,12 +157,17 @@ internal sealed partial class CombatBeamSolver
     internal IReadOnlyList<PlanAction> BuildPreferredOpeningPotionActions()
         => BuildPreferredPotionActionsAfterPrefix([]);
 
-    internal IReadOnlyList<PlanAction> BuildOpeningPotionEnablerActions()
+    internal IReadOnlyList<PlanAction> BuildOpeningResourceActions()
     {
         SimulationSnapshot rootSnapshot = Replay([]);
         List<SearchNode> children = [];
         try
         {
+            IReadOnlyList<PredictedCard> openingHand = ((CombatPredictionSimulator)rootSnapshot.Simulator)
+                .State.GetPlayerCombatState(_player).Hand.Cards;
+            IReadOnlyDictionary<string, CardType> cardTypes = openingHand
+                .GroupBy(card => card.Preview.Id.Entry)
+                .ToDictionary(group => group.Key, group => group.First().Preview.Type);
             SearchNode seed = new(
                 null,
                 0,
@@ -182,21 +187,30 @@ internal sealed partial class CombatBeamSolver
             children.AddRange(Expand(seed).Where(node =>
                 node.Action is { Kind: PlanActionKind.PlayCard, Turn: var turn }
                 && turn == rootSnapshot.Turn));
-            SearchNode? best = children
+            return children
                 .Where(node => node.Snapshot.Energy > rootSnapshot.Energy
                     || node.Snapshot.Stars > rootSnapshot.Stars
                     || node.Snapshot.HandCount > rootSnapshot.HandCount
                     || node.Snapshot.ReachableHandValue > rootSnapshot.ReachableHandValue
-                    || node.Snapshot.ZeroCostPlayableCount > rootSnapshot.ZeroCostPlayableCount)
-                .OrderByDescending(node =>
-                    (node.Snapshot.Energy - rootSnapshot.Energy) * 64
-                    + (node.Snapshot.Stars - rootSnapshot.Stars) * 48
-                    + (node.Snapshot.HandCount - rootSnapshot.HandCount) * 16
-                    + node.Snapshot.ReachableHandValue - rootSnapshot.ReachableHandValue
-                    + (node.Snapshot.ZeroCostPlayableCount - rootSnapshot.ZeroCostPlayableCount) * 8)
-                .ThenByDescending(node => node.Score)
-                .FirstOrDefault();
-            return best?.Action is { } action ? [action] : [];
+                    || node.Snapshot.ZeroCostPlayableCount > rootSnapshot.ZeroCostPlayableCount
+                    || (node.Traits & SearchRouteTraits.Resource) != 0)
+                .Select(node => (
+                    Node: node,
+                    Value: (node.Snapshot.Energy - rootSnapshot.Energy) * 64
+                        + (node.Snapshot.Stars - rootSnapshot.Stars) * 48
+                        + (node.Snapshot.HandCount - rootSnapshot.HandCount) * 16
+                        + node.Snapshot.ReachableHandValue - rootSnapshot.ReachableHandValue
+                        + (node.Snapshot.ZeroCostPlayableCount - rootSnapshot.ZeroCostPlayableCount) * 8))
+                .GroupBy(candidate => cardTypes[candidate.Node.Action!.CardId])
+                .Select(group => group
+                    .OrderByDescending(candidate => candidate.Value)
+                    .ThenByDescending(candidate => candidate.Node.Score)
+                    .First())
+                .OrderByDescending(candidate => candidate.Value)
+                .ThenByDescending(candidate => candidate.Node.Score)
+                .Take(3)
+                .Select(candidate => candidate.Node.Action!)
+                .ToArray();
         }
         finally
         {

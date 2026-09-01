@@ -183,6 +183,16 @@ internal static class CombatSearchCoordinator
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
                     maximumPotionUses: 1)
                 .SelectGeneratedResourcePotionActions(openingPotions);
+        IReadOnlyList<PlanAction> openingResources = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds)
+            .BuildOpeningResourceActions();
         List<(PlanAction Potion, PlanAction Power)> potionPowerPairs = [];
         foreach (PlanAction openingPotion in openingPotions)
         {
@@ -209,7 +219,8 @@ internal static class CombatSearchCoordinator
         }
         if (openingPowers.Count == 0
             && potionPowerPairs.Count == 0
-            && generatedResourcePotions.Count == 0)
+            && generatedResourcePotions.Count == 0
+            && openingResources.Count == 0)
             return primary;
 
         List<SolverResult> searches = [primary];
@@ -323,6 +334,55 @@ internal static class CombatSearchCoordinator
                 $"cards={openingPower.CardId}+{offensiveFollowUp.CardId} " +
                 $"won={linkedWon} hp_deficit={linkedDeficit} " +
                 $"selected={ReferenceEquals(selected, linkedPosterior)}");
+        }
+
+        foreach (PlanAction openingResource in openingResources)
+        {
+            PlanAction? defensiveFollowUp = new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds)
+                .BuildOpeningDefensiveFollowUp([openingResource]);
+            if (defensiveFollowUp == null)
+                continue;
+
+            SolverResult resourceDefensePosterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                fixedPrefixActions: [openingResource, defensiveFollowUp]).Solve();
+            bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
+                && resourceDefensePosterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
+            resourceDefensePosterior.SearchPhase = posteriorDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            resourceDefensePosterior.DeepSearchTriggered = posteriorDeepTriggered;
+            resourceDefensePosterior.DeepSearchImprovedResult = false;
+            resourceDefensePosterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                resourceDefensePosterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                posteriorDeepTriggered);
+            searches.Add(resourceDefensePosterior);
+
+            if (IsBetterCompletedResult(root, resourceDefensePosterior, selected))
+                selected = resourceDefensePosterior;
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] OPENING_RESOURCE_DEFENSE_POSTERIOR " +
+                $"cards={openingResource.CardId}+{defensiveFollowUp.CardId} " +
+                $"won={resourceDefensePosterior.Snapshot.AllEnemiesDead && !resourceDefensePosterior.Snapshot.PlayerDead} " +
+                $"hp_deficit={StrategicHpDeficit(root, resourceDefensePosterior)} " +
+                $"selected={ReferenceEquals(selected, resourceDefensePosterior)}");
         }
 
         foreach (PlanAction openingPotion in generatedResourcePotions)
@@ -1409,7 +1469,7 @@ internal static class CombatSearchCoordinator
                 SolverPotionPolicy.RequireAtLeastOne,
                 baseline,
                 maximumPotionUses: 1)
-            .BuildOpeningPotionEnablerActions();
+            .BuildOpeningResourceActions();
         foreach (PlanAction enabler in enablers)
         {
             IReadOnlyList<PlanAction> potions = new CombatBeamSolver(
