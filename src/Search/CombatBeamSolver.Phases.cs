@@ -610,8 +610,8 @@ internal sealed partial class CombatBeamSolver
         PublishProgress(_startTurnNumber + searchedTurnLayers, searchedTurnLayers, 0,
             finalCandidates.Count, completed.Count, "复核最终候选", force: true);
         SearchMeasurement finalMeasurement = _run.Performance.Begin();
-        List<(SearchNode Node, SimulationSnapshot Snapshot, RouteAnnotations Annotations)> evaluated = finalCandidates
-            .Select(node => (Node: node, Snapshot: node.Snapshot, Annotations: BuildRouteAnnotations(node)))
+        List<(SearchNode Node, SimulationSnapshot Snapshot)> evaluated = finalCandidates
+            .Select(node => (Node: node, Snapshot: node.Snapshot))
             .ToList();
         bool onlyDeathRoutesFound = evaluated.All(candidate =>
             candidate.Snapshot.PlayerDead || candidate.Snapshot.ProjectedPlayerHp <= 0);
@@ -625,7 +625,10 @@ internal sealed partial class CombatBeamSolver
         int potionBranchesRejected = ordering.PotionBranchesRejected;
         int potionHpSaved = ordering.PotionHpSaved;
         int potionHpRequired = ordering.PotionHpRequired;
-        int annotatedFutureSold = selectedCandidate.Annotations.SoldHpByTurn.Values.Sum();
+        // Final ordering consumes scalar node features only. Walk the route once after selection
+        // instead of rebuilding the same annotation maps for every discarded finalist.
+        RouteAnnotations annotations = BuildRouteAnnotations(selectedCandidate.Node);
+        int annotatedFutureSold = annotations.SoldHpByTurn.Values.Sum();
         if (annotatedFutureSold != selectedCandidate.FutureSold)
         {
             throw new InvalidOperationException(
@@ -634,7 +637,6 @@ internal sealed partial class CombatBeamSolver
         SearchNode best = selectedCandidate.Node with { Score = selectedCandidate.Score };
 
         SimulationSnapshot finalSnapshot = selectedCandidate.Snapshot;
-        RouteAnnotations annotations = selectedCandidate.Annotations;
         IReadOnlyList<CachedContinuation> continuations = BuildContinuations(best);
         int searchedTurns = Math.Max(1, best.Actions
             .Select(action => action.Turn)

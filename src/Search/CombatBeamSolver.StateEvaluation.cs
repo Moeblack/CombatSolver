@@ -165,11 +165,7 @@ internal sealed partial class CombatBeamSolver
                 (int)Math.Round(CardChoiceSupport.CardValue(liveCard.Preview)));
         }
         ThreatFocus focus = BuildThreatFocus(simulator, combat);
-        StrategicEffectContext strategicContext = StrategicEffectContext.Build(
-            liveCards,
-            enemyHp,
-            focus.TotalThreat,
-            focus.IncomingHitCount);
+        StrategicEffectContext? strategicContext = null;
         StrategicEffectVector strategicEffects = StrategicEffectVector.Zero;
         int offensivePersistentBuffValue = 0;
         PersistentSetupTraits persistentSetupTraits = PersistentSetupTraits.None;
@@ -182,7 +178,14 @@ internal sealed partial class CombatBeamSolver
             {
                 continue;
             }
-            StrategicEffectVector effect = StrategicEffectModel.Evaluate(power, strategicContext);
+            strategicContext ??= StrategicEffectContext.Build(
+                liveCards,
+                enemyHp,
+                focus.TotalThreat,
+                focus.IncomingHitCount);
+            StrategicEffectVector effect = StrategicEffectModel.Evaluate(
+                power,
+                strategicContext.Value);
             strategicEffects += effect;
             offensivePersistentBuffValue += effect.DamagePotential + effect.ScalingPotential;
             persistentSetupTraits |= PersistentPowerSetupTrait(power);

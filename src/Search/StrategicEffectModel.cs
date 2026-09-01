@@ -92,7 +92,24 @@ internal readonly record struct StrategicEffectContext(
             int energyCost = card.EnergyCost.CostsX
                 ? 0
                 : Math.Max(0, card.EnergyCost.GetWithModifiers(CostModifiers.All));
-            switch (card.Type)
+            CardType cardType = card.Type;
+            bool hasBlockDynamicVar = false;
+            bool hasDebuffDynamicVar = false;
+            foreach (KeyValuePair<string, MegaCrit.Sts2.Core.Localization.DynamicVars.DynamicVar> dynamicVar
+                     in card.DynamicVars)
+            {
+                string key = dynamicVar.Key;
+                if (!hasBlockDynamicVar && cardType == CardType.Skill)
+                    hasBlockDynamicVar = IsBlockDynamicVar(key);
+                if (!hasDebuffDynamicVar)
+                    hasDebuffDynamicVar = IsDebuffDynamicVar(key);
+                if (hasDebuffDynamicVar
+                    && (cardType != CardType.Skill || hasBlockDynamicVar))
+                {
+                    break;
+                }
+            }
+            switch (cardType)
             {
                 case CardType.Attack:
                     attackCount++;
@@ -101,7 +118,7 @@ internal readonly record struct StrategicEffectContext(
                 case CardType.Skill:
                     skillCount++;
                     skillEnergy += energyCost;
-                    if (card.DynamicVars.Keys.Any(IsBlockDynamicVar))
+                    if (hasBlockDynamicVar)
                         blockSkillCount++;
                     break;
                 case CardType.Power:
@@ -116,7 +133,7 @@ internal readonly record struct StrategicEffectContext(
                 exhaustCount++;
             if (card.Tags.Contains(CardTag.Shiv))
                 shivCount++;
-            if (card.DynamicVars.Keys.Any(IsDebuffDynamicVar))
+            if (hasDebuffDynamicVar)
                 debuffCount++;
         }
 

@@ -156,11 +156,11 @@ internal sealed partial class SimulatedCombatState
                 bool enteredCombat = false;
                 if (!liveCardsAtSnapshot.Contains(card.Original))
                     enteredCombat = (_powerAfflictionKnownCards ??= []).Add(card);
-                if (card.Preview.Affliction is Tainted)
+                if (card.Preview.Affliction is Tainted tainted)
                 {
                     if (!hasVitalSpark)
                         card.ClearAffliction();
-                    else
+                    else if (tainted.Amount != vitalSparkAmount)
                         card.MutablePreview.Affliction!.Amount = vitalSparkAmount;
                     continue;
                 }

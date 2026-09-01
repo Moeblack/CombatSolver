@@ -16,7 +16,7 @@ internal sealed partial class CombatBeamSolver
         BattleDamageSnapshot battleDamage)
     {
         public FinalPlanSelection Select(
-            IReadOnlyList<(SearchNode Node, SimulationSnapshot Snapshot, RouteAnnotations Annotations)> evaluated,
+            IReadOnlyList<(SearchNode Node, SimulationSnapshot Snapshot)> evaluated,
             int initialHp,
             bool emitDiagnostics)
         {
@@ -69,7 +69,7 @@ internal sealed partial class CombatBeamSolver
                             ? PotionUsePolicy.AdditionalRequiredUseStrategicHpCost(
                                 optionalPotionStrategicCost)
                             : 0);
-                    return (candidate.Node, candidate.Snapshot, candidate.Annotations, Features: features,
+                    return (candidate.Node, candidate.Snapshot, Features: features,
                         FutureSold: sold, BattleSold: battleSold, PotionCount: potionCount,
                         ExplicitPotionCount: explicitPotionCount, HpDeficit: hpDeficit,
                         StrategicHpDeficit: strategicHpDeficit, PolicyHpDeficit: policyHpDeficit,
@@ -265,7 +265,6 @@ internal sealed partial class CombatBeamSolver
                 new FinalPlanCandidate(
                     selectedCandidate.Node,
                     selectedCandidate.Snapshot,
-                    selectedCandidate.Annotations,
                     selectedCandidate.Features,
                     selectedCandidate.FutureSold,
                     selectedCandidate.BattleSold,

@@ -2213,9 +2213,15 @@ internal sealed partial class CombatBeamSolver
         double resource = Math.Max(0.5d, energy + stars * 0.5d);
         double normalized = (damage + block * 0.8d) / resource;
         CombatPredictionSimulator simulator = (CombatPredictionSimulator)after.Simulator;
-        bool pure = simulator.History.Entries
-            .Skip(before.HistoryEntryCount)
-            .All(IsPureHistoryEntry);
+        bool pure = true;
+        foreach (CombatPredictionHistoryEntry entry in
+                 simulator.History.EntriesFrom(before.HistoryEntryCount))
+        {
+            if (IsPureHistoryEntry(entry))
+                continue;
+            pure = false;
+            break;
+        }
         SimulatedCombatState beforeCombat = (SimulatedCombatState)
             ((CombatPredictionSimulator)before.Simulator).State.CombatState;
         bool declinedExtraTurn = beforeCombat.RelicsOf(_player)

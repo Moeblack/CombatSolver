@@ -264,7 +264,6 @@ internal sealed partial class CombatBeamSolver
     private sealed record FinalPlanCandidate(
         SearchNode Node,
         SimulationSnapshot Snapshot,
-        RouteAnnotations Annotations,
         SearchFeatures Features,
         int FutureSold,
         int BattleSold,

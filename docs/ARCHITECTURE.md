@@ -31,7 +31,7 @@ Entry / turn hooks
 | `src/Runtime/BaseLibCloneConcurrencyPatch.cs` | BaseLib 克隆扩展存在时，让原版 `MutableClone` 与内嵌模拟的模型深克隆共用窄串行边界，保护其全局弱表 | 整段搜索串行化、BaseLib 业务语义与候选政策 |
 | `src/Runtime/PowerDynamicVarWarmup.cs` | 主线程根捕获时物化规范 Power 与当前战斗 Power 的显示变量 | 搜索评分、Power 语义与 worker 本地化 |
 | `src/Runtime/PowerDynamicVarMaterializationGuardPatch.cs` | 搜索模拟惰性创建 Power 显示变量时立即报告根捕获缺失 | Power 语义、显示内容与搜索阶段串行化 |
-| `src/Runtime/SearchGcPolicy.cs` | 默认交由 CLR 分代 GC；保留旧自动 GC 生命周期的关闭实现与兼容入口，并提供玩家显式触发的手动全代回收 | Beam 剪枝、候选评分与模拟语义 |
+| `src/Runtime/SearchGcPolicy.cs` | 按玩家预算管理战斗级 No-GC 区域、搜索分配检查点、区域滚动、引用释放屏障和有压力才执行的后台非压缩回收；区域切换只在活动搜索退出后发生 | Beam 剪枝、候选评分、模拟语义与 UI 手动阻塞回收 |
 | `src/Runtime/SearchMemoryPressureSignal.cs` | 将 Runtime 的进程分配边界和回收入口注入搜索；不让 Search 直接操作 GC 模式 | 设置读取与搜索评分 |
 | `src/Runtime/SolverSettings.cs` | 持久化性能、执行、搜索并行度、逐槽药水策略和搜索结束通知设置，并在主线程捕获不可变搜索 snapshot | 搜索期读取全局设置 |
 | `src/Runtime/PlayerTurnSetupPatches.cs` | 首回合原生页面出现后的 Start 根搜索；后续回合观察上一轮 `EndTurn.TurnStartChoices` 的原生页面，全自动直接可见重放，单步默认交还玩家并允许执行/全自动入口接管既有选择；进入 Play 后交给 continuation 核对；跨 Reset 的 Setup/部署延迟由 lifecycle token 取消 | 普通 Play 阶段搜索与动作部署 |
@@ -95,7 +95,7 @@ Entry / turn hooks
 
 ### 4.1 基础层
 
-`src/Engine/InCombat/Simulation/` 负责通用战斗命令时序、伤害、牌堆、历史、RNG、球和 Fork。它不包含单张卡、单个 Power 或具体怪物的搜索策略。
+`src/Engine/InCombat/Simulation/` 负责通用战斗命令时序、伤害、牌堆、历史、RNG、球和 Fork。它不包含单张卡、单个 Power 或具体怪物的搜索策略。`CombatPredictionHistory` 以不可变 prefix segment + 分支本地 mutable tail 保存事件；动作后缀消费者必须使用冻结上界的 `EntriesFrom/EntriesBetween`，不能先遍历完整 prefix 再 `Skip`，否则长线会把一次局部查询放大为随深度增长的重复工作。
 
 `src/Engine/Common/` 提供 `PredictedCard`、`PredictionForkContext`、`PredictionStateStore` 和通用模型克隆。一次 Fork 内的所有结构必须共享同一个 context；分支可变对象必须显式重映射。`BaseLibCloneConcurrency` 是原版与预测克隆共用的外部扩展并发边界，只包围模型深克隆阶段。
 

@@ -47,9 +47,7 @@ internal sealed partial class CombatPredictionSimulator
         // Game 0.111.0 has no vanilla BeforeCardAutoPlayed listeners; the hook catalog will expose any future addition.
         var resources = SpendResources(card, isAutoPlay: true, skipXCapture);
         OnPlayWrapper(card, target, isAutoPlay: true, resources, out _, nestedChoiceSourceId);
-        if (History.Entries.Skip(historyEntryStart)
-            .OfType<CombatPredictionCardPlayStartedEntry>()
-            .Any(entry => ReferenceEquals(entry.Card, card))
+        if (HasCardPlayStartedSince(historyEntryStart, card)
             && !HasPendingChoice
             && State.CombatState is ICombatPredictionCardExecutionSink sink)
         {
