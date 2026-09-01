@@ -138,7 +138,10 @@ internal sealed partial class CombatBeamSolver
                 CombatProgressState.Capture(snapshot),
                 TurnSetupChoices: choices,
                 TurnSetupPlayState: turnSetupPlayState);
-            root = ApplyFixedPrefix(root);
+            SearchNode? compatibleRoot = ApplyFixedPrefix(root);
+            if (compatibleRoot == null)
+                continue;
+            root = compatibleRoot;
             frontier.Add(root);
             if (_run.Transpositions.TryGetValue(root.StateKey, out TranspositionFrontier? existing))
                 existing.TryAccept(new TranspositionLabel(
@@ -159,6 +162,9 @@ internal sealed partial class CombatBeamSolver
                         0,
                         root.Score)));
         }
+        if (frontier.Count == 0)
+            throw new InvalidOperationException("固定搜索前缀与全部回合准备选牌分支都不相容。");
+
         List<SearchNode> completed = [];
         SearchNode fallback = frontier.MaxBy(static node => node.Score)!;
         SearchNode? potionFreeBoundaryFallback = null;
@@ -708,7 +714,7 @@ internal sealed partial class CombatBeamSolver
         };
     }
 
-    private SearchNode ApplyFixedPrefix(SearchNode seed)
+    private SearchNode? ApplyFixedPrefix(SearchNode seed)
     {
         SearchNode node = seed;
         foreach (PlanAction action in _fixedPrefixActions)
@@ -719,6 +725,12 @@ internal sealed partial class CombatBeamSolver
             {
                 throw new InvalidOperationException(
                     "固定搜索前缀目前只接受当前回合内、不结束回合的动作。");
+            }
+
+            if (!CanApplyFixedPrefixAction(node, action))
+            {
+                node.Snapshot.ReleaseSimulator();
+                return null;
             }
 
             SimulationSnapshot snapshot = Replay(
@@ -751,6 +763,23 @@ internal sealed partial class CombatBeamSolver
             node.Parent!.Snapshot.ReleaseSimulator();
         }
         return node;
+    }
+
+    private bool CanApplyFixedPrefixAction(SearchNode node, PlanAction action)
+    {
+        CombatPredictionSimulator simulator = (CombatPredictionSimulator)node.Snapshot.Simulator;
+        SimulatedCombatState combat = (SimulatedCombatState)simulator.State.CombatState;
+        if (action.Kind == PlanActionKind.UsePotion)
+        {
+            PotionModel? potion = combat.GetPotionAtSlot(_player, action.PotionSlot);
+            return potion != null
+                && string.Equals(potion.Id.Entry, action.PotionId, StringComparison.Ordinal)
+                && combat.IsPotionAvailable(_player, action.PotionSlot);
+        }
+
+        SimPlayerCombatState player = simulator.State.GetPlayerCombatState(_player);
+        PredictedCard? card = FindCardForReplay(player.Hand.Cards, action);
+        return card != null && combat.CanPlayCard(simulator, card);
     }
 
     private PlanAction WithDisplayNames(PlanAction action)

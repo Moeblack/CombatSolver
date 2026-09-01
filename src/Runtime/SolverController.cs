@@ -269,6 +269,8 @@ internal static class SolverController
         _combat.BugReportIssues.RecordFailure(
             CombatBugReportIssueKind.TurnSetupFailure,
             exception);
+        Entry.Logger.Error(
+            $"[CombatSolver/Test] TURN_SETUP_FAILURE exception={exception.GetBaseException()}");
         if (NGame.Instance is { } host)
             SolverOverlay.Show(host, FormatTurnSetupFailure(exception, parallelSearchWasEnabled));
         return true;
