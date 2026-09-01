@@ -29,6 +29,7 @@
 | `STRATEGY-SMART-POTION-NONDEGRADING` | 通过（headless） | 蔓生伏地虫严格首根 High、Smart、DOP4 保留 `4` 战损无药主路线，拒绝 `14` 战损敏捷药补查路线并追平人工，runId `5db3d24895f045ee888841b2d9ee207a`；无色药生成急躁哨兵仍为 `0` 战损，runId `296884e4797343f8a1a0502da863b778`。 | 2026-09-01 |
 | `STRATEGY-SMART-POTION-ENABLER-FOCUS` | 质量改善，待处理 | 残杀千足虫严格首根 High、Smart、DOP4 保留放血→迅捷药、持续设置和分目标首攻后验，战损从未完成路线的 `48` 降到获胜路线 `35`，人工为 `31`，runId `e05ccbcc56a0448e87d58fc075c9fd60`；蔓生伏地虫哨兵保持无药 `4`，runId `f2ab6a5bfb9a486ba244b1cbcf86a075`。 | 2026-09-01 |
 | `STRATEGY-OPENING-RESOURCE-DEFENSE` | 通过（headless） | 灵魂枢纽严格首根 High、Smart、DOP4 选择燃烧契约→火焰屏障→好勇斗狠，战损从 `19` 降到 `12`，优于人工 `17`，runId `21c2a331c31641259a6810a7b93704d6`；蔓生伏地虫哨兵保持无药 `4`，runId `f387d4c98a3e478082ece11e79e38e0c`。 | 2026-09-01 |
+| `STRATEGY-LONG-TERM-RESOURCE-CHANNEL` | 通过（headless） | 长期资源通道与即时战损主通道使用独立 Beam 排名。虱虫祖先严格中途根 High、Smart、DOP4 为 `16` 战损，追平人工，runId `ab7beaa750714ed28bfcb7a6d5d781fb`；感染棱晶哨兵为 `19` 战损，追平人工，runId `066e5ed6d1c246e5adbd2522261ebcad`。 | 2026-09-01 |
 
 ## 0.23.0
 

@@ -236,6 +236,7 @@ internal sealed record SearchNode(
     private IReadOnlyList<PlanAction>? _actions;
 
     public int RetentionRank { get; set; } = int.MaxValue;
+    public int LongTermResourceRetentionRank { get; set; } = int.MaxValue;
     public IReadOnlyList<PlanAction> Actions => _actions ??= MaterializeActions();
 
     public IReadOnlyList<PlanCardChoice> GetTurnSetupChoices()

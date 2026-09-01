@@ -92,6 +92,21 @@ internal sealed partial class CombatBeamSolver
             return RankBest(nodes, _profile.BeamWidth * 4);
         }
 
+        public List<SearchNode> RankLongTermResource(
+            IReadOnlyList<SearchNode> nodes,
+            int limit)
+        {
+            if (nodes.Count == 0)
+                return [];
+            int highestValue = nodes.Max(node => node.Snapshot.LongTermResourceValue);
+            if (nodes.All(node => node.Snapshot.LongTermResourceValue == highestValue))
+                return [];
+            return RankBest(
+                nodes.Where(node => node.Snapshot.LongTermResourceValue == highestValue),
+                limit,
+                preserveDefensiveRoute: true);
+        }
+
         public List<SearchNode> RankBest(
             IEnumerable<SearchNode> nodes,
             int limit,

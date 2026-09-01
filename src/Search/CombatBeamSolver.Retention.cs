@@ -67,10 +67,42 @@ internal sealed partial class CombatBeamSolver
                 pool,
                 _profile.BeamWidth,
                 preserveDefensiveRoute: true);
+            List<SearchNode> selected = [.. global];
+            HashSet<SearchNode> selectedSet = new(global, ReferenceEqualityComparer.Instance);
+            Dictionary<SearchNode, int> globalRetentionRanks = new(ReferenceEqualityComparer.Instance);
+            foreach (SearchNode candidate in global)
+                globalRetentionRanks.Add(candidate, candidate.RetentionRank);
+            Dictionary<SearchNode, int> ancestorRetentionRanks = new(ReferenceEqualityComparer.Instance);
+            foreach (SearchNode candidate in pool)
+            {
+                for (SearchNode? ancestor = candidate.Parent; ancestor != null; ancestor = ancestor.Parent)
+                {
+                    if (!ancestorRetentionRanks.TryAdd(ancestor, ancestor.RetentionRank))
+                        continue;
+                    if (ancestor.LongTermResourceRetentionRank != int.MaxValue)
+                        ancestor.RetentionRank = ancestor.LongTermResourceRetentionRank;
+                }
+            }
+            List<SearchNode> longTermResource = Retention.RankLongTermResource(pool, _profile.BeamWidth);
+            foreach (SearchNode candidate in longTermResource)
+                candidate.LongTermResourceRetentionRank = candidate.RetentionRank;
+            foreach ((SearchNode ancestor, int retentionRank) in ancestorRetentionRanks)
+                ancestor.RetentionRank = retentionRank;
+            foreach ((SearchNode candidate, int retentionRank) in globalRetentionRanks)
+                candidate.RetentionRank = retentionRank;
+            foreach (SearchNode candidate in longTermResource
+                         .OrderBy(node => node.RetentionRank)
+                         .ThenByDescending(node => node.Score))
+            {
+                if (!selectedSet.Add(candidate))
+                    continue;
+                selected.Add(candidate);
+            }
+            SortRetained(selected);
             if (_profile.Phase != SolverSearchPhase.Deep || pool.Count <= _profile.BeamWidth)
-                return global;
+                return selected;
             if (!root.HasUnusedCardReplayAllocator)
-                return global;
+                return selected;
 
             int channelWidth = Math.Clamp(_profile.BeamWidth / 12, 6, 12);
             List<List<SearchNode>> openingChannels = pool
@@ -92,13 +124,11 @@ internal sealed partial class CombatBeamSolver
                     preserveDefensiveRoute: true))
                 .ToList();
             if (openingChannels.Count == 0)
-                return global;
+                return selected;
 
             int expandedLimit = Math.Min(
                 pool.Count,
-                checked(_profile.BeamWidth + Math.Max(12, _profile.BeamWidth / 3)));
-            List<SearchNode> selected = [.. global];
-            HashSet<SearchNode> selectedSet = new(global, ReferenceEqualityComparer.Instance);
+                checked(selected.Count + Math.Max(12, _profile.BeamWidth / 3)));
             for (int round = 0;
                  selected.Count < expandedLimit && openingChannels.Any(channel => round < channel.Count);
                  round++)
@@ -112,11 +142,7 @@ internal sealed partial class CombatBeamSolver
                         break;
                 }
             }
-            selected.Sort((left, right) =>
-            {
-                int byRetention = left.RetentionRank.CompareTo(right.RetentionRank);
-                return byRetention != 0 ? byRetention : right.Score.CompareTo(left.Score);
-            });
+            SortRetained(selected);
             return selected;
         }
         finally
@@ -124,6 +150,19 @@ internal sealed partial class CombatBeamSolver
             _run.Performance.End(SearchMetricPhase.Prune, measurement);
         }
     }
+
+    private static void SortRetained(List<SearchNode> selected)
+        => selected.Sort((left, right) =>
+        {
+            int leftRank = left.LongTermResourceRetentionRank != int.MaxValue
+                ? left.LongTermResourceRetentionRank
+                : left.RetentionRank;
+            int rightRank = right.LongTermResourceRetentionRank != int.MaxValue
+                ? right.LongTermResourceRetentionRank
+                : right.RetentionRank;
+            int byRetention = leftRank.CompareTo(rightRank);
+            return byRetention != 0 ? byRetention : right.Score.CompareTo(left.Score);
+        });
 
     private static SearchNode? FindOpeningCardNode(SearchNode node)
     {

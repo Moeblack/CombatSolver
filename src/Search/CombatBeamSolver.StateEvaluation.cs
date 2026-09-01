@@ -140,9 +140,10 @@ internal sealed partial class CombatBeamSolver
         int exhaustedTheHunts = playerState.ExhaustPile.Cards.Count(card => card.Preview is TheHunt);
         int rewardedTheHunts = Math.Max(0, combat.GetAmount<TheHuntPower>(_player.Creature));
         int missedTheHuntRewards = Math.Max(0, exhaustedTheHunts - rewardedTheHunts);
-        int longTermResourceValue = combat.LongTermResourceValue
+        int realizedLongTermResourceValue = combat.LongTermResourceValue;
+        int longTermResourceValue = realizedLongTermResourceValue
             - missedTheHuntRewards * CorePowerSupport.TheHuntLongTermResourceValue;
-        score += longTermResourceValue * SolverWeights.LongTermResourceBeamValue;
+        score += realizedLongTermResourceValue * SolverWeights.LongTermResourceBeamValue;
         int angerCopiesGenerated = combat.AngerCopiesGenerated;
         score += angerCopiesGenerated * SolverWeights.AngerCopyBeamPenalty;
         if (won && !uncertainVictory)
