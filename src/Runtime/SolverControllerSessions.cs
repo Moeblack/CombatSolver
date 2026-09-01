@@ -73,11 +73,18 @@ internal sealed class SolverSearchSession(
     public SolverProgress? Progress;
     public SolverProgress? RenderedProgress { get; set; }
     public long LastProgressRenderAt { get; set; } = Environment.TickCount64;
+    public int AdoptCurrentResultRequestState;
     public int FrameCount { get; private set; }
     public int FramesOver33Milliseconds { get; private set; }
     public int FramesOver50Milliseconds { get; private set; }
     public int FramesOver100Milliseconds { get; private set; }
     public double MaxFrameGapMilliseconds { get; private set; }
+
+    public bool AdoptCurrentResultRequested
+        => Volatile.Read(ref AdoptCurrentResultRequestState) != 0;
+
+    public void RequestAdoptCurrentResult()
+        => Interlocked.Exchange(ref AdoptCurrentResultRequestState, 1);
     public long ProcessAllocatedBytesAtStart { get; } = GC.GetTotalAllocatedBytes(precise: false);
     public TimeSpan ProcessGcPauseAtStart { get; } = GC.GetTotalPauseDuration();
 

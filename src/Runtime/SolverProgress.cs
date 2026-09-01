@@ -11,4 +11,6 @@ internal sealed record SolverProgress(
     int FrontierNodes,
     int EndedNodes,
     long ElapsedMilliseconds,
-    string Phase);
+    string Phase,
+    int? CurrentBestPotionCount = null,
+    int? CurrentBestProjectedBattleHpLost = null);

@@ -13,9 +13,10 @@
 | `POTION-PERSISTENCE-BOUNDED-AUDIT-0244` | 通过（headless 设置、搜索与控制器生命周期） | 强制/保护策略按槽位 + 药水 ID 完成 JSON 往返，同槽新药仍为 Smart，恢复 Smart 后不保留覆盖项；Smart 主搜索和药水后验共享 `1.2 s` 请求预算，累计耗时与进度不倒退。runId `0911df45b8b34a04b761d9239f530e9f`。 | 2026-09-01 |
 | `PR25-RUNTIME-GC-INTEGRATION-0244` | 贡献者实测通过；本地集成门禁通过 | 默认关闭求解器 No-GC、补账回收与显式自动收集，保留玩家“手动 GC”入口。贡献者报告实机可行且内存占用下降；本轮不重复性能基准。合并态编译与结构门禁通过，药水/控制器夹具 runId `ffe6bad16592496ea1b02fbc6715930a`。 | 2026-09-01 |
 | `POTION-SLIM-SIDEBAR-ANCHOR-0244` | 通过（headless UI 结构与生命周期） | 药水策略为约 `184 px` 单列窄侧栏；展开侧栏时标题栏预留同宽区域，药水策略、设置和收起按钮仍锚定在主面板右缘。runId `7c0d24e7f3b9448da0e596651d853e15`。 | 2026-09-01 |
-| `POTION-SEARCH-MULTI-PHASE-LABELS-0244` | 通过（headless UI 文案与搜索阶段） | 战损提示包含完整说明和点击跳转提示；搜索阶段覆盖无药、恰好 `N` 瓶的智能梯度，以及固定政策的单药、双药和三药药名。runId `6f3316dc1e884821b14682bc000ef4e0`。 | 2026-09-01 |
+| `POTION-SEARCH-MULTI-PHASE-LABELS-0244` | 通过（headless UI 文案与搜索阶段） | 战损提示包含性能预设建议，点击后持久关闭且不再跳转；搜索阶段覆盖无药、恰好 `N` 瓶的智能梯度，以及固定政策的单药、双药和三药药名。 | 2026-09-01 |
 | `SMART-POTION-GRADIENT-EXACT-0244` | 通过（headless 搜索结构与阈值） | Smart 以无药为唯一基线，普通药按 `9/18/27 HP` 开放恰好 `1/2/3` 瓶额度，同层药水共同竞争并在第一条合格梯度停止。runId `406220b4b3b7482a97ebef4a16a330e9`。 | 2026-09-01 |
 | `SMART-POTION-LETHAL-GRADIENT-0244` | 通过（headless 完整自动战斗） | 无药路线死亡时进入恰好一瓶梯度，实际使用格挡药并以零战损生还，计划外重算 `0`。runId `aa7e15b86b3a412c9c8abdea72d6b375`。 | 2026-09-01 |
+| `SMART-POTION-INTERIM-ADOPTION-0250` | 通过（headless 搜索与控制器生命周期） | 搜索进度显示最近完整路线的用药数与预计战损；玩家采纳后取消更深搜索并采用同一结果。战损提示点击后持久关闭且不再跳转。runId `6f39c40f51304a79af8475a16edc96c5`。 | 2026-09-01 |
 
 ## 0.24.3（已发布）
 

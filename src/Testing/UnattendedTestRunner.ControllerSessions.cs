@@ -114,12 +114,17 @@ internal sealed partial class UnattendedTestRunner
                 FrontierNodes: 0,
                 EndedNodes: 0,
                 ElapsedMilliseconds: 600,
-                Phase: "正在搜索无药路线"),
+                Phase: "正在搜索无药路线",
+                CurrentBestPotionCount: 0,
+                CurrentBestProjectedBattleHpLost: 9),
             deployWhenReady: false,
             reviewedWorldlinesBeforeSearch: 5);
         if (SolverOverlay.SearchProgressRatioForTesting < progressRatio
             || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
                 "正在搜索无药路线",
+                StringComparison.Ordinal) != true
+            || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
+                "当前可采用：用 0 瓶药，预计战损 9",
                 StringComparison.Ordinal) != true)
         {
             throw new InvalidOperationException("药水补查开始后搜索进度条倒退。");
@@ -653,14 +658,32 @@ internal sealed partial class UnattendedTestRunner
         }
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
         List<long> elapsedSamples = [];
+        using CancellationTokenSource adoptionCancellation = new();
+        bool adoptionRequested = false;
+        int? displayedPotionCount = null;
+        int? displayedHpLost = null;
         Stopwatch stopwatch = Stopwatch.StartNew();
-        await Task.Run(() => CombatSearchCoordinator.Solve(
+        SolverResult adopted = await Task.Run(() => CombatSearchCoordinator.Solve(
             root,
             displayNames,
             battleDamage,
             policy,
-            CancellationToken.None,
-            progress => elapsedSamples.Add(progress.ElapsedMilliseconds)));
+            adoptionCancellation.Token,
+            progress =>
+            {
+                elapsedSamples.Add(progress.ElapsedMilliseconds);
+                if (adoptionRequested
+                    || progress.CurrentBestPotionCount is not { } potionCount
+                    || progress.CurrentBestProjectedBattleHpLost is not { } hpLost)
+                {
+                    return;
+                }
+                displayedPotionCount = potionCount;
+                displayedHpLost = hpLost;
+                adoptionRequested = true;
+                adoptionCancellation.Cancel();
+            },
+            () => adoptionRequested));
         stopwatch.Stop();
         if (stopwatch.ElapsedMilliseconds > 4_000)
         {
@@ -669,6 +692,12 @@ internal sealed partial class UnattendedTestRunner
         }
         if (elapsedSamples.Zip(elapsedSamples.Skip(1), (left, right) => right >= left).Any(valid => !valid))
             throw new InvalidOperationException("药水补查的累计耗时发生倒退。");
+        if (!adoptionRequested
+            || displayedPotionCount != adopted.ProjectedBattlePotionCount
+            || displayedHpLost != adopted.ProjectedBattleHpLost)
+        {
+            throw new InvalidOperationException("搜索中间结果没有显示用药、战损并在玩家采纳后成为最终路线。");
+        }
     }
 
     private static void AssertBugReportAutomaticClassification()

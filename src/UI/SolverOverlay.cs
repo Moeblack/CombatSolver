@@ -124,16 +124,33 @@ internal static class SolverOverlay
     {
         if (_performanceHintButton == null)
             return false;
+        SolverSettingsData originalSettings = SolverSettings.Current;
         bool original = _performanceHintButton.Visible;
-        SetPerformanceHintVisible(true);
-        bool visible = _performanceHintButton.Visible
-            && _performanceHintButton.Text.Contains("本场战斗出现战损", StringComparison.Ordinal)
-            && _performanceHintButton.Text.Contains("若对结果不满意", StringComparison.Ordinal)
-            && _performanceHintButton.Text.Contains("设置 > 性能", StringComparison.Ordinal)
-            && _performanceHintButton.Text.Contains("高或极高", StringComparison.Ordinal)
-            && _performanceHintButton.Text.Contains("点击本提示可直接跳转", StringComparison.Ordinal);
-        SetPerformanceHintVisible(original);
-        return visible;
+        try
+        {
+            SolverSettings.ApplyForTesting(originalSettings with
+            {
+                ShowBattleDamagePerformanceHint = true,
+            });
+            SetPerformanceHintVisible(true);
+            bool visible = _performanceHintButton.Visible
+                && _performanceHintButton.Text.Contains("本场战斗出现战损", StringComparison.Ordinal)
+                && _performanceHintButton.Text.Contains("若对结果不满意", StringComparison.Ordinal)
+                && _performanceHintButton.Text.Contains("设置 > 性能", StringComparison.Ordinal)
+                && _performanceHintButton.Text.Contains("高或极高", StringComparison.Ordinal)
+                && _performanceHintButton.Text.Contains("点击本消息之后不再提示", StringComparison.Ordinal)
+                && !_performanceHintButton.Text.Contains("跳转", StringComparison.Ordinal);
+            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(
+                originalSettings with { ShowBattleDamagePerformanceHint = false }));
+            SetPerformanceHintVisible(false);
+            SetPerformanceHintVisible(true);
+            return visible && !_performanceHintButton.Visible;
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(originalSettings);
+            SetPerformanceHintVisible(original);
+        }
     }
     internal static bool ExercisePotionStrategyUiForTesting()
     {
@@ -238,8 +255,15 @@ internal static class SolverOverlay
         string potionSearchPhase = progress.Phase.StartsWith("正在搜索", StringComparison.Ordinal)
             ? progress.Phase + " · "
             : string.Empty;
+        string currentBest = progress is
+        {
+            CurrentBestPotionCount: { } potionCount,
+            CurrentBestProjectedBattleHpLost: { } hpLost,
+        }
+            ? $"当前可采用：用 {potionCount} 瓶药，预计战损 {hpLost} · "
+            : string.Empty;
         SetReviewText(
-            $"{potionSearchPhase}已查阅 " +
+            $"{potionSearchPhase}{currentBest}已查阅 " +
             $"{reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线");
         if (_searchProgressBar != null)
         {
@@ -547,18 +571,26 @@ internal static class SolverOverlay
 
         bool solverDisabled = SolverController.SolverDisabled;
         _recalculateButton.Disabled = solverDisabled || SolverController.IsSearching || SolverController.IsDeploying;
-        _executeButton.Disabled = solverDisabled || SolverController.IsDeploying;
+        _executeButton.Disabled = solverDisabled
+            || SolverController.IsDeploying
+            || SolverController.IsAdoptingCurrentSearchResult;
         if (SolverController.IsDeploying)
             _executeButton.Text = "执行中…";
+        else if (SolverController.IsAdoptingCurrentSearchResult)
+            _executeButton.Text = "正在采用…";
+        else if (SolverController.CanAdoptCurrentSearchResult)
+            _executeButton.Text = "采用当前路线";
         else if (SolverController.IsSearching)
             _executeButton.Text = "停止计算";
         else if (_deployQueued)
             _executeButton.Text = "已排队执行";
         else
             _executeButton.Text = "执行本回合";
-        SolverButtonStyle executeStyle = SolverController.IsSearching
-            ? SolverButtonStyle.Danger
-            : SolverButtonStyle.Primary;
+        SolverButtonStyle executeStyle = SolverController.CanAdoptCurrentSearchResult
+            ? SolverButtonStyle.Positive
+            : SolverController.IsSearching
+                ? SolverButtonStyle.Danger
+                : SolverButtonStyle.Primary;
         if (_renderedExecuteButtonStyle != executeStyle)
         {
             SolverUiTokens.ApplyButtonStyle(_executeButton, executeStyle);
@@ -1019,7 +1051,7 @@ internal static class SolverOverlay
     private static Control CreatePerformanceHint()
     {
         _performanceHintButton = SolverUiTokens.CreateButton(
-            "本场战斗出现战损，若对结果不满意可以前往 设置 > 性能，将性能预设调为高或极高后重试。点击本提示可直接跳转",
+            "本场战斗出现战损，若对结果不满意可以前往 设置 > 性能，将性能预设调为高或极高后重试。点击本消息之后不再提示",
             SolverButtonStyle.Secondary);
         _performanceHintButton.Name = "PerformanceHint";
         _performanceHintButton.Visible = false;
@@ -1038,7 +1070,7 @@ internal static class SolverOverlay
             SolverUiTokens.Radius.Large,
             SolverUiTokens.Spacing.Md,
             SolverUiTokens.Spacing.Xxs));
-        _performanceHintButton.Pressed += OpenPerformanceSettings;
+        _performanceHintButton.Pressed += DismissPerformanceHint;
         return _performanceHintButton;
     }
 
@@ -1393,21 +1425,14 @@ internal static class SolverOverlay
             $"[CombatSolver/Test] UI_ACTION action=potion_strategy visible={_potionStrategyVisible}");
     }
 
-    private static void OpenPerformanceSettings()
+    private static void DismissPerformanceHint()
     {
-        if (_collapsed)
-            SetCollapsed(false);
-        if (_settingsVisible && _settingsPanel?.CommitPending() == false)
-            return;
-        _settingsVisible = true;
-        _potionStrategyVisible = false;
-        _settingsPanel?.Reload();
-        if (_settingsPanel?.OpenPerformancePage() == false)
-            return;
-        ApplyContentVisibility();
+        SolverSettings.Update(SolverSettings.Current with
+        {
+            ShowBattleDamagePerformanceHint = false,
+        });
         SetPerformanceHintVisible(false);
-        QueueResponsiveLayout();
-        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=performance_hint_open_settings");
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=performance_hint_dismissed");
     }
 
     private static void SetReviewText(string? text)
@@ -1420,6 +1445,7 @@ internal static class SolverOverlay
 
     private static void SetPerformanceHintVisible(bool visible)
     {
+        visible &= SolverSettings.Current.ShowBattleDamagePerformanceHint;
         if (_performanceHintButton == null || _performanceHintButton.Visible == visible)
             return;
         _performanceHintButton.Visible = visible;
@@ -1626,6 +1652,11 @@ internal static class SolverOverlay
         NGame? host = NGame.Instance;
         if (host != null && SolverController.IsSearching)
         {
+            if (SolverController.CanAdoptCurrentSearchResult)
+            {
+                SolverController.AdoptCurrentSearchResult();
+                return;
+            }
             Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=stop_search");
             SolverController.StopSearchByUser(host);
             return;

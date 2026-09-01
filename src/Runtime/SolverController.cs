@@ -73,6 +73,15 @@ internal static class SolverController
            || PlayerTurnSetupCoordinator.IsSearching;
     public static bool IsDeploying => _deployment != null;
     public static bool SolverDisabled => _solverDisabled;
+    public static bool CanAdoptCurrentSearchResult
+        => _search is { AdoptCurrentResultRequested: false } search
+           && Volatile.Read(ref search.Progress) is
+           {
+               CurrentBestPotionCount: not null,
+               CurrentBestProjectedBattleHpLost: not null,
+           };
+    public static bool IsAdoptingCurrentSearchResult
+        => _search?.AdoptCurrentResultRequested == true;
 
     /// <summary>
     /// True whenever the current run is a networked multiplayer session (host or client).
@@ -930,7 +939,8 @@ internal static class SolverController
                         battleDamage,
                         searchPolicy,
                         token,
-                        progress => PublishSearchProgress(search, progress));
+                        progress => PublishSearchProgress(search, progress),
+                        () => search.AdoptCurrentResultRequested);
                 }
                 finally
                 {
@@ -1205,6 +1215,26 @@ internal static class SolverController
         Entry.Logger.Info(
             $"[CombatSolver/Test] SEARCH_STOPPED_BY_USER generation={generation?.ToString() ?? "-"} " +
             $"turn_setup={stoppedTurnSetupSearch.ToString().ToLowerInvariant()} automatic_search_paused=true");
+    }
+
+    public static void AdoptCurrentSearchResult()
+    {
+        AssertMainThread();
+        if (_search is not { } search
+            || search.AdoptCurrentResultRequested
+            || Volatile.Read(ref search.Progress) is not
+            {
+                CurrentBestPotionCount: not null,
+                CurrentBestProjectedBattleHpLost: not null,
+            })
+        {
+            return;
+        }
+
+        search.RequestAdoptCurrentResult();
+        search.Cancellation.Cancel();
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=adopt_current_search_result");
     }
 
     public static void SetStopFullAutoOnCombatEnd(bool enabled, bool persist = true)

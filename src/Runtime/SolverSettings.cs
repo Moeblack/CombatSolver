@@ -57,6 +57,7 @@ internal sealed record SolverSettingsData
     public bool StopFullAutoOnDeathTurn { get; init; } = true;
     public bool StopFullAutoOnWorseRecalculation { get; init; } = true;
     public bool EnableDetailedDiagnosticLogs { get; init; }
+    public bool ShowBattleDamagePerformanceHint { get; init; } = true;
     public bool SearchCompletionNotificationsEnabled { get; init; } = true;
     public SolverSearchCompletionNotificationMode SearchCompletionNotificationMode { get; init; }
         = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
@@ -209,6 +210,7 @@ internal static class SolverSettings
             $"stop_on_death_turn={migrated.StopFullAutoOnDeathTurn} " +
             $"stop_on_worse_recalculation={migrated.StopFullAutoOnWorseRecalculation} " +
             $"detailed_diagnostic_logs={migrated.EnableDetailedDiagnosticLogs} " +
+            $"show_battle_damage_performance_hint={migrated.ShowBattleDamagePerformanceHint} " +
             $"search_notifications_enabled={migrated.SearchCompletionNotificationsEnabled} " +
             $"search_notification_mode={migrated.SearchCompletionNotificationMode} " +
             $"potion_policy={migrated.PotionPolicy} " +
