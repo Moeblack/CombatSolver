@@ -228,6 +228,10 @@ internal sealed partial class CombatBeamSolver
         int initialHp = root.InitialPlayerHp;
         int searchedTurnLayers = 0;
         bool timeBudgetReached = false;
+        int reservedTurnLayers = _profile.Phase == SolverSearchPhase.Deep
+            && root.EncounterRoomType == RoomType.Boss
+                ? SolverWeights.BossEnemyStrengthSuppressionHorizon
+                : SolverWeights.StandardEnemyStrengthSuppressionHorizon;
 
         while (frontier.Count > 0
             && (!policy.VerifyIncrementalSearch
@@ -248,6 +252,12 @@ internal sealed partial class CombatBeamSolver
             }
 
             List<SearchNode> ended = [];
+            long turnLayerStartedMs = stopwatch.ElapsedMilliseconds;
+            int remainingReservedLayers = Math.Max(1, reservedTurnLayers - searchedTurnLayers);
+            long remainingSearchMs = Math.Max(
+                1,
+                _profile.SoftTimeBudgetMilliseconds - turnLayerStartedMs);
+            long turnLayerBudgetMs = Math.Max(250, remainingSearchMs / remainingReservedLayers);
             PublishProgress(active.Min(node => node.Turn), searchedTurnLayers, 0, active.Count, 0,
                 "展开回合", force: true);
             for (int playDepth = 0;
@@ -260,6 +270,30 @@ internal sealed partial class CombatBeamSolver
                     adoptionReached = true;
                     timeBudgetReached = true;
                     ended.AddRange(active);
+                    active = [];
+                    break;
+                }
+                if (!policy.VerifyIncrementalSearch
+                    && searchedTurnLayers < reservedTurnLayers - 1
+                    && playDepth > 0
+                    && ended.Count > 0
+                    && stopwatch.ElapsedMilliseconds - turnLayerStartedMs >= turnLayerBudgetMs)
+                {
+                    int forcedEndTurnCandidates = 0;
+                    foreach (SearchNode node in active)
+                    {
+                        foreach (SearchNode endNode in BuildAcceptedEndTurnNodes(node))
+                        {
+                            ended.Add(endNode);
+                            forcedEndTurnCandidates++;
+                        }
+                        node.Snapshot.ReleaseSimulator();
+                    }
+                    policy.Diagnostics.Info(
+                        $"[CombatSolver/Test] TURN_LAYER_BUDGET " +
+                        $"completed_turns={searchedTurnLayers} play_depth={playDepth} " +
+                        $"elapsed_ms={stopwatch.ElapsedMilliseconds - turnLayerStartedMs} " +
+                        $"budget_ms={turnLayerBudgetMs} forced_end_turn={forcedEndTurnCandidates}");
                     active = [];
                     break;
                 }

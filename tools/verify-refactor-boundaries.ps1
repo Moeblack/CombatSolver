@@ -242,8 +242,8 @@ foreach ($check in $beamStructureChecks) {
         $violations.Add("${path}: missing CombatBeamSolver stage member '$($check.Text)'")
     }
 }
-if (-not (Select-String -LiteralPath (Join-Path $searchRoot "CombatBeamSolver.Expansion.cs") -SimpleMatch "repeatedAutoPlayBranchQuota" -Quiet)) {
-    $violations.Add("CombatBeamSolver.Expansion.cs: repeated auto-play choices are missing their per-action branch quota")
+if (-not (Select-String -LiteralPath (Join-Path $searchRoot "CombatBeamSolver.Expansion.cs") -SimpleMatch "ResolveWholeActionChoiceBranchLimit" -Quiet)) {
+    $violations.Add("CombatBeamSolver.Expansion.cs: repeated card choices are missing their whole-action branch quota")
 }
 $beamEntryPath = Join-Path $searchRoot "CombatBeamSolver.cs"
 if (Select-String -LiteralPath $beamEntryPath -SimpleMatch "public SolverResult Solve()" -Quiet) {

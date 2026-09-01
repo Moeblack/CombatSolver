@@ -316,8 +316,8 @@ EOF
 
 require_fixed \
     "$search_root/CombatBeamSolver.Expansion.cs" \
-    'repeatedAutoPlayBranchQuota' \
-    'repeated auto-play choices are missing their per-action branch quota:'
+    'ResolveWholeActionChoiceBranchLimit' \
+    'repeated card choices are missing their whole-action branch quota:'
 
 beam_entry_path="$search_root/CombatBeamSolver.cs"
 forbid_fixed "$beam_entry_path" 'public SolverResult Solve()' 'Solve returned to the entry/field declaration file:'

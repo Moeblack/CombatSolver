@@ -519,9 +519,17 @@ internal sealed partial class CombatBeamSolver
                 PlanCardChoice? requiredEmptyChoice = CardChoiceSupport.BuildRequiredEmptyChoice(card.Preview);
                 CardChoiceSpec? primaryChoiceSpec = choiceSpec
                     ?? BuildRequiredEmptyChoiceSpec(requiredEmptyChoice);
+                int actionChoiceBranchLimit = ResolveWholeActionChoiceBranchLimit(
+                    action,
+                    primaryChoiceSpec);
                 IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> resolvedBranches =
                     HasChoiceBeforePrimary(probeSnapshot, primaryChoiceSpec)
-                        ? ResolveRoundChoiceBranches(node, action, probeSnapshot, primaryChoiceSpec)
+                        ? ResolveRoundChoiceBranches(
+                            node,
+                            action,
+                            probeSnapshot,
+                            primaryChoiceSpec,
+                            actionChoiceBranchLimit)
                         : ResolvePrimaryCardChoiceBranches(
                             node,
                             action,

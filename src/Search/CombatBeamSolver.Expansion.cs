@@ -640,9 +640,17 @@ internal sealed partial class CombatBeamSolver
                 PlanCardChoice? requiredEmptyChoice = CardChoiceSupport.BuildRequiredEmptyChoice(card.Preview);
                 CardChoiceSpec? primaryChoiceSpec = choiceSpec
                     ?? BuildRequiredEmptyChoiceSpec(requiredEmptyChoice);
+                int actionChoiceBranchLimit = ResolveWholeActionChoiceBranchLimit(
+                    action,
+                    primaryChoiceSpec);
                 IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> resolvedBranches =
                     HasChoiceBeforePrimary(probeSnapshot, primaryChoiceSpec)
-                        ? ResolveRoundChoiceBranches(node, action, probeSnapshot, primaryChoiceSpec)
+                        ? ResolveRoundChoiceBranches(
+                            node,
+                            action,
+                            probeSnapshot,
+                            primaryChoiceSpec,
+                            actionChoiceBranchLimit)
                         : ResolvePrimaryCardChoiceBranches(
                             node,
                             action,
@@ -874,38 +882,8 @@ internal sealed partial class CombatBeamSolver
             }
         }
 
-        foreach ((PlanAction endAction, SimulationSnapshot endSnapshot) in BuildEndTurnBranches(node, []))
-        {
-            int nextTurn = node.Turn + 1;
-            bool combatEnded = endSnapshot.PlayerDead || endSnapshot.AllEnemiesDead;
-            bool endTerminal = combatEnded || endSnapshot.BoundaryReason != SearchBoundaryReason.None;
-            double endScore = ApplySoldHpPenalty(endSnapshot.Score, node.FutureSoldHp);
-            SearchNode endNode = new(
-                endAction,
-                node.ActionCount + 1,
-                endSnapshot.PotionUseCount,
-                endSnapshot.PotionStrategicCost,
-                nextTurn,
-                ClassifyRoundTransitionTraits(node.Traits, snapshot, endSnapshot),
-                node.FutureSoldHp,
-                endScore,
-                endSnapshot.StateKey,
-                endSnapshot.HasRisk,
-                endSnapshot.BoundaryReason,
-                endTerminal,
-                node,
-                endSnapshot,
-                node.CombatProgress.Advance(endSnapshot));
-            if (ShouldPruneCrossTurnNoProgress(endNode))
-            {
-                _run.RepeatableNoProgressBranchesPruned++;
-                endSnapshot.ReleaseSimulator();
-            }
-            else if (TryAcceptTransposition(endNode))
-                yield return endNode;
-            else
-                endSnapshot.ReleaseSimulator();
-        }
+        foreach (SearchNode endNode in BuildAcceptedEndTurnNodes(node))
+            yield return endNode;
     }
 
     private bool IsRepeatableNoProgressStep(
@@ -1000,6 +978,39 @@ internal sealed partial class CombatBeamSolver
         }
     }
 
+    private IEnumerable<SearchNode> BuildAcceptedEndTurnNodes(SearchNode node)
+    {
+        foreach ((PlanAction endAction, SimulationSnapshot endSnapshot) in BuildEndTurnBranches(node, []))
+        {
+            bool combatEnded = endSnapshot.PlayerDead || endSnapshot.AllEnemiesDead;
+            SearchNode endNode = new(
+                endAction,
+                node.ActionCount + 1,
+                endSnapshot.PotionUseCount,
+                endSnapshot.PotionStrategicCost,
+                node.Turn + 1,
+                ClassifyRoundTransitionTraits(node.Traits, node.Snapshot, endSnapshot),
+                node.FutureSoldHp,
+                ApplySoldHpPenalty(endSnapshot.Score, node.FutureSoldHp),
+                endSnapshot.StateKey,
+                endSnapshot.HasRisk,
+                endSnapshot.BoundaryReason,
+                combatEnded || endSnapshot.BoundaryReason != SearchBoundaryReason.None,
+                node,
+                endSnapshot,
+                node.CombatProgress.Advance(endSnapshot));
+            if (ShouldPruneCrossTurnNoProgress(endNode))
+            {
+                _run.RepeatableNoProgressBranchesPruned++;
+                endSnapshot.ReleaseSimulator();
+            }
+            else if (TryAcceptTransposition(endNode))
+                yield return endNode;
+            else
+                endSnapshot.ReleaseSimulator();
+        }
+    }
+
     private IEnumerable<(PlanAction Action, SimulationSnapshot Snapshot)> ResolvePrimaryCardChoiceBranches(
         SearchNode node,
         PlanAction action,
@@ -1014,6 +1025,17 @@ internal sealed partial class CombatBeamSolver
                 displayNames,
                 _profile.MaxPileChoiceBranchesPerAction,
                 _profile.MaxHandChoiceBranchesPerAction).Cast<PlanCardChoice?>().ToList();
+        int wholeActionBranchLimit = ResolveWholeActionChoiceBranchLimit(action, choiceSpec);
+        if (action.ReplayCount > 0
+            && wholeActionBranchLimit != int.MaxValue
+            && choices.Count > 1)
+        {
+            int choiceEvents = checked(action.ReplayCount + 1);
+            int initialChoiceLimit = Math.Max(
+                1,
+                (int)Math.Ceiling(Math.Pow(wholeActionBranchLimit, 1d / choiceEvents)));
+            choices = choices.Take(initialChoiceLimit).ToList();
+        }
         if (choices.Count == 0)
             choices = [null];
         else if (choiceSpec != null)
@@ -1027,9 +1049,9 @@ internal sealed partial class CombatBeamSolver
         if (!choices.Contains(null))
             probeSnapshot.ReleaseSimulator();
 
-        int repeatedAutoPlayBranchQuota = choiceSpec?.Effect == PlanChoiceEffect.AutoPlayRepeated
-            ? Math.Max(1, _profile.MaxHandChoiceBranchesPerAction / Math.Max(1, choices.Count))
-            : int.MaxValue;
+        int downstreamChoiceBranchQuota = wholeActionBranchLimit == int.MaxValue
+            ? int.MaxValue
+            : Math.Max(1, wholeActionBranchLimit / Math.Max(1, choices.Count));
 
         foreach (PlanCardChoice? choice in choices)
         {
@@ -1056,11 +1078,27 @@ internal sealed partial class CombatBeamSolver
                          node,
                          resolvedAction,
                          childSnapshot,
-                         maxFinalBranches: repeatedAutoPlayBranchQuota))
+                         maxFinalBranches: downstreamChoiceBranchQuota))
             {
                 yield return (finalAction, finalSnapshot);
             }
         }
+    }
+
+    private int ResolveWholeActionChoiceBranchLimit(
+        PlanAction action,
+        CardChoiceSpec? primaryChoiceSpec)
+    {
+        if (primaryChoiceSpec == null
+            || action.ReplayCount == 0
+                && primaryChoiceSpec.Effect != PlanChoiceEffect.AutoPlayRepeated)
+        {
+            return int.MaxValue;
+        }
+
+        return primaryChoiceSpec.SourcePile == PileType.Hand
+            ? _profile.MaxHandChoiceBranchesPerAction
+            : _profile.MaxPileChoiceBranchesPerAction;
     }
 
     private static CardChoiceSpec? BuildRequiredEmptyChoiceSpec(PlanCardChoice? requiredEmptyChoice)
