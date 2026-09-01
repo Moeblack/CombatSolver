@@ -457,13 +457,19 @@ internal static class SearchGcPolicy
         _largestSearchAllocatedBytes = 0;
         _noGcRegionExitWithoutCollectionCountForTesting++;
 
-        _ = Task.Run(() =>
+        bool isCombatEnd = reason is not ("no_gc_region_rollover"
+            or "no_gc_region_exhausted"
+            or "before_next_search");
+        _ = Task.Run(async () =>
         {
             Exception? failure = null;
             int gen2Before = GC.CollectionCount(GC.MaxGeneration);
             Stopwatch stopwatch = Stopwatch.StartNew();
             try
             {
+                if (isCombatEnd)
+                    await Task.Delay(System.Random.Shared.Next(3_000, 5_001));
+                // 把 No-GC 区域结束推迟到击杀后 3-5s（奖励环节），让用户体感没有卡顿。
                 if (endNoGcRegion)
                     GC.EndNoGCRegion();
                 if (restoreLatencyMode)
