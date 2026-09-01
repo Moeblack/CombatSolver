@@ -294,6 +294,40 @@ internal static class PlayerTurnSetupCoordinator
         return true;
     }
 
+    public static bool TryQueueManualRecalculation(CombatState combat)
+    {
+        if (_active is not { } active
+            || !IsCurrentActivePlan(active)
+            || !ReferenceEquals(active.Combat, combat))
+        {
+            return false;
+        }
+        active.DeployAfterSetup = false;
+        SolverController.QueueManualSearchAfterTurnSetup();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_QUEUED " +
+            $"turn={active.Player.PlayerCombatState!.TurnNumber}");
+        return true;
+    }
+
+    internal static async Task SubmitEmptyChoiceForTesting(NGame host, CombatState combat)
+    {
+        if (!UnattendedTestRunner.IsActive)
+            throw new InvalidOperationException("只有无人值守测试可以模拟回合开始选择。");
+        if (_active is not { PlannedChoices: not null } active
+            || !IsCurrentActivePlan(active)
+            || !ReferenceEquals(active.Combat, combat)
+            || !active.Choices.IsVisibleSurfaceOpen)
+        {
+            throw new InvalidOperationException("回合开始选择尚未准备好，无法模拟玩家跳过。");
+        }
+
+        await active.Choices.SelectVisibleCardsForTesting(
+            host,
+            [],
+            active.Token);
+    }
+
     public static Task Reset(string reason)
     {
         CancellationTokenSource? cancellation = _cancellation;
@@ -671,6 +705,21 @@ internal static class PlayerTurnSetupCoordinator
             if (!IsCurrentActivePlan(active))
                 return;
             LogSetupPowers(player, "after_original");
+
+            if (SolverController.ManualSearchAfterTurnSetupRequested)
+            {
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_RESUME " +
+                    $"turn={player.PlayerCombatState!.TurnNumber}");
+                DisposeActive(active);
+                await SolverController.ResumeAfterTurnSetupAsync(
+                    host,
+                    active.Combat,
+                    active.LifecycleGeneration,
+                    player.PlayerCombatState.TurnNumber,
+                    token: active.Token);
+                return;
+            }
 
             if (active.ReplayChoices != null)
             {

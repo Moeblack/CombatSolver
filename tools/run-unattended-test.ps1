@@ -147,6 +147,7 @@ param(
     [string]$ExpectedInitialSetupChoiceSourceId = "",
     [string]$ExpectedInitialSetupChoiceTextStartsWith = "",
     [switch]$VerifyInitialSetupWaitsForUserStart,
+    [switch]$VerifyTurnSetupManualRecalculate,
     [switch]$StopAfterInitialSetupAssertion,
     [switch]$StopAfterInitialSolverResultAssertion,
     [switch]$ExpectedFullAutoPausedAtDeathTurn,
@@ -730,6 +731,7 @@ $request = [ordered]@{
     expectedInitialSetupChoiceSourceId = if ([string]::IsNullOrWhiteSpace($ExpectedInitialSetupChoiceSourceId)) { $null } else { $ExpectedInitialSetupChoiceSourceId }
     expectedInitialSetupChoiceTextStartsWith = if ([string]::IsNullOrWhiteSpace($ExpectedInitialSetupChoiceTextStartsWith)) { $null } else { $ExpectedInitialSetupChoiceTextStartsWith }
     verifyInitialSetupWaitsForUserStart = $VerifyInitialSetupWaitsForUserStart.IsPresent
+    verifyTurnSetupManualRecalculate = $VerifyTurnSetupManualRecalculate.IsPresent
     stopAfterInitialSetupAssertion = $StopAfterInitialSetupAssertion.IsPresent
     stopAfterInitialSolverResultAssertion = $StopAfterInitialSolverResultAssertion.IsPresent
     expectedFullAutoPausedAtDeathTurn = $ExpectedFullAutoPausedAtDeathTurn.IsPresent

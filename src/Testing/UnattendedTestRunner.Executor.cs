@@ -105,6 +105,8 @@ internal sealed partial class UnattendedTestRunner
             }
             if (request.StopAfterCombatRootSnapshotAssertion)
                 return Observation(combatEnded: false);
+            if (request.VerifyTurnSetupManualRecalculate)
+                return Observation(combatEnded: false);
             if (request.StopAfterInitialSetupAssertion)
             {
                 runner.SetStage("assert_initial_setup_result");

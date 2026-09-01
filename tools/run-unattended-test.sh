@@ -162,6 +162,7 @@ add_option expected-initial-setup-choice-count-at-least -1 int nonnegative_int
 add_option expected-initial-setup-choice-source-id "" string optional_string
 add_option expected-initial-setup-choice-text-starts-with "" string optional_string
 for name in \
+    verify-turn-setup-manual-recalculate \
     stop-after-initial-setup-assertion stop-after-initial-solver-result-assertion \
     expected-full-auto-paused-at-death-turn \
     expected-full-auto-paused-after-worse-recalculation \

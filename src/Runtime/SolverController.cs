@@ -502,47 +502,75 @@ internal static class SolverController
         bool waitForDeploymentDelay = false,
         CancellationToken token = default)
     {
-        token.ThrowIfCancellationRequested();
-        long deadline = System.Environment.TickCount64 + 30_000;
-        while (CombatManager.Instance.IsInProgress
-               && !CombatManager.Instance.IsOverOrEnding
-               && ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
-               && (LocalContext.GetMe(state)?.PlayerCombatState?.Phase != PlayerTurnPhase.Play
-                   || CombatManager.Instance.PlayerActionsDisabled
-                   || _deployment != null))
+        SolverCombatSession session = _combat;
+        session.TurnSetupResumeState = state;
+        bool searchRequested = false;
+        try
         {
-            if (System.Environment.TickCount64 >= deadline)
-                throw new TimeoutException("回合准备页面完成后 30 秒内没有进入可复用状态。");
-            await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
             token.ThrowIfCancellationRequested();
-        }
+            long deadline = System.Environment.TickCount64 + 30_000;
+            while (CombatManager.Instance.IsInProgress
+                   && !CombatManager.Instance.IsOverOrEnding
+                   && ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
+                   && (LocalContext.GetMe(state)?.PlayerCombatState?.Phase != PlayerTurnPhase.Play
+                       || CombatManager.Instance.PlayerActionsDisabled
+                       || _deployment != null))
+            {
+                if (System.Environment.TickCount64 >= deadline)
+                    throw new TimeoutException("回合准备页面完成后 30 秒内没有进入可复用状态。");
+                await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                token.ThrowIfCancellationRequested();
+            }
 
-        if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
-            || _solverDisabled
-            || !CombatManager.Instance.IsInProgress
-            || CombatManager.Instance.IsOverOrEnding
-            || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
-            || LocalContext.GetMe(state)?.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } playerState
-            || playerState.TurnNumber != turn)
+            if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
+                || _solverDisabled
+                || !CombatManager.Instance.IsInProgress
+                || CombatManager.Instance.IsOverOrEnding
+                || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
+                || LocalContext.GetMe(state)?.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } playerState
+                || playerState.TurnNumber != turn)
+            {
+                return;
+            }
+
+            if (waitForDeploymentDelay)
+                await WaitForTurnStartDeploymentDelayAsync(host, turn, token);
+
+            if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
+                || _solverDisabled
+                || !CombatManager.Instance.IsInProgress
+                || CombatManager.Instance.IsOverOrEnding
+                || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
+                || LocalContext.GetMe(state)?.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } resumedState
+                || resumedState.TurnNumber != turn)
+            {
+                return;
+            }
+
+            SearchReason resumedReason = session.ManualSearchAfterTurnSetupRequested
+                ? SearchReason.Manual
+                : SearchReason.AutoTurnStart;
+            session.ManualSearchAfterTurnSetupRequested = false;
+            session.TurnSetupResumeState = null;
+            searchRequested = true;
+            RequestSearch(host, state, resumedReason, deployWhenReady);
+        }
+        finally
         {
-            return;
+            if (ReferenceEquals(session.TurnSetupResumeState, state))
+                session.TurnSetupResumeState = null;
+            if (!searchRequested && ReferenceEquals(_combat, session))
+                session.ManualSearchAfterTurnSetupRequested = false;
         }
+    }
 
-        if (waitForDeploymentDelay)
-            await WaitForTurnStartDeploymentDelayAsync(host, turn, token);
+    internal static bool ManualSearchAfterTurnSetupRequested
+        => _combat.ManualSearchAfterTurnSetupRequested;
 
-        if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
-            || _solverDisabled
-            || !CombatManager.Instance.IsInProgress
-            || CombatManager.Instance.IsOverOrEnding
-            || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
-            || LocalContext.GetMe(state)?.PlayerCombatState is not { Phase: PlayerTurnPhase.Play } resumedState
-            || resumedState.TurnNumber != turn)
-        {
-            return;
-        }
-
-        RequestSearch(host, state, SearchReason.AutoTurnStart, deployWhenReady);
+    internal static void QueueManualSearchAfterTurnSetup()
+    {
+        AssertMainThread();
+        _combat.ManualSearchAfterTurnSetupRequested = true;
     }
 
     private static async Task StartFullAutoAfterTurnSetupAsync(
@@ -620,6 +648,25 @@ internal static class SolverController
             if (_combat.AutomaticSearchPaused)
                 Entry.Logger.Info("[CombatSolver/Test] AUTOMATIC_SEARCH_RESUMED reason=manual_recalculate");
             _combat.AutomaticSearchPaused = false;
+            bool queuedAfterTurnSetup = PlayerTurnSetupCoordinator.TryQueueManualRecalculation(state);
+            if (!queuedAfterTurnSetup && ReferenceEquals(_combat.TurnSetupResumeState, state))
+            {
+                QueueManualSearchAfterTurnSetup();
+                queuedAfterTurnSetup = true;
+                Entry.Logger.Info(
+                    "[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_QUEUED phase=resuming_play");
+            }
+            if (queuedAfterTurnSetup)
+            {
+                _combat.PendingCompleteProjectionBaseline = null;
+                _combat.PendingManualProjectionBaseline = null;
+                SolverOverlay.Show(
+                    host,
+                    "[b]战斗路线求解器[/b]\n等待当前回合开始选择完成后重新计算。");
+                Entry.Logger.Info(
+                    "[CombatSolver/Test] SEARCH_DEFERRED reason=manual_recalculate_after_turn_setup");
+                return;
+            }
         }
         else if (_combat.AutomaticSearchPaused)
         {

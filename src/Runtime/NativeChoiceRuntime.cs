@@ -339,6 +339,24 @@ internal sealed class NativeChoiceSession : IDisposable
         _firstSurfaceLock = null;
     }
 
+    internal async Task SelectVisibleCardsForTesting(
+        NGame host,
+        IReadOnlyList<CardModel> selected,
+        CancellationToken token)
+    {
+        if (!UnattendedTestRunner.IsActive)
+            throw new InvalidOperationException("只有无人值守测试可以模拟玩家完成原生选牌。");
+
+        NativeChoiceRequest request = await _firstVisibleRequest.Task.WaitAsync(token);
+        NativeChoiceSurfaceLock surfaceLock = await NativeChoiceSurface.WaitAndLockAsync(
+            host,
+            request,
+            token);
+        using (surfaceLock)
+            await NativeChoiceSurface.SelectAsync(host, surfaceLock, request, selected, token);
+        NativeChoiceRuntime.RecordTrace(this, request, "ManualSelected");
+    }
+
     private async Task DriveAsync(NGame host, CancellationToken token)
     {
         IReadOnlyList<PlanCardChoice> plans = _plans
