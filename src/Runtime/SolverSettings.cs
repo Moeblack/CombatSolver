@@ -41,6 +41,11 @@ internal enum SolverPotionPolicy
     RequireAtLeastOne,
 }
 
+internal readonly record struct PersistedPotionDirective(
+    int Slot,
+    string PotionId,
+    SolverPotionDirective Directive);
+
 internal sealed record SolverPerformanceValues(
     SolverSearchProfile ShortProfile,
     SolverSearchProfile DeepProfile);
@@ -57,6 +62,7 @@ internal sealed record SolverSettingsData
         = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
     [JsonIgnore]
     public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
+    public PersistedPotionDirective[] PotionDirectives { get; init; } = [];
     public int PerformanceMigrationVersion { get; init; }
     public SolverPerformancePreset? PerformancePreset { get; init; } = SolverPerformancePreset.Medium;
     public int? SearchMaxDegreeOfParallelism { get; init; }
@@ -206,6 +212,7 @@ internal static class SolverSettings
             $"search_notifications_enabled={migrated.SearchCompletionNotificationsEnabled} " +
             $"search_notification_mode={migrated.SearchCompletionNotificationMode} " +
             $"potion_policy={migrated.PotionPolicy} " +
+            $"potion_directives={migrated.PotionDirectives.Length} " +
             $"performance_preset={ResolvePerformancePreset(migrated)} " +
             $"max_dop={Capture().SearchMaxDegreeOfParallelism} " +
             $"short_budget_ms={Capture().ShortProfile.SoftTimeBudgetMilliseconds} " +
@@ -320,12 +327,58 @@ internal static class SolverSettings
         }
     }
 
+    public static SolverPotionDirective ResolvePotionDirective(int slot, string potionId)
+    {
+        foreach (PersistedPotionDirective directive in Current.PotionDirectives)
+        {
+            if (directive.Slot == slot
+                && string.Equals(directive.PotionId, potionId, StringComparison.Ordinal))
+            {
+                return directive.Directive;
+            }
+        }
+        return SolverPotionDirective.Smart;
+    }
+
+    public static SolverSettingsData ApplyPotionDirective(
+        SolverSettingsData data,
+        int slot,
+        string potionId,
+        SolverPotionDirective directive)
+    {
+        if (slot < 0)
+            throw new ArgumentOutOfRangeException(nameof(slot));
+        if (string.IsNullOrWhiteSpace(potionId))
+            throw new ArgumentException("Potion ID must not be empty.", nameof(potionId));
+        if (!Enum.IsDefined(directive))
+            throw new ArgumentOutOfRangeException(nameof(directive));
+
+        List<PersistedPotionDirective> directives = data.PotionDirectives
+            .Where(item => item.Slot != slot)
+            .ToList();
+        if (directive != SolverPotionDirective.Smart)
+            directives.Add(new PersistedPotionDirective(slot, potionId, directive));
+        return data with
+        {
+            PotionDirectives = directives
+                .OrderBy(item => item.Slot)
+                .ThenBy(item => item.PotionId, StringComparer.Ordinal)
+                .ToArray(),
+        };
+    }
+
     internal static void ApplyForTesting(SolverSettingsData data)
     {
         Validate(data);
         lock (Sync)
             _current = data;
     }
+
+    internal static SolverSettingsData RoundTripForTesting(SolverSettingsData data)
+        => JsonSerializer.Deserialize<SolverSettingsData>(
+               JsonSerializer.Serialize(data, JsonOptions),
+               JsonOptions)
+           ?? throw new InvalidDataException("CombatSolver settings round-trip returned null.");
 
     public static void ResetToDefaults() => Update(CreateCurrentDefaults());
 
@@ -409,6 +462,21 @@ internal static class SolverSettings
         }
         if (!Enum.IsDefined(data.PotionPolicy))
             throw new InvalidDataException($"Unknown potion policy {data.PotionPolicy}.");
+        HashSet<(int Slot, string PotionId)> potionDirectiveKeys = [];
+        foreach (PersistedPotionDirective directive in data.PotionDirectives)
+        {
+            if (directive.Slot < 0)
+                throw new InvalidDataException("Potion directive slot must be non-negative.");
+            if (string.IsNullOrWhiteSpace(directive.PotionId))
+                throw new InvalidDataException("Potion directive ID must not be empty.");
+            if (!Enum.IsDefined(directive.Directive))
+                throw new InvalidDataException($"Unknown potion directive {directive.Directive}.");
+            if (!potionDirectiveKeys.Add((directive.Slot, directive.PotionId)))
+            {
+                throw new InvalidDataException(
+                    $"Duplicate potion directive {directive.PotionId}@{directive.Slot}.");
+            }
+        }
         ValidateRange(data.DeploymentInterActionDelaySeconds, 0d, 3d,
             nameof(data.DeploymentInterActionDelaySeconds));
         if (data.PerformancePreset is { } performancePreset && !Enum.IsDefined(performancePreset))

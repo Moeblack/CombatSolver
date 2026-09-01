@@ -360,6 +360,8 @@ internal static class SolverController
         _combat.TheftPolicy = state is CombatState combat && TheftEncounterStrategy.IsApplicable(combat)
             ? SolverTheftPolicy.PreserveResources
             : null;
+        if (state is CombatState activeCombat)
+            ReconcilePersistedPotionDirectives(activeCombat);
         Entry.Logger.Info(
             $"[CombatSolver/Test] THEFT_POLICY_INIT policy={_combat.TheftPolicy?.ToString() ?? "-"}");
     }
@@ -1271,11 +1273,17 @@ internal static class SolverController
         Player player = LocalContext.GetMe(state)
             ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
         List<PotionSlotDirective> directives = [];
-        foreach (((int slot, string potionId), SolverPotionDirective directive) in _combat.PotionDirectives)
+        foreach (PersistedPotionDirective persisted in SolverSettings.Current.PotionDirectives)
         {
-            PotionModel? potion = player.GetPotionAtSlotIndex(slot);
-            if (potion != null && string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
-                directives.Add(new PotionSlotDirective(slot, potionId, directive));
+            PotionModel? potion = player.GetPotionAtSlotIndex(persisted.Slot);
+            if (potion != null
+                && string.Equals(potion.Id.Entry, persisted.PotionId, StringComparison.Ordinal))
+            {
+                directives.Add(new PotionSlotDirective(
+                    persisted.Slot,
+                    persisted.PotionId,
+                    persisted.Directive));
+            }
         }
         return new PotionStrategySnapshot(defaultPolicy, directives);
     }
@@ -1284,7 +1292,7 @@ internal static class SolverController
         CombatState state,
         int slot,
         string potionId)
-        => CapturePotionStrategy(state, SolverPotionPolicy.Smart).Resolve(slot, potionId);
+        => SolverSettings.ResolvePotionDirective(slot, potionId);
 
     internal static void SetPotionDirective(
         NGame host,
@@ -1311,13 +1319,13 @@ internal static class SolverController
                 $"药水槽位 {slot} 为 {potion.Id.Entry}，预期 {potionId}。");
         }
 
-        (int Slot, string PotionId) key = (slot, potionId);
-        if (_combat.PotionDirectives.GetValueOrDefault(key) == directive
-            && _combat.PotionDirectives.ContainsKey(key))
-        {
+        if (SolverSettings.ResolvePotionDirective(slot, potionId) == directive)
             return;
-        }
-        _combat.PotionDirectives[key] = directive;
+        SolverSettings.Update(SolverSettings.ApplyPotionDirective(
+            SolverSettings.Current,
+            slot,
+            potionId,
+            directive));
         _combat.ContinuationSource = null;
         _combat.PendingCompleteProjectionBaseline = null;
         Entry.Logger.Info(
@@ -1339,7 +1347,32 @@ internal static class SolverController
             ?? throw new InvalidOperationException($"测试药水槽位 {slot} 为空。");
         if (!string.Equals(potion.Id.Entry, potionId, StringComparison.Ordinal))
             throw new InvalidOperationException($"测试药水槽位 {slot} 与 {potionId} 不一致。");
-        _combat.PotionDirectives[(slot, potionId)] = directive;
+        SolverSettings.ApplyForTesting(SolverSettings.ApplyPotionDirective(
+            SolverSettings.Current,
+            slot,
+            potionId,
+            directive));
+    }
+
+    private static void ReconcilePersistedPotionDirectives(CombatState state)
+    {
+        Player player = LocalContext.GetMe(state)
+            ?? throw new InvalidOperationException("当前战斗找不到本地玩家。");
+        SolverSettingsData settings = SolverSettings.Current;
+        PersistedPotionDirective[] retained = settings.PotionDirectives
+            .Where(directive =>
+            {
+                PotionModel? potion = player.GetPotionAtSlotIndex(directive.Slot);
+                return potion != null
+                    && string.Equals(potion.Id.Entry, directive.PotionId, StringComparison.Ordinal);
+            })
+            .ToArray();
+        if (retained.Length == settings.PotionDirectives.Length)
+            return;
+        SolverSettings.Update(settings with { PotionDirectives = retained });
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] POTION_DIRECTIVES_RECONCILED " +
+            $"previous={settings.PotionDirectives.Length} current={retained.Length}");
     }
 
     internal static SolverTheftPolicy? ResolveTheftPolicy(CombatState state)

@@ -70,6 +70,7 @@ internal static class SolverOverlay
     private static int _lastSearchingTurn;
     private static bool _lastSearchDeployWhenReady;
     private static long _lastReviewedWorldlinesBeforeSearch;
+    private static double _lastSearchProgressRatio;
     private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
     private static Vector2 _dragOffset;
@@ -115,6 +116,7 @@ internal static class SolverOverlay
             };
     internal static bool PerformanceHintVisibleForTesting => _performanceHintButton?.Visible == true;
     internal static string? ReviewSummaryTextForTesting => _reviewText?.Text;
+    internal static double SearchProgressRatioForTesting => _lastSearchProgressRatio;
     internal static bool ExercisePerformanceHintForTesting()
     {
         if (_performanceHintButton == null)
@@ -230,8 +232,13 @@ internal static class SolverOverlay
         if (_searchProgressBar != null)
         {
             _searchProgressBar.Visible = true;
-            _searchProgressBar.MaxValue = Math.Max(1, progress.MaxNodes);
-            _searchProgressBar.Value = Math.Clamp(progress.ExpandedNodes, 0, progress.MaxNodes);
+            double currentRatio = Math.Clamp(
+                progress.ExpandedNodes / (double)Math.Max(1, progress.MaxNodes),
+                0d,
+                1d);
+            _lastSearchProgressRatio = Math.Max(_lastSearchProgressRatio, currentRatio);
+            _searchProgressBar.MaxValue = 1d;
+            _searchProgressBar.Value = _lastSearchProgressRatio;
         }
         RefreshControls();
     }
@@ -247,6 +254,7 @@ internal static class SolverOverlay
         _lastSearchingTurn = turn;
         _lastSearchDeployWhenReady = deployWhenReady;
         _lastReviewedWorldlinesBeforeSearch = reviewedWorldlinesBeforeSearch;
+        _lastSearchProgressRatio = 0d;
         EnsureCreated(host);
         _deployQueued = deployWhenReady;
         SetStatus(

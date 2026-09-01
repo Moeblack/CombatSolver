@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using MegaCrit.Sts2.Core.Combat;
 
 namespace CombatSolver;
@@ -15,9 +16,11 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile shortProfile = policy.ShortProfile;
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
             shortProfile = shortProfile with { SoftTimeBudgetMilliseconds = shortBudget };
+        Stopwatch requestClock = Stopwatch.StartNew();
         if (progressCallback != null)
         {
             long completedSearches = 0;
+            long completedElapsed = 0;
             int lastExpanded = 0;
             long lastElapsed = 0;
             Action<SolverProgress> publishProgress = progressCallback;
@@ -27,12 +30,14 @@ internal static class CombatSearchCoordinator
                     || progress.ElapsedMilliseconds < lastElapsed)
                 {
                     completedSearches += lastExpanded;
+                    completedElapsed += lastElapsed;
                 }
                 lastExpanded = progress.ExpandedNodes;
                 lastElapsed = progress.ElapsedMilliseconds;
                 publishProgress(progress with
                 {
                     ReviewedWorldlines = completedSearches + progress.ExpandedNodes,
+                    ElapsedMilliseconds = completedElapsed + progress.ElapsedMilliseconds,
                 });
             };
         }
@@ -49,7 +54,7 @@ internal static class CombatSearchCoordinator
             PopulateSingleSessionTotals(shortResult, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered: false);
             if (!policy.PotionStrategy.HasForcedDirectives)
             {
-                shortResult = AuditRequiredPotionUse(
+                shortResult = RunSupplementalAudits(
                     root,
                     displayNames,
                     battleDamage,
@@ -58,27 +63,8 @@ internal static class CombatSearchCoordinator
                     progressCallback,
                     shortProfile,
                     shortCheckpointMilliseconds: null,
-                    primary: shortResult);
-                shortResult = AuditSmartPotionUse(
-                    root,
-                    displayNames,
-                    battleDamage,
-                    policy,
-                    cancellationToken,
-                    progressCallback,
-                    shortProfile,
-                    shortCheckpointMilliseconds: null,
-                    primary: shortResult);
-                shortResult = AuditOpeningPowerUse(
-                    root,
-                    displayNames,
-                    battleDamage,
-                    policy,
-                    cancellationToken,
-                    progressCallback,
-                    shortProfile,
-                    shortCheckpointMilliseconds: null,
-                    primary: shortResult);
+                    requestClock,
+                    shortResult);
             }
             if (policy.MeasurePhasePerformance)
                 policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(shortResult));
@@ -117,7 +103,7 @@ internal static class CombatSearchCoordinator
         PopulateSingleSessionTotals(result, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered);
         if (!policy.PotionStrategy.HasForcedDirectives)
         {
-            result = AuditRequiredPotionUse(
+            result = RunSupplementalAudits(
                 root,
                 displayNames,
                 battleDamage,
@@ -126,26 +112,7 @@ internal static class CombatSearchCoordinator
                 progressCallback,
                 deepProfile,
                 shortProfile.SoftTimeBudgetMilliseconds,
-                result);
-            result = AuditSmartPotionUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                deepProfile,
-                shortProfile.SoftTimeBudgetMilliseconds,
-                result);
-            result = AuditOpeningPowerUse(
-                root,
-                displayNames,
-                battleDamage,
-                policy,
-                cancellationToken,
-                progressCallback,
-                deepProfile,
-                shortProfile.SoftTimeBudgetMilliseconds,
+                requestClock,
                 result);
         }
         policy.Diagnostics.Info(
@@ -153,6 +120,76 @@ internal static class CombatSearchCoordinator
             $"short_checkpoint_ms={shortProfile.SoftTimeBudgetMilliseconds} " +
             $"total_budget_ms={deepProfile.SoftTimeBudgetMilliseconds}");
         return result;
+    }
+
+    private static SolverResult RunSupplementalAudits(
+        CombatRootSnapshot root,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot policy,
+        CancellationToken cancellationToken,
+        Action<SolverProgress>? progressCallback,
+        SolverSearchProfile profile,
+        int? shortCheckpointMilliseconds,
+        Stopwatch requestClock,
+        SolverResult primary)
+    {
+        long remainingMilliseconds = profile.SoftTimeBudgetMilliseconds - requestClock.ElapsedMilliseconds;
+        if (remainingMilliseconds <= 0)
+        {
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SUPPLEMENTAL_AUDIT_BUDGET exhausted=true " +
+                $"elapsed_ms={requestClock.ElapsedMilliseconds} " +
+                $"budget_ms={profile.SoftTimeBudgetMilliseconds}");
+            return primary;
+        }
+
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(remainingMilliseconds));
+        SolverResult selected = primary;
+        try
+        {
+            selected = AuditRequiredPotionUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                deadline.Token,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                selected);
+            selected = AuditSmartPotionUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                deadline.Token,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                selected);
+            selected = AuditOpeningPowerUse(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                deadline.Token,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                selected);
+        }
+        catch (OperationCanceledException)
+            when (deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SUPPLEMENTAL_AUDIT_BUDGET exhausted=true " +
+                $"elapsed_ms={requestClock.ElapsedMilliseconds} " +
+                $"budget_ms={profile.SoftTimeBudgetMilliseconds} " +
+                $"selected_potions={selected.PotionCount}");
+        }
+        return selected;
     }
 
     private static SolverResult AuditOpeningPowerUse(

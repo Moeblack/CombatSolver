@@ -33,7 +33,7 @@ Entry / turn hooks
 | `src/Runtime/PowerDynamicVarMaterializationGuardPatch.cs` | 搜索模拟惰性创建 Power 显示变量时立即报告根捕获缺失 | Power 语义、显示内容与搜索阶段串行化 |
 | `src/Runtime/SearchGcPolicy.cs` | 战斗级 No-GC、搜索内后台全代回收续搜、战斗结束后台回收、新搜索入口协调，以及“引用已释放/Gen2 已开始标记”的代际覆盖关系 | Beam 剪枝、候选评分与模拟语义 |
 | `src/Runtime/SearchMemoryPressureSignal.cs` | 将 Runtime 的进程分配边界和回收入口注入搜索；不让 Search 直接操作 GC 模式 | 设置读取与搜索评分 |
-| `src/Runtime/SolverSettings.cs` | 持久化性能、执行、搜索并行度和搜索结束通知设置，并在主线程捕获不可变搜索 snapshot | 搜索期读取全局设置 |
+| `src/Runtime/SolverSettings.cs` | 持久化性能、执行、搜索并行度、逐槽药水策略和搜索结束通知设置，并在主线程捕获不可变搜索 snapshot | 搜索期读取全局设置 |
 | `src/Runtime/PlayerTurnSetupPatches.cs` | 首回合原生页面出现后的 Start 根搜索；后续回合观察上一轮 `EndTurn.TurnStartChoices` 的原生页面，全自动直接可见重放，单步默认交还玩家并允许执行/全自动入口接管既有选择；进入 Play 后交给 continuation 核对；跨 Reset 的 Setup/部署延迟由 lifecycle token 取消 | 普通 Play 阶段搜索与动作部署 |
 | `src/Runtime/NativeChoiceRuntime.cs` | 观测原版战斗选择请求，按卡牌语义状态匹配计划实例，并锁定、驱动真实页面控件 | 选择分支枚举和战斗结算 |
 | `src/Runtime/CombatBugReportExporter.cs` | 主线程冻结当前/最近战斗的实机取证状态；单消费者后台 FIFO 按检查点顺序整理并一次序列化为 UTF-8 字节，导出任务作为队列屏障等待此前记录完成 | 后台读取 live 战斗、通用 replay/native-state 导入 |
@@ -50,7 +50,7 @@ Entry / turn hooks
 - `SearchPolicySnapshot.cs`：主线程捕获的不可变搜索设置和逐槽药水策略；后台不读取 UI 或玩家设置。
 - `SearchDiagnosticsSink.cs`：搜索日志出口。
 - `SearchFramePressureSignal.cs`：Runtime 向 worker 提供的帧压力信号。
-- `CombatSearchCoordinator.cs`：一次请求的主搜索，以及 Disabled/Smart/RequireAtLeastOne 所需的无药或限药反事实审计；合并多次搜索的总指标。
+- `CombatSearchCoordinator.cs`：一次请求的主搜索，以及 Disabled/Smart/RequireAtLeastOne 所需的无药或限药反事实审计；所有子搜索共享请求级时间余量，并合并总指标。
 - `CombatPlan.cs`：Runtime 消费的计划、结果和续用数据。结果不得保留历史 Simulator 对象图。
 
 ### 3.2 CombatBeamSolver 分片

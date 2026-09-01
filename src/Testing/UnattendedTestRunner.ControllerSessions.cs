@@ -77,6 +77,7 @@ internal sealed partial class UnattendedTestRunner
                     forcedPotion.Potion.Id.Entry,
                     SolverPotionDirective.Smart);
             }
+            await AssertBoundedSmartPotionAuditAsync(combat);
         }
 
         SolverController.RequestSearch(host, combat, SearchReason.Manual);
@@ -100,6 +101,24 @@ internal sealed partial class UnattendedTestRunner
             reviewedWorldlinesBeforeSearch: 5);
         if (SolverOverlay.ReviewSummaryTextForTesting != "已查阅 42 条世界线")
             throw new InvalidOperationException("搜索进度区没有独立显示累计查阅世界线数量。");
+        double progressRatio = SolverOverlay.SearchProgressRatioForTesting;
+        SolverOverlay.ShowProgress(
+            new SolverProgress(
+                progressTurn,
+                progressTurn,
+                CompletedTurnLayers: 0,
+                PlayDepth: 0,
+                ExpandedNodes: 1,
+                ReviewedWorldlines: 40,
+                MaxNodes: 100,
+                FrontierNodes: 0,
+                EndedNodes: 0,
+                ElapsedMilliseconds: 600,
+                Phase: "potion-audit-test"),
+            deployWhenReady: false,
+            reviewedWorldlinesBeforeSearch: 5);
+        if (SolverOverlay.SearchProgressRatioForTesting < progressRatio)
+            throw new InvalidOperationException("药水补查开始后搜索进度条倒退。");
         if (SolverOverlay.ExecuteButtonTextForTesting != "停止计算")
             throw new InvalidOperationException("搜索期间执行按钮没有切换为停止计算。");
         if (!SolverOverlay.MessageWrappingEnabledForTesting)
@@ -140,6 +159,7 @@ internal sealed partial class UnattendedTestRunner
                 potionEntry.Slot,
                 potionEntry.Potion.Id.Entry,
                 SolverPotionDirective.Force);
+            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(SolverSettings.Current));
             PotionStrategySnapshot forcedStrategy = SolverController.CapturePotionStrategy(
                 combat,
                 SolverPotionPolicy.Smart);
@@ -155,6 +175,12 @@ internal sealed partial class UnattendedTestRunner
                     .AllForcedUsesSatisfied)
             {
                 throw new InvalidOperationException("指定药水没有形成精确槽位和药水身份约束。");
+            }
+            if (SolverSettings.ResolvePotionDirective(
+                    potionEntry.Slot,
+                    potionEntry.Potion.Id.Entry + "_REPLACEMENT") != SolverPotionDirective.Smart)
+            {
+                throw new InvalidOperationException("同槽位的新药错误继承了旧药的持久化策略。");
             }
             SolverController.SetPotionDirectiveForTesting(
                 combat,
@@ -177,6 +203,8 @@ internal sealed partial class UnattendedTestRunner
                 potionEntry.Slot,
                 potionEntry.Potion.Id.Entry,
                 SolverPotionDirective.Smart);
+            if (SolverSettings.Current.PotionDirectives.Any(item => item.Slot == potionEntry.Slot))
+                throw new InvalidOperationException("恢复智能后仍保留了逐瓶策略覆盖项。");
         }
         if (!SolverOverlay.ExerciseSearchCompletionNotificationPolicyForTesting())
             throw new InvalidOperationException("搜索结束通知三态选项不能无损回读旧设置字段。");
@@ -516,6 +544,45 @@ internal sealed partial class UnattendedTestRunner
                 $"completed={deploymentLifecycle.ReleasesCompleted} " +
                 $"cts_disposed={deploymentLifecycle.CancellationsDisposed}。");
         }
+    }
+
+    private static async Task AssertBoundedSmartPotionAuditAsync(CombatState combat)
+    {
+        SolverSettingsSnapshot settings = SolverSettings.Capture();
+        SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
+            settings,
+            combat,
+            includeTurnSetup: false,
+            theftPolicy: SolverController.ResolveTheftPolicy(combat)) with
+        {
+            ShortProfile = settings.ShortProfile with
+            {
+                MaxExpandedNodes = 100_000,
+                SoftTimeBudgetMilliseconds = 1_200,
+            },
+            ForceShortOnly = true,
+            MaxDegreeOfParallelism = 1,
+        };
+        CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
+        SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
+        BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
+        List<long> elapsedSamples = [];
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        await Task.Run(() => CombatSearchCoordinator.Solve(
+            root,
+            displayNames,
+            battleDamage,
+            policy,
+            CancellationToken.None,
+            progress => elapsedSamples.Add(progress.ElapsedMilliseconds)));
+        stopwatch.Stop();
+        if (stopwatch.ElapsedMilliseconds > 4_000)
+        {
+            throw new InvalidOperationException(
+                $"Smart 药水补查超过单次请求预算：{stopwatch.ElapsedMilliseconds} ms。");
+        }
+        if (elapsedSamples.Zip(elapsedSamples.Skip(1), (left, right) => right >= left).Any(valid => !valid))
+            throw new InvalidOperationException("药水补查的累计耗时发生倒退。");
     }
 
     private static void AssertBugReportAutomaticClassification()
