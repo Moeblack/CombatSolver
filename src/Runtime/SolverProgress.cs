@@ -6,6 +6,7 @@ internal sealed record SolverProgress(
     int CompletedTurnLayers,
     int PlayDepth,
     int ExpandedNodes,
+    long ReviewedWorldlines,
     int MaxNodes,
     int FrontierNodes,
     int EndedNodes,

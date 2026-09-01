@@ -24,7 +24,8 @@ internal sealed partial class SolverDetailsButton : Button
         layout.AddChild(SolverUiTokens.CreateLabel(
             "状态详情",
             SolverUiTokens.Type.Body,
-            SolverUiTokens.Palette.TextPrimary));
+            SolverUiTokens.Palette.TextPrimary,
+            MegaCrit.Sts2.Core.Localization.Fonts.FontType.Bold));
 
         _arrowLabel = SolverUiTokens.CreateLabel(
             "▾",

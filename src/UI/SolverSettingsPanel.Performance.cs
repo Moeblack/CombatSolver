@@ -15,14 +15,28 @@ internal sealed partial class SolverSettingsPanel
         SolverSettingsData original = SolverSettings.Current;
         try
         {
+            SolverSettingsData migrated = SolverSettings.ApplyCurrentPerformanceMigrationForTesting(
+                original with
+                {
+                    PerformanceMigrationVersion = 0,
+                    PerformancePreset = SolverPerformancePreset.VeryHigh,
+                    NoGcRegionBudgetGigabytes = 8d,
+                });
+            bool migrationApplied = migrated.PerformanceMigrationVersion
+                    == SolverSettings.CurrentPerformanceMigrationVersion
+                && SolverSettings.ResolvePerformancePreset(migrated) == SolverPerformancePreset.Medium
+                && migrated.NoGcRegionBudgetGigabytes == SolverSettings.DefaultNoGcRegionBudgetGigabytes;
             SolverSettingsData preset = SolverSettings.ApplyPerformancePreset(
-                original,
+                original with { NoGcRegionBudgetGigabytes = 64d },
                 SolverPerformancePreset.High);
             SolverSettings.ApplyForTesting(preset);
             Reload();
-            return CommitPending()
+            return migrationApplied
+                   && preset.NoGcRegionBudgetGigabytes == 64d
+                   && CommitPending()
                    && SolverSettings.ResolvePerformancePreset(SolverSettings.Current)
-                   == SolverPerformancePreset.High;
+                   == SolverPerformancePreset.High
+                   && SolverSettings.Current.NoGcRegionBudgetGigabytes == 64d;
         }
         finally
         {
@@ -47,11 +61,12 @@ internal sealed partial class SolverSettingsPanel
             budgetGrid,
             "搜索内存预算（GB）",
             CreateRequiredDoubleInput(
-                data => SolverSettings.ResolvePerformanceValues(data).NoGcRegionBudgetGigabytes,
-                (data, value) => AsCustomPerformance(data with { NoGcRegionBudgetGigabytes = value }),
+                data => data.NoGcRegionBudgetGigabytes
+                    ?? SolverSettings.DefaultNoGcRegionBudgetGigabytes,
+                (data, value) => data with { NoGcRegionBudgetGigabytes = value },
                 1d,
-                16d),
-            "这是单个搜索 No-GC 区域的实际请求预算，不是进程总内存上限。设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
+                SolverSettings.MaximumNoGcRegionBudgetGigabytes),
+            "这是独立于性能预设的单个搜索 No-GC 区域请求预算，不是进程总内存上限。设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
         content.AddChild(budgetGrid);
 
         _advancedParametersToggle = SolverUiTokens.CreateButton(
@@ -135,10 +150,10 @@ internal sealed partial class SolverSettingsPanel
     private OptionButton CreatePerformancePresetInput()
     {
         OptionButton input = CreateOptionInput(260);
-        input.AddItem("低档（5 / 60 秒，6 GB）", (int)SolverPerformancePreset.Low);
-        input.AddItem("中档（8 / 120 秒，8 GB）", (int)SolverPerformancePreset.Medium);
-        input.AddItem("高档（12 / 180 秒，12 GB）", (int)SolverPerformancePreset.High);
-        input.AddItem("极高（默认，20 / 300 秒，16 GB）", (int)SolverPerformancePreset.VeryHigh);
+        input.AddItem("低档（5 / 60 秒）", (int)SolverPerformancePreset.Low);
+        input.AddItem("中档（默认，8 / 120 秒）", (int)SolverPerformancePreset.Medium);
+        input.AddItem("高档（12 / 180 秒）", (int)SolverPerformancePreset.High);
+        input.AddItem("极高（20 / 300 秒）", (int)SolverPerformancePreset.VeryHigh);
         input.AddItem("自定义", (int)SolverPerformancePreset.Custom);
         input.ItemSelected += index =>
         {
@@ -286,9 +301,9 @@ internal sealed partial class SolverSettingsPanel
             return true;
         if (data != SolverSettings.Current)
             SolverSettings.Update(data);
-        _performancePreset.Selected = _performancePreset.GetItemIndex(
-            (int)SolverSettings.ResolvePerformancePreset(data));
-        SetAdvancedParametersExpanded(true);
+        SolverPerformancePreset preset = SolverSettings.ResolvePerformancePreset(data);
+        _performancePreset.Selected = _performancePreset.GetItemIndex((int)preset);
+        SetAdvancedParametersExpanded(preset == SolverPerformancePreset.Custom);
         input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
         SetStatus("已保存，下次搜索生效", SolverUiTokens.Palette.Success);
         return true;

@@ -26,12 +26,12 @@ internal sealed partial class UnattendedTestRunner
             return;
         }
         (int ShortMs, int DeepMs, int ShortBeam, int DeepBeam, int ShortNodes, int DeepNodes,
-            int ShortBranches, int DeepBranches, long NoGcBytes) expected = preset switch
+            int ShortBranches, int DeepBranches) expected = preset switch
         {
-            SolverPerformancePreset.Low => (5_000, 60_000, 18, 45, 1_200, 6_000, 14, 24, 6_000_000_000L),
-            SolverPerformancePreset.Medium => (8_000, 120_000, 24, 60, 2_400, 12_000, 20, 32, 8_000_000_000L),
-            SolverPerformancePreset.High => (12_000, 180_000, 36, 90, 5_000, 25_000, 30, 48, 12_000_000_000L),
-            SolverPerformancePreset.VeryHigh => (20_000, 300_000, 54, 135, 10_000, 50_000, 45, 72, 16_000_000_000L),
+            SolverPerformancePreset.Low => (5_000, 60_000, 18, 45, 1_200, 6_000, 14, 24),
+            SolverPerformancePreset.Medium => (8_000, 120_000, 24, 60, 2_400, 12_000, 20, 32),
+            SolverPerformancePreset.High => (12_000, 180_000, 36, 90, 5_000, 25_000, 30, 48),
+            SolverPerformancePreset.VeryHigh => (20_000, 300_000, 54, 135, 10_000, 50_000, 45, 72),
             _ => throw new ArgumentOutOfRangeException(nameof(preset)),
         };
         if (snapshot.ShortProfile.SoftTimeBudgetMilliseconds != expected.ShortMs
@@ -41,15 +41,14 @@ internal sealed partial class UnattendedTestRunner
             || snapshot.ShortProfile.MaxExpandedNodes != expected.ShortNodes
             || snapshot.DeepProfile.MaxExpandedNodes != expected.DeepNodes
             || snapshot.ShortProfile.MaxCardBranchesPerNode != expected.ShortBranches
-            || snapshot.DeepProfile.MaxCardBranchesPerNode != expected.DeepBranches
-            || snapshot.NoGcRegionBudgetBytes != expected.NoGcBytes)
+            || snapshot.DeepProfile.MaxCardBranchesPerNode != expected.DeepBranches)
         {
             throw new InvalidOperationException($"性能预设 {preset} 解析结果与固定规格不一致。");
         }
         _completedChecks.Add(
             $"PerformancePreset:{preset}:{expected.ShortMs}/{expected.DeepMs}ms:" +
             $"Beam={expected.ShortBeam}/{expected.DeepBeam}:Nodes={expected.ShortNodes}/{expected.DeepNodes}:" +
-            $"Branches={expected.ShortBranches}/{expected.DeepBranches}:NoGC={expected.NoGcBytes}");
+            $"Branches={expected.ShortBranches}/{expected.DeepBranches}:NoGC={snapshot.NoGcRegionBudgetBytes}");
     }
 
     private void AssertAppliedNoGcRegionBudget()
@@ -66,9 +65,9 @@ internal sealed partial class UnattendedTestRunner
                 MidpointRounding.AwayFromZero))
             : _request.PerformancePresetForTest switch
             {
-                SolverPerformancePreset.Low => 6_000_000_000L,
-                SolverPerformancePreset.Medium => 8_000_000_000L,
-                SolverPerformancePreset.High => 12_000_000_000L,
+                SolverPerformancePreset.Low => 16_000_000_000L,
+                SolverPerformancePreset.Medium => 16_000_000_000L,
+                SolverPerformancePreset.High => 16_000_000_000L,
                 SolverPerformancePreset.VeryHigh => 16_000_000_000L,
                 _ => SolverSettings.Capture().NoGcRegionBudgetBytes,
             };
@@ -160,6 +159,21 @@ internal sealed partial class UnattendedTestRunner
         }
 
         AssertAppliedNoGcRegionBudget();
+        long reviewedWorldlines = (long)result.ShortExpandedNodes + result.DeepExpandedNodes;
+        SolverOverlaySnapshot reviewSnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+            result,
+            unexpectedReplan: false,
+            reviewedWorldlines);
+        bool validReviewSummary = result.WasReused
+            ? reviewSnapshot.ReviewSummaryText.StartsWith("路线已复用，共查阅了 ", StringComparison.Ordinal)
+            : reviewSnapshot.ReviewSummaryText.StartsWith("花费了 ", StringComparison.Ordinal)
+                && reviewSnapshot.ReviewSummaryText.Contains("秒，共查阅了 ", StringComparison.Ordinal);
+        if (!validReviewSummary
+            || !reviewSnapshot.ReviewSummaryText.EndsWith(" 条世界线", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("搜索完成快照没有生成耗时与世界线汇总。");
+        }
+        _completedChecks.Add("InitialWorldlineSummary");
 
         if (_request.ExpectedInitialSetupChoiceCountAtLeast is { } minimumTurnSetupChoices
             && result.TurnSetupChoices.Count < minimumTurnSetupChoices)

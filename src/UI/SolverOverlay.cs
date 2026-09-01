@@ -32,6 +32,7 @@ internal static class SolverOverlay
     private static PanelContainer? _summaryPanel;
     private static RichTextLabel? _summaryText;
     private static Label? _progressText;
+    private static Label? _reviewText;
     private static ProgressBar? _searchProgressBar;
     private static HBoxContainer? _routeHeadingRow;
     private static readonly SolverRouteRow[] RouteRows = new SolverRouteRow[SolverWeights.UiTurnRows];
@@ -47,6 +48,7 @@ internal static class SolverOverlay
     private static Button? _collapseButton;
     private static Button? _settingsButton;
     private static Button? _potionStrategyButton;
+    private static Button? _performanceHintButton;
     private static SolverPotionStrategyPanel? _potionStrategyPanel;
     private static PanelContainer? _feedbackBanner;
     private static Label? _feedbackBannerLabel;
@@ -67,6 +69,7 @@ internal static class SolverOverlay
     private static string? _lastMessageText;
     private static int _lastSearchingTurn;
     private static bool _lastSearchDeployWhenReady;
+    private static long _lastReviewedWorldlinesBeforeSearch;
     private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
     private static Vector2 _dragOffset;
@@ -104,7 +107,26 @@ internal static class SolverOverlay
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
     internal static bool PotionStrategyUiConfiguredForTesting
         => _potionStrategyButton != null
-            && _potionStrategyPanel is { RowCountForTesting: > 0, RowsUseIconAndTextForTesting: true };
+            && _potionStrategyPanel is
+            {
+                RowCountForTesting: > 0,
+                RowsUseIconAndTextForTesting: true,
+                UsesGridCardsForTesting: true,
+            };
+    internal static bool PerformanceHintVisibleForTesting => _performanceHintButton?.Visible == true;
+    internal static string? ReviewSummaryTextForTesting => _reviewText?.Text;
+    internal static bool ExercisePerformanceHintForTesting()
+    {
+        if (_performanceHintButton == null)
+            return false;
+        bool original = _performanceHintButton.Visible;
+        SetPerformanceHintVisible(true);
+        bool visible = _performanceHintButton.Visible
+            && _performanceHintButton.Text.Contains("设置 > 性能", StringComparison.Ordinal)
+            && _performanceHintButton.Text.Contains("高或极高", StringComparison.Ordinal);
+        SetPerformanceHintVisible(original);
+        return visible;
+    }
     internal static bool ExercisePotionStrategyUiForTesting()
     {
         if (_potionStrategyButton == null || _potionStrategyPanel == null)
@@ -140,6 +162,8 @@ internal static class SolverOverlay
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("求解器消息", TextMuted);
+        SetPerformanceHintVisible(false);
+        SetReviewText(null);
         const string legacyTitle = "[b]战斗路线求解器[/b]\n";
         SetMessageContent(text.StartsWith(legacyTitle, StringComparison.Ordinal) ? text[legacyTitle.Length..] : text);
         ShowLayer();
@@ -153,6 +177,8 @@ internal static class SolverOverlay
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("求解器已禁用", TextMuted);
+        SetPerformanceHintVisible(false);
+        SetReviewText(null);
         SetMessageContent($"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动搜索和路线执行已暂停。[/color]");
         ShowLayer();
         RefreshControls();
@@ -165,19 +191,25 @@ internal static class SolverOverlay
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("计算已停止", Danger);
+        SetPerformanceHintVisible(false);
+        SetReviewText(null);
         SetMessageContent(
             $"[color={SolverUiTokens.Palette.DangerHex}]本场自动计算已暂停。点击“重新计算”后恢复当前及后续回合搜索。[/color]");
         ShowLayer();
         RefreshControls();
     }
 
-    public static void ShowProgress(SolverProgress progress, bool deployWhenReady)
+    public static void ShowProgress(
+        SolverProgress progress,
+        bool deployWhenReady,
+        long reviewedWorldlinesBeforeSearch)
     {
         if (_layer == null || !GodotObject.IsInstanceValid(_layer) || !_layer.Visible)
             return;
         _deployQueued = deployWhenReady;
         _lastSearchingTurn = progress.CurrentTurnNumber;
         _lastSearchDeployWhenReady = deployWhenReady;
+        _lastReviewedWorldlinesBeforeSearch = reviewedWorldlinesBeforeSearch;
         SetStatus(
             "后台计算中",
             Accent,
@@ -193,6 +225,8 @@ internal static class SolverOverlay
             _progressText.Visible = true;
             _progressText.Text = $"已用 {progress.ElapsedMilliseconds / 1000d:F1} s";
         }
+        SetReviewText(
+            $"已查阅 {reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线");
         if (_searchProgressBar != null)
         {
             _searchProgressBar.Visible = true;
@@ -202,12 +236,17 @@ internal static class SolverOverlay
         RefreshControls();
     }
 
-    public static void ShowSearching(Node host, int turn, bool deployWhenReady)
+    public static void ShowSearching(
+        Node host,
+        int turn,
+        bool deployWhenReady,
+        long reviewedWorldlinesBeforeSearch)
     {
         _lastSnapshot = null;
         _lastMessageText = null;
         _lastSearchingTurn = turn;
         _lastSearchDeployWhenReady = deployWhenReady;
+        _lastReviewedWorldlinesBeforeSearch = reviewedWorldlinesBeforeSearch;
         EnsureCreated(host);
         _deployQueued = deployWhenReady;
         SetStatus(
@@ -221,6 +260,8 @@ internal static class SolverOverlay
         }
         if (_progressText != null)
             _progressText.Visible = false;
+        SetReviewText($"已查阅 {reviewedWorldlinesBeforeSearch:N0} 条世界线");
+        SetPerformanceHintVisible(false);
         if (_searchProgressBar != null)
         {
             _searchProgressBar.Visible = true;
@@ -282,6 +323,8 @@ internal static class SolverOverlay
         }
         if (_progressText != null)
             _progressText.Visible = false;
+        SetReviewText(snapshot.ReviewSummaryText);
+        SetPerformanceHintVisible(snapshot.ProjectedBattleHpLost > 0);
         if (_searchProgressBar != null)
             _searchProgressBar.Visible = false;
 
@@ -502,7 +545,7 @@ internal static class SolverOverlay
             _renderedExecuteButtonStyle = executeStyle;
         }
 
-        _fullAutoButton.Text = SolverController.FullAutoEnabled ? "全自动：运行中" : "全自动：关";
+        _fullAutoButton.Text = SolverController.FullAutoEnabled ? "全自动：开" : "全自动：关";
         _fullAutoButton.Disabled = solverDisabled;
         if (_renderedFullAutoStyle != SolverController.FullAutoEnabled)
         {
@@ -624,7 +667,11 @@ internal static class SolverOverlay
         }
         else if (SolverController.IsSearching)
         {
-            ShowSearching(host, _lastSearchingTurn, _lastSearchDeployWhenReady);
+            ShowSearching(
+                host,
+                _lastSearchingTurn,
+                _lastSearchDeployWhenReady,
+                _lastReviewedWorldlinesBeforeSearch);
         }
         else
         {
@@ -683,11 +730,27 @@ internal static class SolverOverlay
         panel.AddChild(root);
 
         root.AddChild(CreateHeader());
-        _potionStrategyPanel = new SolverPotionStrategyPanel();
-        _potionStrategyPanel.DirectiveChanged += OnPotionDirectiveChanged;
-        root.AddChild(_potionStrategyPanel);
-        root.AddChild(CreateFeedbackBanner());
-        root.AddChild(CreateDivider());
+        root.AddChild(CreatePerformanceHint());
+
+        HBoxContainer contentColumns = new()
+        {
+            Name = "ContentColumns",
+            MouseFilter = Control.MouseFilterEnum.Pass,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        contentColumns.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Md);
+        root.AddChild(contentColumns);
+
+        VBoxContainer primaryColumn = new()
+        {
+            Name = "PrimaryColumn",
+            MouseFilter = Control.MouseFilterEnum.Pass,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        primaryColumn.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+        contentColumns.AddChild(primaryColumn);
+        primaryColumn.AddChild(CreateFeedbackBanner());
+        primaryColumn.AddChild(CreateDivider());
 
         VBoxContainer lowerStack = new()
         {
@@ -695,7 +758,7 @@ internal static class SolverOverlay
             MouseFilter = Control.MouseFilterEnum.Pass,
         };
         lowerStack.AddThemeConstantOverride("separation", 0);
-        root.AddChild(lowerStack);
+        primaryColumn.AddChild(lowerStack);
         _mainStack = lowerStack;
 
         _settingsPanel = new SolverSettingsPanel
@@ -703,7 +766,11 @@ internal static class SolverOverlay
             Visible = false,
         };
         _settingsPanel.ResetPositionRequested += ResetOverlayPosition;
-        root.AddChild(_settingsPanel);
+        primaryColumn.AddChild(_settingsPanel);
+
+        _potionStrategyPanel = new SolverPotionStrategyPanel();
+        _potionStrategyPanel.DirectiveChanged += OnPotionDirectiveChanged;
+        contentColumns.AddChild(_potionStrategyPanel);
 
         _body = new VBoxContainer
         {
@@ -915,38 +982,35 @@ internal static class SolverOverlay
 
     private static Button CreateHeaderButton(string text, float minimumWidth)
     {
-        Button button = new()
-        {
-            Text = text,
-            FocusMode = Control.FocusModeEnum.None,
-            MouseDefaultCursorShape = Control.CursorShape.PointingHand,
-            CustomMinimumSize = new Vector2(minimumWidth, 24),
-        };
-        button.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Caption);
-        button.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextSecondary);
-        button.AddThemeColorOverride("font_hover_color", TextPrimary);
-        button.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            Colors.Transparent,
-            Colors.Transparent,
-            SolverUiTokens.Radius.Small,
-            SolverUiTokens.Spacing.Xs,
-            SolverUiTokens.Spacing.Xxs,
-            borderWidth: 0));
-        button.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceHover,
-            SolverUiTokens.Palette.BorderSubtle,
-            SolverUiTokens.Radius.Small,
-            SolverUiTokens.Spacing.Xs,
-            SolverUiTokens.Spacing.Xxs));
-        button.AddThemeStyleboxOverride("pressed", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
-            SolverUiTokens.Palette.BorderSubtle,
-            SolverUiTokens.Radius.Small,
-            SolverUiTokens.Spacing.Xs,
-            SolverUiTokens.Spacing.Xxs));
-        SolverUiTokens.ApplyTextOutline(button);
-        button.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        Button button = SolverUiTokens.CreateButton(text, SolverButtonStyle.Secondary);
+        button.CustomMinimumSize = new Vector2(minimumWidth, SolverUiTokens.Size.ButtonHeight);
+        button.ApplyLocaleFontSubstitution(FontType.Bold, "font");
         return button;
+    }
+
+    private static Control CreatePerformanceHint()
+    {
+        _performanceHintButton = SolverUiTokens.CreateButton(
+            "有战损：前往 设置 > 性能，将性能预设调为高或极高后重试",
+            SolverButtonStyle.Secondary);
+        _performanceHintButton.Name = "PerformanceHint";
+        _performanceHintButton.Visible = false;
+        _performanceHintButton.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _performanceHintButton.CustomMinimumSize = new Vector2(0, 30);
+        _performanceHintButton.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
+            SolverUiTokens.IsLightTheme ? Warning.Lightened(0.82f) : Warning.Darkened(0.78f),
+            Warning,
+            SolverUiTokens.Radius.Large,
+            SolverUiTokens.Spacing.Md,
+            SolverUiTokens.Spacing.Xxs));
+        _performanceHintButton.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
+            SolverUiTokens.IsLightTheme ? Warning.Lightened(0.72f) : Warning.Darkened(0.68f),
+            Warning.Lightened(0.12f),
+            SolverUiTokens.Radius.Large,
+            SolverUiTokens.Spacing.Md,
+            SolverUiTokens.Spacing.Xxs));
+        _performanceHintButton.Pressed += OpenPerformanceSettings;
+        return _performanceHintButton;
     }
 
     private static Control CreateSummarySection()
@@ -992,11 +1056,21 @@ internal static class SolverOverlay
         _summaryText.CustomMinimumSize = new Vector2(0, 24);
         _summaryText.ApplyLocaleFontSubstitution(FontType.Bold, "normal_font");
         _progressText = CreateTextLabel(string.Empty, SolverUiTokens.Type.Metric, TextPrimary, FontType.Bold);
-        _progressText.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        _progressText.CustomMinimumSize = new Vector2(0, 24);
+        _progressText.SizeFlagsHorizontal = Control.SizeFlags.ShrinkBegin;
+        _progressText.CustomMinimumSize = new Vector2(104, 24);
         _progressText.ClipText = true;
         _progressText.Visible = false;
         statusRow.AddChild(_progressText);
+        _reviewText = CreateTextLabel(
+            string.Empty,
+            SolverUiTokens.Type.Metric,
+            SolverUiTokens.Palette.TextSecondary,
+            FontType.Bold);
+        _reviewText.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _reviewText.CustomMinimumSize = new Vector2(0, 24);
+        _reviewText.ClipText = true;
+        _reviewText.Visible = false;
+        statusRow.AddChild(_reviewText);
         _detailsButton = new SolverDetailsButton
         {
             Visible = false,
@@ -1261,6 +1335,8 @@ internal static class SolverOverlay
         if (_settingsVisible)
             _settingsPanel?.Reload();
         ApplyContentVisibility();
+        SetPerformanceHintVisible(
+            !_settingsVisible && _lastSnapshot?.ProjectedBattleHpLost > 0);
         QueueResponsiveLayout();
         Entry.Logger.Info($"[CombatSolver/Test] UI_ACTION action=settings visible={_settingsVisible}");
     }
@@ -1276,9 +1352,43 @@ internal static class SolverOverlay
         _potionStrategyPanel?.Invalidate();
         RefreshControls();
         ApplyContentVisibility();
+        SetPerformanceHintVisible(_lastSnapshot?.ProjectedBattleHpLost > 0);
         QueueResponsiveLayout();
         Entry.Logger.Info(
             $"[CombatSolver/Test] UI_ACTION action=potion_strategy visible={_potionStrategyVisible}");
+    }
+
+    private static void OpenPerformanceSettings()
+    {
+        if (_collapsed)
+            SetCollapsed(false);
+        if (_settingsVisible && _settingsPanel?.CommitPending() == false)
+            return;
+        _settingsVisible = true;
+        _potionStrategyVisible = false;
+        _settingsPanel?.Reload();
+        if (_settingsPanel?.OpenPerformancePage() == false)
+            return;
+        ApplyContentVisibility();
+        SetPerformanceHintVisible(false);
+        QueueResponsiveLayout();
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=performance_hint_open_settings");
+    }
+
+    private static void SetReviewText(string? text)
+    {
+        if (_reviewText == null)
+            return;
+        _reviewText.Visible = !string.IsNullOrEmpty(text);
+        _reviewText.Text = text ?? string.Empty;
+    }
+
+    private static void SetPerformanceHintVisible(bool visible)
+    {
+        if (_performanceHintButton == null || _performanceHintButton.Visible == visible)
+            return;
+        _performanceHintButton.Visible = visible;
+        QueueResponsiveLayout();
     }
 
     private static void ToggleDetails()
@@ -1380,9 +1490,13 @@ internal static class SolverOverlay
         Vector2 viewportSize = _viewport.GetVisibleRect().Size;
         float availableWidth = Math.Max(360f, viewportSize.X - SolverUiTokens.Size.PanelMargin * 2f);
         float availableHeight = Math.Max(SolverUiTokens.Size.CollapsedHeight, viewportSize.Y - SolverUiTokens.Size.PanelMargin * 2f);
+        float expandedMaximumWidth = _potionStrategyVisible ? 1140f : SolverUiTokens.Size.ExpandedMaxWidth;
+        float expandedMinimumWidth = _potionStrategyVisible ? 900f : SolverUiTokens.Size.ExpandedMinWidth;
         float width = _collapsed
             ? Math.Min(SolverUiTokens.Size.CollapsedWidth, availableWidth)
-            : Math.Min(SolverUiTokens.Size.ExpandedMaxWidth, Math.Max(SolverUiTokens.Size.ExpandedMinWidth, viewportSize.X * 0.58f));
+            : Math.Min(
+                expandedMaximumWidth,
+                Math.Max(expandedMinimumWidth, viewportSize.X * (_potionStrategyVisible ? 0.76f : 0.58f)));
         width = Math.Min(width, availableWidth);
         float desiredHeight = _collapsed
             ? SolverUiTokens.Size.CollapsedHeight

@@ -82,6 +82,24 @@ internal sealed partial class UnattendedTestRunner
         SolverController.RequestSearch(host, combat, SearchReason.Manual);
         if (!SolverController.IsSearching)
             throw new InvalidOperationException("控制器没有建立搜索会话。");
+        int progressTurn = player.PlayerCombatState!.TurnNumber;
+        SolverOverlay.ShowProgress(
+            new SolverProgress(
+                progressTurn,
+                progressTurn,
+                CompletedTurnLayers: 0,
+                PlayDepth: 0,
+                ExpandedNodes: 7,
+                ReviewedWorldlines: 37,
+                MaxNodes: 100,
+                FrontierNodes: 0,
+                EndedNodes: 0,
+                ElapsedMilliseconds: 500,
+                Phase: "test"),
+            deployWhenReady: false,
+            reviewedWorldlinesBeforeSearch: 5);
+        if (SolverOverlay.ReviewSummaryTextForTesting != "已查阅 42 条世界线")
+            throw new InvalidOperationException("搜索进度区没有独立显示累计查阅世界线数量。");
         if (SolverOverlay.ExecuteButtonTextForTesting != "停止计算")
             throw new InvalidOperationException("搜索期间执行按钮没有切换为停止计算。");
         if (!SolverOverlay.MessageWrappingEnabledForTesting)
@@ -100,12 +118,14 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("设置页没有按常规、性能、反馈三页独立切换。");
         }
+        if (!SolverOverlay.ExercisePerformanceHintForTesting())
+            throw new InvalidOperationException("战损结果没有可用的性能预设重试胶囊提示。");
         if (strategyPotion is { } potionEntry)
         {
             if (!SolverOverlay.PotionStrategyUiConfiguredForTesting
                 || !SolverOverlay.ExercisePotionStrategyUiForTesting())
             {
-                throw new InvalidOperationException("主界面药水策略没有按图标、名称和折叠面板建立。");
+                throw new InvalidOperationException("主界面药水策略没有按右侧图标卡片网格建立。");
             }
             PotionStrategySnapshot initialStrategy = SolverController.CapturePotionStrategy(
                 combat,
@@ -192,9 +212,11 @@ internal sealed partial class UnattendedTestRunner
         }
         SolverSettingsData notificationDefaults = new();
         if (SolverSettings.ResolvePerformancePreset(notificationDefaults)
-            != SolverPerformancePreset.VeryHigh)
+                != SolverPerformancePreset.Medium
+            || notificationDefaults.NoGcRegionBudgetGigabytes
+                != SolverSettings.DefaultNoGcRegionBudgetGigabytes)
         {
-            throw new InvalidOperationException("新安装和恢复默认没有使用极高性能档。");
+            throw new InvalidOperationException("新安装和恢复默认没有使用中性能档与 16 GB 独立内存预算。");
         }
         if (!notificationDefaults.SearchCompletionNotificationsEnabled
             || notificationDefaults.SearchCompletionNotificationMode
@@ -247,7 +269,7 @@ internal sealed partial class UnattendedTestRunner
         if (!SolverOverlay.ExerciseUploadCompletionTransitionForTesting())
             throw new InvalidOperationException("上传任务结束前按钮状态提前切回空闲，可能重新打开确认弹窗。");
         if (!SolverOverlay.ExercisePerformancePresetPersistenceForTesting())
-            throw new InvalidOperationException("性能预设在未修改算力参数时被误判为自定义。");
+            throw new InvalidOperationException("0.24.3 性能迁移或预设/内存独立持久化失败。");
         if (SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(1) != 1
             || SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(2) != 2
             || SolverWeights.ResolveDefaultSearchMaxDegreeOfParallelism(3) != 2

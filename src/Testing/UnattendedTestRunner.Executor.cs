@@ -530,14 +530,12 @@ internal sealed partial class UnattendedTestRunner
             SolverSettingsData testSettings = request.PerformancePresetForTest is { } preset
                 ? SolverSettings.ApplyPerformancePreset(_settingsBeforeTest, preset)
                 : _settingsBeforeTest;
-            bool hasCustomPerformanceOverride = request.NoGcRegionBudgetGigabytesForTest.HasValue
-                || request.ShortMaxCardBranchesPerNodeForTest.HasValue
+            bool hasCustomPerformanceOverride = request.ShortMaxCardBranchesPerNodeForTest.HasValue
                 || request.DeepMaxCardBranchesPerNodeForTest.HasValue;
             if (request.NoGcRegionBudgetGigabytesForTest is { } noGcBudget)
             {
                 testSettings = testSettings with
                 {
-                    PerformancePreset = SolverPerformancePreset.Custom,
                     NoGcRegionBudgetGigabytes = noGcBudget,
                 };
             }

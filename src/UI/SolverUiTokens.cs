@@ -312,11 +312,7 @@ internal static class SolverUiTokens
 
     private static void ApplyButtonFont(Button button, SolverButtonStyle style)
     {
-        button.ApplyLocaleFontSubstitution(
-            style is SolverButtonStyle.Primary or SolverButtonStyle.Positive or SolverButtonStyle.Danger
-                ? FontType.Bold
-                : FontType.Regular,
-            "font");
+        button.ApplyLocaleFontSubstitution(FontType.Bold, "font");
     }
 
     public static Texture2D CreateCircleTexture(Color color, int size = 12)

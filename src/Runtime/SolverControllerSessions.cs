@@ -39,7 +39,9 @@ internal sealed class SolverCombatSession
     public CombatState? TurnSetupResumeState { get; set; }
     public Dictionary<(int Slot, string PotionId), SolverPotionDirective> PotionDirectives { get; } = [];
     public Dictionary<ReplanCause, int> ReplanCounts { get; } = [];
+    public HashSet<SolverResult> ReviewedWorldlineResults { get; } = [];
     public int SearchesStarted { get; set; }
+    public long ReviewedWorldlinesTotal { get; set; }
     public int ContinuationsReused { get; set; }
     public IReadOnlyList<string> LastContinuationDifferences { get; set; } = [];
     public int? LastSolverDeployedTurn { get; set; }

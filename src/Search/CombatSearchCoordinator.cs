@@ -15,6 +15,27 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile shortProfile = policy.ShortProfile;
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
             shortProfile = shortProfile with { SoftTimeBudgetMilliseconds = shortBudget };
+        if (progressCallback != null)
+        {
+            long completedSearches = 0;
+            int lastExpanded = 0;
+            long lastElapsed = 0;
+            Action<SolverProgress> publishProgress = progressCallback;
+            progressCallback = progress =>
+            {
+                if (progress.ExpandedNodes < lastExpanded
+                    || progress.ElapsedMilliseconds < lastElapsed)
+                {
+                    completedSearches += lastExpanded;
+                }
+                lastExpanded = progress.ExpandedNodes;
+                lastElapsed = progress.ElapsedMilliseconds;
+                publishProgress(progress with
+                {
+                    ReviewedWorldlines = completedSearches + progress.ExpandedNodes,
+                });
+            };
+        }
         if (policy.ForceShortOnly)
         {
             SolverResult shortResult = new CombatBeamSolver(

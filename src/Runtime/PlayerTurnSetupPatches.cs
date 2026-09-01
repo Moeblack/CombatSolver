@@ -371,7 +371,8 @@ internal static class PlayerTurnSetupCoordinator
         SolverOverlay.ShowSearching(
             host,
             active.Player.PlayerCombatState!.TurnNumber,
-            deployWhenReady: false);
+            deployWhenReady: false,
+            SolverController.ReviewedWorldlinesTotal);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_REQUESTED " +
             $"turn={active.Player.PlayerCombatState.TurnNumber} native_choice_pending=true");
@@ -950,7 +951,11 @@ internal static class PlayerTurnSetupCoordinator
         active.Progress = null;
         active.RenderedProgress = null;
         Interlocked.Exchange(ref active.ManualSearchState, 1);
-        SolverOverlay.ShowSearching(host, turn, deployWhenReady: false);
+        SolverOverlay.ShowSearching(
+            host,
+            turn,
+            deployWhenReady: false,
+            SolverController.ReviewedWorldlinesTotal);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_START turn={turn} " +
             "native_choice_pending=true");
@@ -988,7 +993,10 @@ internal static class PlayerTurnSetupCoordinator
                     && !ReferenceEquals(progress, active.RenderedProgress))
                 {
                     active.RenderedProgress = progress;
-                    SolverOverlay.ShowProgress(progress, deployWhenReady: false);
+                    SolverOverlay.ShowProgress(
+                        progress,
+                        deployWhenReady: false,
+                        SolverController.ReviewedWorldlinesTotal);
                 }
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 active.Token.ThrowIfCancellationRequested();
@@ -1051,7 +1059,11 @@ internal static class PlayerTurnSetupCoordinator
         }
         int turn = active.Player.PlayerCombatState!.TurnNumber;
         active.Choices.RecordSearchStarted();
-        SolverOverlay.ShowSearching(host, turn, deployWhenReady: false);
+        SolverOverlay.ShowSearching(
+            host,
+            turn,
+            deployWhenReady: false,
+            SolverController.ReviewedWorldlinesTotal);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_SEARCH_START turn={turn} phase={phase} " +
             "after_native_choice_visible=true");
@@ -1090,7 +1102,10 @@ internal static class PlayerTurnSetupCoordinator
                     && !ReferenceEquals(progress, active.RenderedProgress))
                 {
                     active.RenderedProgress = progress;
-                    SolverOverlay.ShowProgress(progress, deployWhenReady: false);
+                    SolverOverlay.ShowProgress(
+                        progress,
+                        deployWhenReady: false,
+                        SolverController.ReviewedWorldlinesTotal);
                 }
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 active.Token.ThrowIfCancellationRequested();

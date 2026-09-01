@@ -10,7 +10,8 @@ namespace CombatSolver;
 
 internal sealed partial class SolverPotionStrategyPanel : PanelContainer
 {
-    private readonly VBoxContainer _rows;
+    private const float CardMinimumWidth = 136f;
+    private readonly GridContainer _cards;
     private string? _renderedSignature;
 
     public SolverPotionStrategyPanel()
@@ -18,27 +19,60 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         Name = "PotionStrategyPanel";
         Visible = false;
         MouseFilter = MouseFilterEnum.Stop;
-        SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        CustomMinimumSize = new Vector2(300, 0);
+        SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+        SizeFlagsVertical = SizeFlags.ExpandFill;
         AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
             SolverUiTokens.Palette.Surface,
             SolverUiTokens.Palette.BorderSubtle,
             SolverUiTokens.Radius.Medium,
             SolverUiTokens.Spacing.Sm,
             SolverUiTokens.Spacing.Sm));
-        _rows = new VBoxContainer
+
+        VBoxContainer layout = new()
         {
-            Name = "PotionRows",
+            Name = "PotionStrategyLayout",
             MouseFilter = MouseFilterEnum.Pass,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
-        _rows.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Xs);
-        AddChild(_rows);
+        layout.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+        Label heading = SolverUiTokens.CreateLabel(
+            "药水策略",
+            SolverUiTokens.Type.Body,
+            SolverUiTokens.Palette.TextPrimary,
+            FontType.Bold);
+        layout.AddChild(heading);
+
+        _cards = new GridContainer
+        {
+            Name = "PotionCards",
+            Columns = 2,
+            MouseFilter = MouseFilterEnum.Pass,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        _cards.AddThemeConstantOverride("h_separation", SolverUiTokens.Spacing.Sm);
+        _cards.AddThemeConstantOverride("v_separation", SolverUiTokens.Spacing.Sm);
+        ScrollContainer scroll = new()
+        {
+            Name = "PotionCardScroll",
+            CustomMinimumSize = new Vector2(0, 176),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            SizeFlagsVertical = SizeFlags.ExpandFill,
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+            VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
+            MouseFilter = MouseFilterEnum.Pass,
+        };
+        scroll.AddChild(_cards);
+        layout.AddChild(scroll);
+        AddChild(layout);
+        Resized += UpdateGridColumns;
     }
 
     public event Action<int, string, SolverPotionDirective>? DirectiveChanged;
 
     internal int RowCountForTesting { get; private set; }
     internal bool RowsUseIconAndTextForTesting { get; private set; }
+    internal bool UsesGridCardsForTesting { get; private set; }
 
     public void Refresh(CombatState? state, bool controlsDisabled)
     {
@@ -74,14 +108,15 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         IReadOnlyList<(int Slot, PotionModel Potion, SolverPotionDirective Directive, bool Searchable)> potions,
         bool controlsDisabled)
     {
-        foreach (Node child in _rows.GetChildren())
+        foreach (Node child in _cards.GetChildren())
         {
-            _rows.RemoveChild(child);
+            _cards.RemoveChild(child);
             child.QueueFree();
         }
 
         RowCountForTesting = potions.Count;
         RowsUseIconAndTextForTesting = potions.Count > 0;
+        UsesGridCardsForTesting = potions.Count > 0;
         if (potions.Count == 0)
         {
             Label empty = SolverUiTokens.CreateLabel(
@@ -89,50 +124,65 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
                 SolverUiTokens.Type.Body,
                 SolverUiTokens.Palette.TextMuted);
             empty.CustomMinimumSize = new Vector2(0, 32);
-            _rows.AddChild(empty);
+            _cards.AddChild(empty);
             return;
         }
 
         foreach ((int slot, PotionModel potion, SolverPotionDirective directive, bool searchable) in potions)
-            _rows.AddChild(CreatePotionRow(slot, potion, directive, searchable, controlsDisabled));
+            _cards.AddChild(CreatePotionCard(slot, potion, directive, searchable, controlsDisabled));
+        Callable.From(UpdateGridColumns).CallDeferred();
     }
 
-    private Control CreatePotionRow(
+    private Control CreatePotionCard(
         int slot,
         PotionModel potion,
         SolverPotionDirective directive,
         bool searchable,
         bool controlsDisabled)
     {
-        HBoxContainer row = new()
+        PanelContainer card = new()
         {
-            Name = $"PotionStrategyRow{slot}",
-            CustomMinimumSize = new Vector2(0, 38),
+            Name = $"PotionStrategyCard{slot}",
+            CustomMinimumSize = new Vector2(CardMinimumWidth, 154),
             MouseFilter = MouseFilterEnum.Pass,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
-        row.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+        card.AddThemeStyleboxOverride("panel", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.SurfaceRaised,
+            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Radius.Medium,
+            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Sm));
+        VBoxContainer layout = new()
+        {
+            MouseFilter = MouseFilterEnum.Pass,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        layout.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Xs);
 
         TextureRect icon = new()
         {
             Name = "PotionIcon",
             Texture = potion.Image,
-            CustomMinimumSize = new Vector2(32, 32),
+            CustomMinimumSize = new Vector2(56, 56),
+            SizeFlagsHorizontal = SizeFlags.ShrinkCenter,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             MouseFilter = MouseFilterEnum.Ignore,
         };
-        row.AddChild(icon);
+        layout.AddChild(icon);
 
         Label title = SolverUiTokens.CreateLabel(
-            $"{slot + 1}  {potion.Title.GetFormattedText()}",
-            SolverUiTokens.Type.Body,
+            $"#{slot + 1}  {potion.Title.GetFormattedText()}",
+            SolverUiTokens.Type.Caption,
             SolverUiTokens.Palette.TextPrimary,
             FontType.Bold);
         title.Name = "PotionTitle";
         title.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        title.ClipText = true;
-        row.AddChild(title);
+        title.HorizontalAlignment = HorizontalAlignment.Center;
+        title.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        title.CustomMinimumSize = new Vector2(0, 38);
+        layout.AddChild(title);
 
         OptionButton input = CreateDirectiveInput();
         input.Name = "PotionDirective";
@@ -156,8 +206,20 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
                 DirectiveChanged?.Invoke(slot, potionId, selected);
             };
         }
-        row.AddChild(input);
-        return row;
+        input.SizeFlagsHorizontal = SizeFlags.ExpandFill;
+        layout.AddChild(input);
+        card.AddChild(layout);
+        return card;
+    }
+
+    private void UpdateGridColumns()
+    {
+        float availableWidth = Math.Max(CustomMinimumSize.X, Size.X)
+            - SolverUiTokens.Spacing.Sm * 2f;
+        _cards.Columns = Math.Clamp(
+            (int)Math.Floor(availableWidth / (CardMinimumWidth + SolverUiTokens.Spacing.Sm)),
+            1,
+            4);
     }
 
     private static OptionButton CreateDirectiveInput()
@@ -193,7 +255,7 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
                 SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
         }
         SolverUiTokens.ApplyTextOutline(input);
-        input.ApplyLocaleFontSubstitution(FontType.Regular, "font");
+        input.ApplyLocaleFontSubstitution(FontType.Bold, "font");
         return input;
     }
 }

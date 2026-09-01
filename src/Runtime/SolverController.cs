@@ -88,6 +88,7 @@ internal static class SolverController
     public static bool StopFullAutoOnDeathTurn => _stopFullAutoOnDeathTurn;
     public static bool StopFullAutoOnWorseRecalculation => _stopFullAutoOnWorseRecalculation;
     public static SolverTheftPolicy? TheftPolicy => _combat.TheftPolicy;
+    internal static long ReviewedWorldlinesTotal => _combat.ReviewedWorldlinesTotal;
     internal static SolverResult? CurrentResultForBugReport => _combat.LatestResult ?? _combat.ContinuationSource;
     internal static string ReplanAuditForBugReport => DescribeReplanAudit();
     internal static string BuildBugReportDescription(string playerDescription)
@@ -363,6 +364,14 @@ internal static class SolverController
             $"[CombatSolver/Test] THEFT_POLICY_INIT policy={_combat.TheftPolicy?.ToString() ?? "-"}");
     }
 
+    private static void RecordReviewedWorldlines(SolverResult result)
+    {
+        if (!_combat.ReviewedWorldlineResults.Add(result))
+            return;
+        long reviewed = (long)result.ShortExpandedNodes + result.DeepExpandedNodes;
+        _combat.ReviewedWorldlinesTotal = checked(_combat.ReviewedWorldlinesTotal + reviewed);
+    }
+
     internal static bool ActivateTurnSetupResult(
         NGame host,
         CombatState state,
@@ -387,6 +396,7 @@ internal static class SolverController
 
         LiveCombatStamp stamp = LiveCombatStamp.Capture(state);
         CancelSearch();
+        RecordReviewedWorldlines(result);
         _combat.State = state;
         _combat.LatestResult = result;
         _combat.LatestStamp = stamp;
@@ -406,7 +416,10 @@ internal static class SolverController
             DescribeReplanAudit());
         SolverOverlay.ShowResult(
             host,
-            SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0));
+            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                result,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal));
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_RESULT_ACCEPTED turn={player.PlayerCombatState.TurnNumber}");
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
@@ -424,9 +437,13 @@ internal static class SolverController
     internal static void ShowTurnSetupResultPreview(NGame host, SolverResult result)
     {
         AssertMainThread();
+        RecordReviewedWorldlines(result);
         SolverOverlay.ShowResult(
             host,
-            SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0));
+            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                result,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal));
         SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_RESULT_PREVIEW turn={result.StartTurnNumber} " +
@@ -450,7 +467,8 @@ internal static class SolverController
             SolverOverlaySnapshot.CapturePendingTurnSetup(
                 source,
                 turn,
-                UnexpectedReplanCount > 0));
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal));
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_RESULT_PREVIEW turn={turn} " +
             "source=continuation native_choice_pending=true");
@@ -757,7 +775,10 @@ internal static class SolverController
                     DescribeReplanAudit());
                 SolverOverlay.ShowResult(
                     host,
-                    SolverOverlaySnapshot.Capture(reused!, UnexpectedReplanCount > 0));
+                    SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                        reused!,
+                        UnexpectedReplanCount > 0,
+                        _combat.ReviewedWorldlinesTotal));
                 Entry.Logger.Info($"[CombatSolver/Test] SEARCH_REUSED from_turn={reused!.ReusedFromTurn} turn={reused.StartTurnNumber} validation=exact_state_text remaining_turns={reused.SearchedTurns}");
                 Entry.Logger.Info(SolverDiagnostics.DescribeResult(reused));
                 if (_combat.FullAutoEnabled)
@@ -872,7 +893,11 @@ internal static class SolverController
 
             Player player = LocalContext.GetMe(state)!;
             int turn = player.PlayerCombatState!.TurnNumber;
-            SolverOverlay.ShowSearching(host, turn, deployWhenReady);
+            SolverOverlay.ShowSearching(
+                host,
+                turn,
+                deployWhenReady,
+                _combat.ReviewedWorldlinesTotal);
             Entry.Logger.Info(
                 $"[CombatSolver/Test] SEARCH_REQUEST generation={generation} reason={reason} " +
                 $"cause={CauseToken(replanCause)} previous_boundary={previousBoundary?.ToString() ?? "-"} " +
@@ -1028,7 +1053,11 @@ internal static class SolverController
         {
             search.DeployWhenReady = true;
             Player player = LocalContext.GetMe(state)!;
-            SolverOverlay.ShowSearching(host, player.PlayerCombatState!.TurnNumber, deployWhenReady: true);
+            SolverOverlay.ShowSearching(
+                host,
+                player.PlayerCombatState!.TurnNumber,
+                deployWhenReady: true,
+                _combat.ReviewedWorldlinesTotal);
             Entry.Logger.Info($"[CombatSolver/Test] DEPLOY_WAIT generation={search.Generation}");
             return;
         }
@@ -1531,7 +1560,10 @@ internal static class SolverController
             return;
         search.LastProgressRenderAt = now;
         search.RenderedProgress = progress;
-        SolverOverlay.ShowProgress(progress, search.DeployWhenReady);
+        SolverOverlay.ShowProgress(
+            progress,
+            search.DeployWhenReady,
+            _combat.ReviewedWorldlinesTotal);
     }
 
     public static void ObserveMainThreadFrameGap(TimeSpan gap)
@@ -1727,6 +1759,7 @@ internal static class SolverController
         result.P99MainThreadFrameGapMilliseconds = search.FramePercentile(0.99d);
         result.MainThreadFramesOver50Milliseconds = search.FramesOver50Milliseconds;
         result.MainThreadFramesOver100Milliseconds = search.FramesOver100Milliseconds;
+        RecordReviewedWorldlines(result);
         _combat.LatestResult = result;
         _combat.LatestStamp = searchedStamp;
         if (UnattendedTestRunner.IsActive)
@@ -1740,7 +1773,10 @@ internal static class SolverController
             DescribeReplanAudit());
         SolverOverlay.ShowResult(
             host,
-            SolverOverlaySnapshot.Capture(result, UnexpectedReplanCount > 0));
+            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                result,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal));
         SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
         if (search.DeployWhenReady)

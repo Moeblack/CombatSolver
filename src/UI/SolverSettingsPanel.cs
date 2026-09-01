@@ -122,6 +122,8 @@ internal sealed partial class SolverSettingsPanel : PanelContainer
         return true;
     }
 
+    public bool OpenPerformancePage() => TrySelectPage(SettingsPage.Performance);
+
     internal bool SettingsTabsConfiguredForTesting
         => _generalTab.Text == "常规"
            && _performanceTab.Text == "性能"

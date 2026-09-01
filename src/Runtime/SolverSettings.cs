@@ -43,8 +43,7 @@ internal enum SolverPotionPolicy
 
 internal sealed record SolverPerformanceValues(
     SolverSearchProfile ShortProfile,
-    SolverSearchProfile DeepProfile,
-    double NoGcRegionBudgetGigabytes);
+    SolverSearchProfile DeepProfile);
 
 internal sealed record SolverSettingsData
 {
@@ -58,11 +57,12 @@ internal sealed record SolverSettingsData
         = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
     [JsonIgnore]
     public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
-    public SolverPerformancePreset? PerformancePreset { get; init; }
+    public int PerformanceMigrationVersion { get; init; }
+    public SolverPerformancePreset? PerformancePreset { get; init; } = SolverPerformancePreset.Medium;
     public int? SearchMaxDegreeOfParallelism { get; init; }
     public double? ShortTimeLimitSeconds { get; init; }
     public double? DeepTimeLimitSeconds { get; init; }
-    public double? NoGcRegionBudgetGigabytes { get; init; }
+    public double? NoGcRegionBudgetGigabytes { get; init; } = 16d;
     public int? ShortBeamWidth { get; init; }
     public int? DeepBeamWidth { get; init; }
     // Legacy split fields are read for migration; new writes use Short/DeepBeamWidth.
@@ -103,7 +103,9 @@ internal sealed record SolverSettingsSnapshot(
 
 internal static class SolverSettings
 {
-    public const double DefaultNoGcRegionBudgetGigabytes = 8d;
+    public const double DefaultNoGcRegionBudgetGigabytes = 16d;
+    public const double MaximumNoGcRegionBudgetGigabytes = 256d;
+    internal const int CurrentPerformanceMigrationVersion = 243;
     private static readonly SolverPerformanceValues LowPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
@@ -120,12 +122,10 @@ internal static class SolverSettings
             MaxCardBranchesPerNode: 24,
             MaxPileChoiceBranchesPerAction: 12,
             MaxHandChoiceBranchesPerAction: 16,
-            SoftTimeBudgetMilliseconds: 60_000),
-        NoGcRegionBudgetGigabytes: 6d);
+            SoftTimeBudgetMilliseconds: 60_000));
     private static readonly SolverPerformanceValues MediumPerformance = new(
         SolverSearchProfile.Short,
-        SolverSearchProfile.Deep,
-        NoGcRegionBudgetGigabytes: DefaultNoGcRegionBudgetGigabytes);
+        SolverSearchProfile.Deep);
     private static readonly SolverPerformanceValues HighPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
@@ -142,8 +142,7 @@ internal static class SolverSettings
             MaxCardBranchesPerNode: 48,
             MaxPileChoiceBranchesPerAction: 28,
             MaxHandChoiceBranchesPerAction: 36,
-            SoftTimeBudgetMilliseconds: 180_000),
-        NoGcRegionBudgetGigabytes: 12d);
+            SoftTimeBudgetMilliseconds: 180_000));
     private static readonly SolverPerformanceValues VeryHighPerformance = new(
         new SolverSearchProfile(
             SolverSearchPhase.Short,
@@ -160,8 +159,7 @@ internal static class SolverSettings
             MaxCardBranchesPerNode: 72,
             MaxPileChoiceBranchesPerAction: 42,
             MaxHandChoiceBranchesPerAction: 54,
-            SoftTimeBudgetMilliseconds: 300_000),
-        NoGcRegionBudgetGigabytes: 16d);
+            SoftTimeBudgetMilliseconds: 300_000));
     private const string SettingsUri = "user://combat_solver_settings.json";
     private static readonly object Sync = new();
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -184,32 +182,39 @@ internal static class SolverSettings
     public static void Load()
     {
         string path = ProjectSettings.GlobalizePath(SettingsUri);
-        SolverSettingsData loaded = File.Exists(path)
+        bool persisted = File.Exists(path);
+        SolverSettingsData loaded = persisted
             ? JsonSerializer.Deserialize<SolverSettingsData>(File.ReadAllText(path), JsonOptions)
                 ?? throw new InvalidDataException("CombatSolver settings file contained null.")
             : new SolverSettingsData();
-        Validate(loaded);
+        SolverSettingsData migrated = ApplyCurrentPerformanceMigration(loaded);
+        Validate(migrated);
         lock (Sync)
-            _current = loaded;
+        {
+            _current = migrated;
+            if (!persisted || migrated != loaded)
+                SaveLocked(migrated);
+        }
         Entry.Logger.Info(
-            $"[CombatSolver/Test] SETTINGS_LOADED persisted={File.Exists(path)} " +
-            $"solver_disabled={loaded.SolverDisabled} " +
-            $"stop_on_combat_end={loaded.StopFullAutoOnCombatEnd} " +
-            $"stop_on_death_turn={loaded.StopFullAutoOnDeathTurn} " +
-            $"stop_on_worse_recalculation={loaded.StopFullAutoOnWorseRecalculation} " +
-            $"detailed_diagnostic_logs={loaded.EnableDetailedDiagnosticLogs} " +
-            $"search_notifications_enabled={loaded.SearchCompletionNotificationsEnabled} " +
-            $"search_notification_mode={loaded.SearchCompletionNotificationMode} " +
-            $"potion_policy={loaded.PotionPolicy} " +
-            $"performance_preset={ResolvePerformancePreset(loaded)} " +
+            $"[CombatSolver/Test] SETTINGS_LOADED persisted={persisted} " +
+            $"performance_migration={loaded.PerformanceMigrationVersion}->{migrated.PerformanceMigrationVersion} " +
+            $"solver_disabled={migrated.SolverDisabled} " +
+            $"stop_on_combat_end={migrated.StopFullAutoOnCombatEnd} " +
+            $"stop_on_death_turn={migrated.StopFullAutoOnDeathTurn} " +
+            $"stop_on_worse_recalculation={migrated.StopFullAutoOnWorseRecalculation} " +
+            $"detailed_diagnostic_logs={migrated.EnableDetailedDiagnosticLogs} " +
+            $"search_notifications_enabled={migrated.SearchCompletionNotificationsEnabled} " +
+            $"search_notification_mode={migrated.SearchCompletionNotificationMode} " +
+            $"potion_policy={migrated.PotionPolicy} " +
+            $"performance_preset={ResolvePerformancePreset(migrated)} " +
             $"max_dop={Capture().SearchMaxDegreeOfParallelism} " +
             $"short_budget_ms={Capture().ShortProfile.SoftTimeBudgetMilliseconds} " +
             $"deep_budget_ms={Capture().DeepProfile.SoftTimeBudgetMilliseconds} " +
             $"no_gc_budget_bytes={Capture().NoGcRegionBudgetBytes} " +
-            $"deployment_fast_mode={loaded.DeploymentFastMode} " +
-            $"deployment_delay_seconds={loaded.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
-            $"overlay_theme={loaded.OverlayTheme} " +
-            $"overlay_opacity={loaded.OverlayOpacity:0.##}");
+            $"deployment_fast_mode={migrated.DeploymentFastMode} " +
+            $"deployment_delay_seconds={migrated.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
+            $"overlay_theme={migrated.OverlayTheme} " +
+            $"overlay_opacity={migrated.OverlayOpacity:0.##}");
     }
 
     public static SolverSettingsSnapshot Capture()
@@ -218,7 +223,8 @@ internal static class SolverSettings
         SolverPerformanceValues performance = ResolvePerformanceValues(data);
         SolverSearchProfile shortProfile = performance.ShortProfile;
         SolverSearchProfile deepProfile = performance.DeepProfile;
-        double noGcGigabytes = performance.NoGcRegionBudgetGigabytes;
+        double noGcGigabytes = data.NoGcRegionBudgetGigabytes
+            ?? DefaultNoGcRegionBudgetGigabytes;
         long noGcBytes = checked((long)Math.Round(
             noGcGigabytes * 1_000_000_000d,
             MidpointRounding.AwayFromZero));
@@ -243,7 +249,7 @@ internal static class SolverSettings
         if (data.PerformancePreset is { } configured)
             return configured;
         if (!HasExplicitPerformanceValues(data))
-            return SolverPerformancePreset.VeryHigh;
+            return SolverPerformancePreset.Medium;
 
         SolverPerformanceValues legacy = BuildCustomPerformance(data);
         if (legacy == LowPerformance)
@@ -287,7 +293,6 @@ internal static class SolverSettings
             PerformancePreset = preset,
             ShortTimeLimitSeconds = values.ShortProfile.SoftTimeBudgetMilliseconds / 1000d,
             DeepTimeLimitSeconds = values.DeepProfile.SoftTimeBudgetMilliseconds / 1000d,
-            NoGcRegionBudgetGigabytes = values.NoGcRegionBudgetGigabytes,
             ShortBeamWidth = values.ShortProfile.BeamWidth,
             DeepBeamWidth = values.DeepProfile.BeamWidth,
             ShortPotionFreeBeamWidth = null,
@@ -322,7 +327,11 @@ internal static class SolverSettings
             _current = data;
     }
 
-    public static void ResetToDefaults() => Update(new SolverSettingsData());
+    public static void ResetToDefaults() => Update(CreateCurrentDefaults());
+
+    internal static SolverSettingsData ApplyCurrentPerformanceMigrationForTesting(
+        SolverSettingsData data)
+        => ApplyCurrentPerformanceMigration(data);
 
     public static Vector2? OverlayPosition
     {
@@ -359,9 +368,15 @@ internal static class SolverSettings
 
     private static void Validate(SolverSettingsData data)
     {
+        if (data.PerformanceMigrationVersion < 0)
+            throw new InvalidDataException("PerformanceMigrationVersion must be non-negative.");
         ValidateRange(data.ShortTimeLimitSeconds, 0.1d, 600d, nameof(data.ShortTimeLimitSeconds));
         ValidateRange(data.DeepTimeLimitSeconds, 0.1d, 600d, nameof(data.DeepTimeLimitSeconds));
-        ValidateRange(data.NoGcRegionBudgetGigabytes, 1d, 16d, nameof(data.NoGcRegionBudgetGigabytes));
+        ValidateRange(
+            data.NoGcRegionBudgetGigabytes,
+            1d,
+            MaximumNoGcRegionBudgetGigabytes,
+            nameof(data.NoGcRegionBudgetGigabytes));
         ValidateRange(
             data.SearchMaxDegreeOfParallelism,
             1,
@@ -444,6 +459,23 @@ internal static class SolverSettings
             + (legacyPotion ?? legacyPotionDefault));
     }
 
+    private static SolverSettingsData CreateCurrentDefaults()
+        => ApplyCurrentPerformanceMigration(new SolverSettingsData());
+
+    private static SolverSettingsData ApplyCurrentPerformanceMigration(SolverSettingsData data)
+    {
+        if (data.PerformanceMigrationVersion >= CurrentPerformanceMigrationVersion)
+            return data;
+
+        return ApplyPerformancePreset(
+            data with
+            {
+                PerformanceMigrationVersion = CurrentPerformanceMigrationVersion,
+                NoGcRegionBudgetGigabytes = DefaultNoGcRegionBudgetGigabytes,
+            },
+            SolverPerformancePreset.Medium);
+    }
+
     private static SolverPerformanceValues BuildCustomPerformance(SolverSettingsData data)
     {
         SolverSearchProfile shortProfile = MediumPerformance.ShortProfile with
@@ -486,16 +518,12 @@ internal static class SolverSettings
                 ? checked((int)Math.Round(deepSeconds * 1000d, MidpointRounding.AwayFromZero))
                 : MediumPerformance.DeepProfile.SoftTimeBudgetMilliseconds,
         };
-        return new SolverPerformanceValues(
-            shortProfile,
-            deepProfile,
-            data.NoGcRegionBudgetGigabytes ?? MediumPerformance.NoGcRegionBudgetGigabytes);
+        return new SolverPerformanceValues(shortProfile, deepProfile);
     }
 
     private static bool HasExplicitPerformanceValues(SolverSettingsData data)
         => data.ShortTimeLimitSeconds.HasValue
             || data.DeepTimeLimitSeconds.HasValue
-            || data.NoGcRegionBudgetGigabytes.HasValue
             || data.ShortBeamWidth.HasValue
             || data.DeepBeamWidth.HasValue
             || data.ShortPotionFreeBeamWidth.HasValue

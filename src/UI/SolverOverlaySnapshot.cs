@@ -43,6 +43,7 @@ internal sealed record SolverOverlaySnapshot(
     string StatusText,
     SolverOverlayTone StatusTone,
     string SummaryText,
+    string ReviewSummaryText,
     int ProjectedBattlePotionCount,
     int ProjectedBattleHpLost,
     string HpOutcomeText,
@@ -52,19 +53,32 @@ internal sealed record SolverOverlaySnapshot(
     bool HasRisk)
 {
     public static SolverOverlaySnapshot Capture(SolverResult result, bool unexpectedReplan)
-        => Capture(result, result.StartTurnNumber, unexpectedReplan, pendingTurnSetup: false);
+        => CaptureWithReviewedWorldlines(result, unexpectedReplan, reviewedWorldlinesTotal: 0);
+
+    internal static SolverOverlaySnapshot CaptureWithReviewedWorldlines(
+        SolverResult result,
+        bool unexpectedReplan,
+        long reviewedWorldlinesTotal)
+        => Capture(
+            result,
+            result.StartTurnNumber,
+            unexpectedReplan,
+            pendingTurnSetup: false,
+            reviewedWorldlinesTotal);
 
     public static SolverOverlaySnapshot CapturePendingTurnSetup(
         SolverResult result,
         int turn,
-        bool unexpectedReplan)
-        => Capture(result, turn, unexpectedReplan, pendingTurnSetup: true);
+        bool unexpectedReplan,
+        long reviewedWorldlinesTotal = 0)
+        => Capture(result, turn, unexpectedReplan, pendingTurnSetup: true, reviewedWorldlinesTotal);
 
     private static SolverOverlaySnapshot Capture(
         SolverResult result,
         int startTurnNumber,
         bool unexpectedReplan,
-        bool pendingTurnSetup)
+        bool pendingTurnSetup,
+        long reviewedWorldlinesTotal)
     {
         int searchedTurns = result.StartTurnNumber + result.SearchedTurns - startTurnNumber;
         if (searchedTurns <= 0)
@@ -95,6 +109,9 @@ internal sealed record SolverOverlaySnapshot(
         string summaryText = result.CombatEndedTurn == startTurnNumber
             ? $"[color={SolverUiTokens.Palette.SuccessHex}]本回合结束战斗  │  {confidence}[/color]"
             : $"[color={SolverUiTokens.Palette.TextSecondaryHex}]预计路线 [b]{searchedTurns}[/b] 回合  │  {confidence}[/color]";
+        string reviewSummaryText = result.WasReused
+            ? $"路线已复用，共查阅了 {reviewedWorldlinesTotal:N0} 条世界线"
+            : $"花费了 {result.TotalSearchElapsed.TotalSeconds:F1} 秒，共查阅了 {reviewedWorldlinesTotal:N0} 条世界线";
         string hpOutcomeText = result.ProjectedBattleHpLost > 0
             ? result.ProjectedBattleHpLossIncrease > 0
                 ? $"本局扣血  已 {result.BattleHpLostSoFar}    预计 {result.ProjectedBattleHpLost} HP    重算增加 {result.ProjectedBattleHpLossIncrease} HP"
@@ -109,6 +126,7 @@ internal sealed record SolverOverlaySnapshot(
             statusText,
             statusTone,
             summaryText,
+            reviewSummaryText,
             result.ProjectedBattlePotionCount,
             result.ProjectedBattleHpLost,
             hpOutcomeText,
