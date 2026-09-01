@@ -169,6 +169,20 @@ internal static class CombatSearchCoordinator
                     potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
                     maximumPotionUses: 1)
                 .BuildOpeningPotionActions();
+        IReadOnlyList<PlanAction> generatedResourcePotions = openingPotions.Count == 0
+            ? []
+            : new CombatBeamSolver(
+                    root,
+                    displayNames,
+                    battleDamage,
+                    policy,
+                    cancellationToken,
+                    progressCallback,
+                    profile,
+                    shortCheckpointMilliseconds,
+                    potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                    maximumPotionUses: 1)
+                .SelectGeneratedResourcePotionActions(openingPotions);
         List<(PlanAction Potion, PlanAction Power)> potionPowerPairs = [];
         foreach (PlanAction openingPotion in openingPotions)
         {
@@ -193,7 +207,9 @@ internal static class CombatSearchCoordinator
             if (potionPowerPairs.Count == 4)
                 break;
         }
-        if (openingPowers.Count == 0 && potionPowerPairs.Count == 0)
+        if (openingPowers.Count == 0
+            && potionPowerPairs.Count == 0
+            && generatedResourcePotions.Count == 0)
             return primary;
 
         List<SolverResult> searches = [primary];
@@ -307,6 +323,65 @@ internal static class CombatSearchCoordinator
                 $"cards={openingPower.CardId}+{offensiveFollowUp.CardId} " +
                 $"won={linkedWon} hp_deficit={linkedDeficit} " +
                 $"selected={ReferenceEquals(selected, linkedPosterior)}");
+        }
+
+        foreach (PlanAction openingPotion in generatedResourcePotions)
+        {
+            SolverResult resourcePosterior = new CombatBeamSolver(
+                root,
+                displayNames,
+                battleDamage,
+                policy,
+                cancellationToken,
+                progressCallback,
+                profile,
+                shortCheckpointMilliseconds,
+                potionPolicyOverride: SolverPotionPolicy.RequireAtLeastOne,
+                maximumPotionUses: 1,
+                fixedPrefixActions: [openingPotion]).Solve();
+            bool resourceDeepTriggered = shortCheckpointMilliseconds is { } resourceCheckpoint
+                && resourcePosterior.Elapsed.TotalMilliseconds > resourceCheckpoint;
+            resourcePosterior.SearchPhase = resourceDeepTriggered
+                ? SolverSearchPhase.Deep
+                : SolverSearchPhase.Short;
+            resourcePosterior.DeepSearchTriggered = resourceDeepTriggered;
+            resourcePosterior.DeepSearchImprovedResult = false;
+            resourcePosterior.SingleSessionSearch = true;
+            PopulateSingleSessionTotals(
+                resourcePosterior,
+                shortCheckpointMilliseconds ?? profile.SoftTimeBudgetMilliseconds,
+                resourceDeepTriggered);
+            searches.Add(resourcePosterior);
+
+            bool resourceWon = resourcePosterior.Snapshot.AllEnemiesDead
+                && !resourcePosterior.Snapshot.PlayerDead
+                && resourcePosterior.Snapshot.ProjectedPlayerHp > 0;
+            bool selectedWon = selected.Snapshot.AllEnemiesDead
+                && !selected.Snapshot.PlayerDead
+                && selected.Snapshot.ProjectedPlayerHp > 0;
+            int resourceDeficit = StrategicHpDeficit(root, resourcePosterior);
+            int selectedDeficit = StrategicHpDeficit(root, selected);
+            if (resourceWon
+                && (!selectedWon
+                    || resourceDeficit < selectedDeficit
+                    || resourceDeficit == selectedDeficit
+                        && (resourcePosterior.PotionCount < selected.PotionCount
+                            || resourcePosterior.PotionCount == selected.PotionCount
+                                && resourcePosterior.BestNode.Score > selected.BestNode.Score)))
+            {
+                selected = resourcePosterior;
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] POTION_RESOURCE_POSTERIOR " +
+                $"potion={openingPotion.PotionId} card={openingPotion.Choice!.Cards[0].CardId} " +
+                $"won={resourceWon} hp_deficit={resourceDeficit} " +
+                $"selected={ReferenceEquals(selected, resourcePosterior)}");
+        }
+
+        if (StrategicHpDeficit(root, selected) == 0 && selected.PotionCount <= 1)
+        {
+            MergeAuditTotals(selected, searches.ToArray());
+            return selected;
         }
 
         foreach ((PlanAction openingPotion, PlanAction postPotionPower) in potionPowerPairs)

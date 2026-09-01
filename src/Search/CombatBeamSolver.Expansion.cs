@@ -177,6 +177,47 @@ internal sealed partial class CombatBeamSolver
         return selected;
     }
 
+    internal IReadOnlyList<PlanAction> SelectGeneratedResourcePotionActions(
+        IReadOnlyList<PlanAction> actions)
+        => actions
+            .Where(action => action.Choice is
+            {
+                Effect: PlanChoiceEffect.GenerateToHand,
+                Cards.Count: 1,
+            })
+            .Select(action => (Action: action, Value: GeneratedCardResourceValue(action)))
+            .Where(candidate => candidate.Value > 0)
+            .GroupBy(candidate => candidate.Action.PotionSlot)
+            .Select(group => group
+                .OrderByDescending(candidate => candidate.Value)
+                .ThenBy(candidate => candidate.Action.Choice!.Cards[0].CardId, StringComparer.Ordinal)
+                .First().Action)
+            .ToArray();
+
+    private int GeneratedCardResourceValue(PlanAction action)
+    {
+        SimulationSnapshot snapshot = Replay([action]);
+        try
+        {
+            PlanCardToken token = action.Choice!.Cards[0];
+            PredictedCard? card = ((CombatPredictionSimulator)snapshot.Simulator).State
+                .GetPlayerCombatState(_player)
+                .Hand.Cards
+                .LastOrDefault(candidate => CardChoiceSupport.MatchesToken(candidate, token));
+            if (card == null)
+                return 0;
+
+            int draw = Math.Max(0, (int)CardChoiceSupport.DynamicVarBaseValue(card.Preview.DynamicVars, "Cards"));
+            int energy = Math.Max(0, (int)CardChoiceSupport.DynamicVarBaseValue(card.Preview.DynamicVars, "Energy"));
+            int stars = Math.Max(0, (int)CardChoiceSupport.DynamicVarBaseValue(card.Preview.DynamicVars, "Stars"));
+            return draw * 16 + energy * 16 + stars * 8;
+        }
+        finally
+        {
+            snapshot.ReleaseSimulator();
+        }
+    }
+
     internal PlanAction? BuildOpeningPowerOffensiveFollowUp(PlanAction openingPower)
     {
         SimulationSnapshot rootSnapshot = Replay([]);

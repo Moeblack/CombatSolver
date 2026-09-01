@@ -25,6 +25,7 @@
 | `STRATEGY-REPLAY-8695-HIGH-ENERGY-DEFENSE` | 通过（headless） | 严格恢复感染棱晶报告首回合根；High、Smart、DOP4 得到 `8` 战损，评估并拒绝 `120` 条药水分支，从报告原求解器 `21` 追平人工 `8`。runId `566104854a2448ef95976505746abac2`。 | 2026-08-31 |
 | `STRATEGY-REPLAY-EE98-HIGH-DUAL-POTION` | 通过（headless） | 严格恢复寄生蛙报告首回合根；High、Smart、DOP4 在 Short 阶段使用束缚药水和格挡药水，反事实省血 `50/18`，战损从报告原求解器 `27` 降到 `17`，追平人工。runId `c3e91ca55bd3476487d8710e899b12f1`。 | 2026-08-31 |
 | `STRATEGY-THE-HUNT-OPPORTUNITY-COST` | 通过（headless） | 感染棱晶严格首根 High、Smart、DOP4 从 `29` 降到 `21`，前三回合战损 `0/6/13` 与人工一致，runId `2ac40cf8aa7240629ccc5fa1a10f894d`；致命狩猎哨兵仍首动使用狩猎、长期资源至少 `30`、战损 `0`，runId `4c445ef747f643c59b0fc437bd161d4d`。 | 2026-09-01 |
+| `STRATEGY-REPLAY-941B-GENERATED-RESOURCE-POTION` | 通过（headless） | 直飞产卵虫严格首根 High、Smart、DOP4 选择无色药水生成急躁，随后打击、急躁、群星之子+、战火铸就，战损从当前 `2` 降到 `0`，追平人工；runId `f8bc0f22a1be4c688f75c603528b917d`。感染棱晶哨兵保持 `21`，runId `6fb2503e4bb34db2972b569f7dd944d9`。 | 2026-09-01 |
 
 ## 0.23.0
 
