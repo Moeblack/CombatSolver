@@ -11,6 +11,7 @@
   "shortSearchBudgetOverrideMilliseconds": 1500,
   "expectedInitialSetupChoiceCountAtLeast": 1,
   "expectedInitialSetupChoiceSourceId": "TOASTY_MITTENS",
+  "verifyTurnSetupManualRefresh": true,
   "stopAfterInitialSetupAssertion": true,
   "timeoutSeconds": 120
 }

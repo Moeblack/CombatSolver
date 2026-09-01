@@ -10,7 +10,8 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
-| `INITIAL-GAMBLING-CHIP-MANUAL-RECALCULATE-0240` | 通过（headless 回合准备事务） | 赌博筹码原生选择仍在回合开始阶段时请求手动重算，先排队并允许玩家空选跳过；进入 Play 后从实际手牌重新搜索，第 `1` 回合新路线含 `13` 个动作，不再被阶段校验拒绝。runId `76316be607cc40f0babd78b5d7e60105`。 | 2026-09-01 |
+| `TURN-SETUP-MANUAL-REFRESH-0240` | 通过（headless 原生选牌页刷新） | 烘焙手套手牌页、工具箱三选一和选择悖论页面都在首次计划就绪后再次请求手动重算，同一页面收到新的 `PlanReady` 并按刷新后的路线完成选择。runId `15f1fedfab9f4a15a8cf224afe6b36fd`、`55f9bea8cf014e94a194eaa8280ab1da`、`635775924e2041e5b8348def2a77fef7`。 | 2026-09-01 |
+| `INITIAL-GAMBLING-CHIP-MANUAL-RECALCULATE-0240` | 通过（headless 选择后重算） | 先在赌博筹码页面空选跳过，再立即请求手动重算；求解器进入 Play 后从实际手牌搜索，第 `1` 回合新路线含 `13` 个动作，不再被阶段校验拒绝。runId `f87e11a8a9934e4cb0934ee47cadd4c0`。 | 2026-09-01 |
 | `POTION-STRATEGY-FORCED-SEARCH-0240` | 通过（headless 搜索、结构与生命周期） | 主界面从当前药水栏建立图标、官方名称和逐瓶选项，折叠开关生效；新药默认 Smart，Force 的真实短搜使用精确槽位与药水 ID，Disabled 阻止主动用药；新安装/恢复默认解析为 VeryHigh。runId `2b1bef9d976242d09591331db0906466`。 | 2026-09-01 |
 | `SMART-POTION-LETHAL-0240-SENTINEL` | 通过（headless 完整自动战斗） | 1 HP 致死场景继续选择格挡药并在第 2 回合获胜，首轮预计用药 `1`、整场战损 `0`、计划外重算 `0`。runId `33fad9cf08aa440eab0bc6dfc790f5b9`。 | 2026-09-01 |
 | `STRATEGY-ACTION-ADMISSION-EXPERTISE` | 通过（headless） | 原单节点分支预算压到 `3`，手牌包含升级熟练、升级子弹时间和三张打击；搜索先保留资源/过牌代表，首动作选择熟练并完成三回合短搜。runId `d2edebb4a7094d2fbce5787e02cc849c`。 | 2026-08-31 |

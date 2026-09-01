@@ -17,6 +17,7 @@
   "expectedInitialSetupChoiceCountAtLeast": 1,
   "expectedInitialSetupChoiceSourceId": "TOOLBOX",
   "expectedInitialChoiceBranchesEvaluatedAtLeast": 3,
+  "verifyTurnSetupManualRefresh": true,
   "stopAfterInitialSetupAssertion": true,
   "timeoutSeconds": 120
 }

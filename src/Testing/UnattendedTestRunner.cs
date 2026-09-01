@@ -430,6 +430,9 @@ internal sealed partial class UnattendedTestRunner
         bool turnSetupPlanAccepted = false;
         bool initialSetupPauseVerified = false;
         bool manualRecalculationSubmitted = false;
+        bool manualRefreshRequested = false;
+        bool manualRefreshCompleted = false;
+        int manualRefreshCompletedAtRequest = 0;
         while (true)
         {
             EnsureWithinDeadline();
@@ -467,18 +470,54 @@ internal sealed partial class UnattendedTestRunner
                         $"[CombatSolver/Test] TURN_SETUP_AWAITING_USER_START turn={turn} " +
                         "native_choice_pending=true selected=false cards_played=0");
                 }
-                if (_request.VerifyTurnSetupManualRecalculate && !manualRecalculationSubmitted)
+                if (_request.VerifyTurnSetupManualRefresh)
+                {
+                    int turn = player?.PlayerCombatState?.TurnNumber
+                        ?? throw new InvalidOperationException("回合开始选项刷新测试找不到玩家回合。");
+                    if (!manualRefreshRequested)
+                    {
+                        manualRefreshCompletedAtRequest =
+                            PlayerTurnSetupCoordinator.ManualRecalculationCompletedCountForTesting;
+                        SolverController.RequestSearch(_host, state, SearchReason.Manual);
+                        if (SolverController.ManualSearchAfterTurnSetupRequested)
+                            throw new InvalidOperationException("原生选牌页仍打开时，手动刷新被错误延迟到选牌结束后。");
+                        manualRefreshRequested = true;
+                        Entry.Logger.Info(
+                            $"[CombatSolver/Test] TURN_SETUP_MANUAL_REFRESH_SUBMITTED turn={turn}");
+                        await NextFrameAsync();
+                        continue;
+                    }
+                    int completedRefreshes =
+                        PlayerTurnSetupCoordinator.ManualRecalculationCompletedCountForTesting;
+                    if (completedRefreshes <= manualRefreshCompletedAtRequest
+                        || PlayerTurnSetupCoordinator.IsSearching)
+                    {
+                        await NextFrameAsync();
+                        continue;
+                    }
+                    if (!manualRefreshCompleted)
+                    {
+                        manualRefreshCompleted = true;
+                        _completedChecks.Add(
+                            $"TurnSetupManualRefresh:Turn={turn}:Refreshes={completedRefreshes - manualRefreshCompletedAtRequest}");
+                    }
+                    turnSetupPlanAccepted = PlayerTurnSetupCoordinator.TryContinuePlannedChoice(
+                        _host,
+                        state,
+                        deployAfterSetup: false);
+                }
+                else if (_request.VerifyTurnSetupManualRecalculate && !manualRecalculationSubmitted)
                 {
                     int turn = player?.PlayerCombatState?.TurnNumber
                         ?? throw new InvalidOperationException("筹码重算测试找不到玩家回合。");
-                    SolverController.RequestSearch(_host, state, SearchReason.Manual);
-                    if (!SolverController.ManualSearchAfterTurnSetupRequested)
-                        throw new InvalidOperationException("筹码流程中的手动重算没有进入等待队列。");
                     await PlayerTurnSetupCoordinator.SubmitEmptyChoiceForTesting(_host, state);
+                    SolverController.RequestSearch(_host, state, SearchReason.Manual);
+                    bool queued = SolverController.ManualSearchAfterTurnSetupRequested;
                     manualRecalculationSubmitted = true;
                     turnSetupPlanAccepted = true;
                     Entry.Logger.Info(
-                        $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_SUBMITTED turn={turn}");
+                        $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_SUBMITTED " +
+                        $"turn={turn} queued={queued.ToString().ToLowerInvariant()}");
                 }
                 else
                 {
@@ -518,6 +557,11 @@ internal sealed partial class UnattendedTestRunner
                         throw new InvalidOperationException("进入出牌阶段后，筹码手动重算仍停留在等待队列。");
                     _completedChecks.Add(
                         $"TurnSetupManualRecalculate:Turn={recalculated.StartTurnNumber}:Actions={recalculated.BestNode.Actions.Count}");
+                }
+                if (_request.VerifyTurnSetupManualRefresh && !manualRefreshCompleted)
+                {
+                    await NextFrameAsync();
+                    continue;
                 }
                 return state;
             }

@@ -132,6 +132,7 @@ internal sealed class UnattendedTestRequest
     public string? ExpectedInitialSetupChoiceTextStartsWith { get; init; }
     public bool VerifyInitialSetupWaitsForUserStart { get; init; }
     public bool VerifyTurnSetupManualRecalculate { get; init; }
+    public bool VerifyTurnSetupManualRefresh { get; init; }
     public bool StopAfterInitialSetupAssertion { get; init; }
     public bool StopAfterInitialSolverResultAssertion { get; init; }
     public bool ExpectedFullAutoPausedAtDeathTurn { get; init; }

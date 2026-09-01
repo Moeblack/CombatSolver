@@ -120,12 +120,17 @@ internal static class PlayerTurnSetupCoordinator
         public SolverProgress? Progress;
         public SolverProgress? RenderedProgress;
         public int SearchState;
+        public TaskCompletionSource ManualRecalculationRequested { get; set; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        public int ManualSearchState;
+        public bool ManualRecalculated { get; set; }
+        public int ManualRecalculationCompletedCount { get; set; }
         public bool ReplayDrivingStarted { get; set; }
         public bool ReplaySurfacePrepared { get; set; }
         public bool DeployAfterSetup { get; set; }
         public int DisposeState;
         public IReadOnlyList<PlanCardChoice>? PlannedChoices
-            => ReplayChoices ?? Result?.TurnSetupChoices;
+            => Result?.TurnSetupChoices ?? ReplayChoices;
         public TaskCompletionSource PlanReady { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
     }
@@ -260,7 +265,11 @@ internal static class PlayerTurnSetupCoordinator
 
     public static bool IsSearching
         => _deferredSetupCancellation != null
-           || _active is { InitialSearch: not null, Result: null, SearchState: 1 };
+           || _active is { InitialSearch: not null, Result: null, SearchState: 1 }
+           || _active is { ManualSearchState: 1 };
+
+    internal static int ManualRecalculationCompletedCountForTesting
+        => _active?.ManualRecalculationCompletedCount ?? 0;
 
     public static bool HasPendingPlannedChoice(CombatState combat)
         => _active is { PlannedChoices: not null } active
@@ -307,6 +316,29 @@ internal static class PlayerTurnSetupCoordinator
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_QUEUED " +
             $"turn={active.Player.PlayerCombatState!.TurnNumber}");
+        return true;
+    }
+
+    public static bool TryRecalculatePendingChoice(NGame host, CombatState combat)
+    {
+        if (_active is not { InitialSearch: not null } active
+            || !IsCurrentActivePlan(active)
+            || !ReferenceEquals(active.Combat, combat)
+            || !active.Choices.IsVisibleSurfaceOpen
+            || active.ReplayDrivingStarted)
+        {
+            return false;
+        }
+
+        active.DeployAfterSetup = false;
+        active.ManualRecalculationRequested.TrySetResult();
+        SolverOverlay.ShowSearching(
+            host,
+            active.Player.PlayerCombatState!.TurnNumber,
+            deployWhenReady: false);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_REQUESTED " +
+            $"turn={active.Player.PlayerCombatState.TurnNumber} native_choice_pending=true");
         return true;
     }
 
@@ -520,45 +552,42 @@ internal static class PlayerTurnSetupCoordinator
         IReadOnlyList<PlanCardChoice>? replayChoices,
         CancellationToken token)
     {
-        InitialSearchContext? initialSearch = null;
-        if (replayChoices == null)
+        InitialSearchContext initialSearch;
+        try
         {
+            SolverSettingsSnapshot settings = SolverSettings.Capture();
+            SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
+            BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
+            SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
+                settings,
+                combat,
+                includeTurnSetup: true,
+                theftPolicy: SolverController.ResolveTheftPolicy(combat));
+            long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+            CombatRootSnapshot rootSnapshot;
             try
             {
-                SolverSettingsSnapshot settings = SolverSettings.Capture();
-                SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
-                BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
-                SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
-                    settings,
-                    combat,
-                    includeTurnSetup: true,
-                    theftPolicy: SolverController.ResolveTheftPolicy(combat));
-                long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
-                CombatRootSnapshot rootSnapshot;
-                try
-                {
-                    rootSnapshot = CombatRootSnapshot.Capture(combat);
-                }
-                finally
-                {
-                    SearchGcPolicy.ReportCombatLifecycleAllocation(
-                        Math.Max(
-                            0,
-                            GC.GetTotalAllocatedBytes(precise: false) - rootCaptureAllocatedAtStart),
-                        "turn_setup_root_snapshot");
-                }
-                initialSearch = new InitialSearchContext(
-                    displayNames,
-                    settings,
-                    battleDamage,
-                    searchPolicy,
-                    rootSnapshot);
+                rootSnapshot = CombatRootSnapshot.Capture(combat);
             }
-            catch
+            finally
             {
-                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
-                throw;
+                SearchGcPolicy.ReportCombatLifecycleAllocation(
+                    Math.Max(
+                        0,
+                        GC.GetTotalAllocatedBytes(precise: false) - rootCaptureAllocatedAtStart),
+                    "turn_setup_root_snapshot");
             }
+            initialSearch = new InitialSearchContext(
+                displayNames,
+                settings,
+                battleDamage,
+                searchPolicy,
+                rootSnapshot);
+        }
+        catch
+        {
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
+            throw;
         }
         NativeChoiceSession choices = NativeChoiceRuntime.Begin(
             combat,
@@ -574,19 +603,16 @@ internal static class PlayerTurnSetupCoordinator
         _active = active;
         NGame host = NGame.Instance
             ?? throw new InvalidOperationException("回合准备选牌搜索缺少游戏节点。");
-        if (initialSearch != null)
-        {
-            CombatRootSnapshot rootSnapshot = initialSearch.RootSnapshot;
-            Entry.Logger.Info(
-                $"[CombatSolver/Test] TURN_SETUP_ROOT_CAPTURE turn={player.PlayerCombatState.TurnNumber} " +
-                $"elapsed_ms={rootSnapshot.CaptureElapsedMilliseconds:F3} " +
-                $"cards={rootSnapshot.CapturedCardCount} powers={rootSnapshot.CapturedPowerCount} " +
-                $"listeners={rootSnapshot.CapturedHookListenerCount} " +
-                $"run_mod_subscribers={rootSnapshot.CapturedRunModSubscriberCount} " +
-                $"combat_mod_subscribers={rootSnapshot.CapturedCombatModSubscriberCount} " +
-                $"base_lib_card_modifiers={rootSnapshot.CapturedBaseLibCardModifiers}");
-        }
-        else
+        CombatRootSnapshot capturedRoot = initialSearch.RootSnapshot;
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_ROOT_CAPTURE turn={player.PlayerCombatState.TurnNumber} " +
+            $"elapsed_ms={capturedRoot.CaptureElapsedMilliseconds:F3} " +
+            $"cards={capturedRoot.CapturedCardCount} powers={capturedRoot.CapturedPowerCount} " +
+            $"listeners={capturedRoot.CapturedHookListenerCount} " +
+            $"run_mod_subscribers={capturedRoot.CapturedRunModSubscriberCount} " +
+            $"combat_mod_subscribers={capturedRoot.CapturedCombatModSubscriberCount} " +
+            $"base_lib_card_modifiers={capturedRoot.CapturedBaseLibCardModifiers}");
+        if (replayChoices != null)
         {
             SolverController.ShowTurnSetupContinuationPreview(
                 host,
@@ -598,11 +624,13 @@ internal static class PlayerTurnSetupCoordinator
         bool keepActiveForAutoPrePlay = false;
         try
         {
-            if (initialSearch != null)
-                await TryStartSearchAfterVisibleChoiceAsync(active, host, originalSetup, "setup");
+            bool ownsVisibleChoice = replayChoices == null
+                ? await TryStartSearchAfterVisibleChoiceAsync(active, host, originalSetup, "setup")
+                : await PrepareReplayChoiceSurfaceAsync(active, host, originalSetup, "setup");
+            if (ownsVisibleChoice)
+                await AwaitPhaseWithManualRecalculationsAsync(active, host, originalSetup);
             else
-                await PrepareReplayChoiceSurfaceAsync(active, host, originalSetup, "setup");
-            await active.Choices.AwaitPhaseAsync(originalSetup);
+                await active.Choices.AwaitPhaseAsync(originalSetup);
             if (!IsCurrentActivePlan(active))
                 return;
             keepActiveForAutoPrePlay = true;
@@ -639,7 +667,7 @@ internal static class PlayerTurnSetupCoordinator
                 active.Combat,
                 active.LifecycleGeneration,
                 ex,
-                initialSearch?.SearchPolicy.MaxDegreeOfParallelism > 1);
+                initialSearch.SearchPolicy.MaxDegreeOfParallelism > 1);
             DisposeActive(active);
             throw;
         }
@@ -694,11 +722,13 @@ internal static class PlayerTurnSetupCoordinator
             _invokingOriginalAutoPrePlay = false;
             NGame host = NGame.Instance
                 ?? throw new InvalidOperationException("回合准备自动出牌缺少游戏节点。");
-            if (active.InitialSearch != null)
-                await TryStartSearchAfterVisibleChoiceAsync(active, host, original, "auto_pre_play");
+            bool ownsVisibleChoice = active.ReplayChoices == null
+                ? await TryStartSearchAfterVisibleChoiceAsync(active, host, original, "auto_pre_play")
+                : await PrepareReplayChoiceSurfaceAsync(active, host, original, "auto_pre_play");
+            if (ownsVisibleChoice)
+                await AwaitPhaseWithManualRecalculationsAsync(active, host, original);
             else
-                await PrepareReplayChoiceSurfaceAsync(active, host, original, "auto_pre_play");
-            await active.Choices.AwaitPhaseAsync(original);
+                await active.Choices.AwaitPhaseAsync(original);
             if (!IsCurrentActivePlan(active))
                 return;
             await active.Choices.CompleteAsync();
@@ -721,7 +751,7 @@ internal static class PlayerTurnSetupCoordinator
                 return;
             }
 
-            if (active.ReplayChoices != null)
+            if (active.ReplayChoices != null && !active.ManualRecalculated)
             {
                 bool solverDriven = active.ReplayDrivingStarted;
                 bool deployAfterSetup = active.DeployAfterSetup;
@@ -821,24 +851,150 @@ internal static class PlayerTurnSetupCoordinator
         }
     }
 
-    private static async Task TryStartSearchAfterVisibleChoiceAsync(
+    private static async Task AwaitPhaseWithManualRecalculationsAsync(
+        ActivePlan active,
+        NGame host,
+        Task phaseTask)
+    {
+        if (active.ReplayDrivingStarted)
+        {
+            await active.Choices.AwaitPhaseAsync(phaseTask);
+            return;
+        }
+
+        while (!phaseTask.IsCompleted)
+        {
+            TaskCompletionSource requested = active.ManualRecalculationRequested;
+            Task winner = await Task.WhenAny(phaseTask, requested.Task);
+            if (phaseTask.IsCompleted || ReferenceEquals(winner, phaseTask))
+                break;
+            active.ManualRecalculationRequested = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!IsCurrentActivePlan(active))
+                break;
+            await RecalculatePendingChoiceAsync(active, host);
+        }
+        await active.Choices.AwaitPhaseAsync(phaseTask);
+    }
+
+    private static async Task RecalculatePendingChoiceAsync(ActivePlan active, NGame host)
+    {
+        InitialSearchContext original = active.InitialSearch
+            ?? throw new InvalidOperationException("回合开始选项重算缺少选择前搜索根。");
+        await active.Choices.LockVisibleSurfaceForSearchAsync(host, active.Token);
+        if (!IsCurrentActivePlan(active))
+            return;
+
+        SolverSettingsSnapshot settings = SolverSettings.Capture();
+        InitialSearchContext refreshed = new(
+            SolverDisplayNames.Capture(active.Combat),
+            settings,
+            BattleDamageTracker.Observe(active.Combat),
+            SolverController.CaptureSearchPolicy(
+                settings,
+                active.Combat,
+                includeTurnSetup: true,
+                theftPolicy: SolverController.ResolveTheftPolicy(active.Combat)),
+            original.RootSnapshot);
+        int turn = active.Player.PlayerCombatState!.TurnNumber;
+        active.Progress = null;
+        active.RenderedProgress = null;
+        Interlocked.Exchange(ref active.ManualSearchState, 1);
+        SolverOverlay.ShowSearching(host, turn, deployWhenReady: false);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_START turn={turn} " +
+            "native_choice_pending=true");
+        try
+        {
+            Task<SolverResult> solveTask = Task.Run(() =>
+            {
+                Thread worker = Thread.CurrentThread;
+                ThreadPriority previousPriority = worker.Priority;
+                worker.Priority = ThreadPriority.BelowNormal;
+                try
+                {
+                    using IDisposable gcPolicy = SearchGcPolicy.EnterLowLatencySearch(
+                        refreshed.Settings.NoGcRegionBudgetBytes,
+                        refreshed.SearchPolicy.MemoryPressureSignal,
+                        active.Token);
+                    return CombatSearchCoordinator.Solve(
+                        refreshed.RootSnapshot,
+                        refreshed.DisplayNames,
+                        refreshed.BattleDamage,
+                        refreshed.SearchPolicy,
+                        active.Token,
+                        progress => Volatile.Write(ref active.Progress, progress));
+                }
+                finally
+                {
+                    worker.Priority = previousPriority;
+                }
+            }, active.Token);
+            while (!solveTask.IsCompleted)
+            {
+                SolverProgress? progress = Volatile.Read(ref active.Progress);
+                if (progress != null
+                    && IsCurrentActivePlan(active)
+                    && !ReferenceEquals(progress, active.RenderedProgress))
+                {
+                    active.RenderedProgress = progress;
+                    SolverOverlay.ShowProgress(progress, deployWhenReady: false);
+                }
+                await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+                active.Token.ThrowIfCancellationRequested();
+            }
+            SolverResult result = await solveTask;
+            if (!IsCurrentActivePlan(active))
+                return;
+            if (result.TurnSetupChoices.Count == 0)
+                throw new InvalidOperationException("回合开始选项重算没有返回原生选牌计划。");
+
+            active.Result = result;
+            active.ManualRecalculated = true;
+            active.ManualRecalculationCompletedCount++;
+            active.Choices.RecordPlanReady();
+            SolverController.ShowTurnSetupResultPreview(host, result);
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] TURN_SETUP_MANUAL_RECALCULATE_RESULT turn={turn} " +
+                $"choices={result.TurnSetupChoices.Count} expanded={result.ExpandedNodes} " +
+                $"searched_turns={result.SearchedTurns}");
+        }
+        catch (OperationCanceledException) when (
+            active.Token.IsCancellationRequested || !CanPublishForPlan(active))
+        {
+            return;
+        }
+        catch
+        {
+            if (CanPublishForPlan(active))
+                SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
+            throw;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref active.ManualSearchState, 0);
+            active.Choices.ReleaseVisibleSurface();
+        }
+    }
+
+    private static async Task<bool> TryStartSearchAfterVisibleChoiceAsync(
         ActivePlan active,
         NGame host,
         Task phaseTask,
         string phase)
     {
         if (active.Result != null)
-            return;
+            return false;
         InitialSearchContext initialSearch = active.InitialSearch
             ?? throw new InvalidOperationException("已有路线的回合准备不得启动新搜索。");
         if (!await active.Choices.WaitForFirstVisibleSurfaceAsync(host, phaseTask, active.Token))
-            return;
+            return false;
         if (!IsCurrentActivePlan(active))
-            return;
+            return false;
         if (Interlocked.CompareExchange(ref active.SearchState, 1, 0) != 0)
         {
             await active.PlanReady.Task.WaitAsync(active.Token);
-            return;
+            return false;
         }
         int turn = active.Player.PlayerCombatState!.TurnNumber;
         active.Choices.RecordSearchStarted();
@@ -899,13 +1055,13 @@ internal static class PlayerTurnSetupCoordinator
             if (!ownsCurrentLifecycle)
             {
                 active.PlanReady.TrySetResult();
-                return;
+                return false;
             }
             if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
             {
                 active.Choices.ReleaseVisibleSurface();
                 active.PlanReady.TrySetResult();
-                return;
+                return false;
             }
             active.PlanReady.TrySetCanceled(active.Token);
             throw;
@@ -915,7 +1071,7 @@ internal static class PlayerTurnSetupCoordinator
             if (!IsCurrentActivePlan(active))
             {
                 active.PlanReady.TrySetResult();
-                return;
+                return false;
             }
             SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Failed);
             active.PlanReady.TrySetException(ex);
@@ -925,7 +1081,7 @@ internal static class PlayerTurnSetupCoordinator
         if (!IsCurrentActivePlan(active))
         {
             active.PlanReady.TrySetResult();
-            return;
+            return false;
         }
         if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
         {
@@ -933,7 +1089,7 @@ internal static class PlayerTurnSetupCoordinator
                 SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
             active.Choices.ReleaseVisibleSurface();
             active.PlanReady.TrySetResult();
-            return;
+            return false;
         }
         if (result.TurnSetupChoices.Count == 0)
         {
@@ -950,20 +1106,21 @@ internal static class PlayerTurnSetupCoordinator
             $"[CombatSolver/Test] TURN_SETUP_PLAN turn={turn} choices={result.TurnSetupChoices.Count} " +
             $"expanded={result.ExpandedNodes} searched_turns={result.SearchedTurns} " +
             "awaiting_user_start=true");
+        return true;
     }
 
-    private static async Task PrepareReplayChoiceSurfaceAsync(
+    private static async Task<bool> PrepareReplayChoiceSurfaceAsync(
         ActivePlan active,
         NGame host,
         Task phaseTask,
         string phase)
     {
         if (active.ReplaySurfacePrepared)
-            return;
+            return false;
         if (!await active.Choices.WaitForFirstVisibleSurfaceAsync(host, phaseTask, active.Token))
-            return;
+            return false;
         if (!IsCurrentActivePlan(active) || active.ReplaySurfacePrepared)
-            return;
+            return false;
 
         active.ReplaySurfacePrepared = true;
         int turn = active.Player.PlayerCombatState!.TurnNumber;
@@ -976,6 +1133,7 @@ internal static class PlayerTurnSetupCoordinator
             $"source=continuation choices={active.ReplayChoices!.Count} search=false " +
             $"phase={phase} visible=true " +
             $"driving={active.ReplayDrivingStarted.ToString().ToLowerInvariant()}");
+        return true;
     }
 
     private static bool RequiresSolverChoice(Player player)

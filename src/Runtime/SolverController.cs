@@ -648,6 +648,14 @@ internal static class SolverController
             if (_combat.AutomaticSearchPaused)
                 Entry.Logger.Info("[CombatSolver/Test] AUTOMATIC_SEARCH_RESUMED reason=manual_recalculate");
             _combat.AutomaticSearchPaused = false;
+            if (PlayerTurnSetupCoordinator.TryRecalculatePendingChoice(host, state))
+            {
+                _combat.PendingCompleteProjectionBaseline = null;
+                _combat.PendingManualProjectionBaseline = null;
+                Entry.Logger.Info(
+                    "[CombatSolver/Test] SEARCH_RESTARTED reason=manual_recalculate_pending_turn_setup");
+                return;
+            }
             bool queuedAfterTurnSetup = PlayerTurnSetupCoordinator.TryQueueManualRecalculation(state);
             if (!queuedAfterTurnSetup && ReferenceEquals(_combat.TurnSetupResumeState, state))
             {

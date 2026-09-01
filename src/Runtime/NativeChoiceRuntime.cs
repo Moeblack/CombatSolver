@@ -339,6 +339,14 @@ internal sealed class NativeChoiceSession : IDisposable
         _firstSurfaceLock = null;
     }
 
+    public async Task LockVisibleSurfaceForSearchAsync(NGame host, CancellationToken token)
+    {
+        NativeChoiceRequest request = await _firstVisibleRequest.Task.WaitAsync(token);
+        ReleaseVisibleSurface();
+        _firstSurfaceLock = await NativeChoiceSurface.WaitAndLockAsync(host, request, token);
+        RecordVisibleOnce(request);
+    }
+
     internal async Task SelectVisibleCardsForTesting(
         NGame host,
         IReadOnlyList<CardModel> selected,

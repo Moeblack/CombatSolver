@@ -13,6 +13,7 @@
   "expectedInitialSetupChoiceSourceId": "CHOICES_PARADOX",
   "expectedInitialSetupChoiceTextStartsWith": "选择悖论：选择 ",
   "expectedInitialChoiceBranchesEvaluatedAtLeast": 5,
+  "verifyTurnSetupManualRefresh": true,
   "stopAfterInitialSetupAssertion": true,
   "timeoutSeconds": 120
 }
