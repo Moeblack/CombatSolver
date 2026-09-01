@@ -29,6 +29,8 @@
   --clear-player-piles \
   --cards-path coverage/unattended/search-performance-silent-large-deck-cards.json \
   --performance-preset-for-test VeryHigh \
+  --enable-no-gc-region-for-test 1 \
+  --no-gc-region-budget-gigabytes-for-test 16 \
   --potion-policy-for-test Smart \
   --search-max-degree-of-parallelism-for-test 8 \
   --force-short-search-only \
@@ -42,7 +44,7 @@
   --exit-on-complete
 ```
 
-Runner 同时断言 VeryHigh 的 Beam `36/90`、节点 `10000/50000`、出牌分支 `30/48` 和 No-GC `16,000,000,000 B` 均保持原设置。
+Runner 同时断言 VeryHigh 的 Beam `54/135`、节点 `10000/50000`、出牌分支 `45/72`，并核对配置为启用的 `16,000,000,000 B` No-GC 与实际区域状态一致。
 
 ## Necrobinder 药水/高分支压力
 
@@ -66,6 +68,8 @@ Runner 同时断言 VeryHigh 的 Beam `36/90`、节点 `10000/50000`、出牌分
   --cards-json '[]' \
   --search-max-degree-of-parallelism-for-test 8 \
   --performance-preset-for-test VeryHigh \
+  --enable-no-gc-region-for-test 1 \
+  --no-gc-region-budget-gigabytes-for-test 16 \
   --potion-policy-for-test RequireAtLeastOne \
   --force-short-search-only \
   --short-search-budget-override-milliseconds 5000 \
@@ -79,6 +83,27 @@ Runner 同时断言 VeryHigh 的 Beam `36/90`、节点 `10000/50000`、出牌分
 ```
 
 Runner 同时断言 VeryHigh 原 Beam、节点、分支、药水策略与精确 `16 GB` No-GC 契约，并要求返回可执行且使用药水的候选。
+
+## CLR 常规 GC 关闭契约
+
+该快速夹具只验证设置和运行态接线，不将 CLR 自主发生的 GC 次数或 pause 断言为零：
+
+```bash
+./tools/run-unattended-test.sh \
+  --scenario-id SEARCH-GC-CLR-UPSTREAM-SHORT \
+  --character-id IRONCLAD \
+  --encounter-id FUZZY_WURM_CRAWLER_WEAK \
+  --enemy-current-hp 1 \
+  --performance-preset-for-test Low \
+  --enable-no-gc-region-for-test 0 \
+  --no-gc-region-budget-gigabytes-for-test 17 \
+  --force-short-search-only \
+  --stop-after-initial-solver-result-assertion \
+  --timeout-seconds 120 \
+  --exit-on-complete
+```
+
+Runner 必须报告 configured 为 `false / 17,000,000,000 B`，actual 为区域未激活、预算 `0 B` 且 latency 非 `NoGCRegion`；预算值在关闭期间仍保留。
 
 Windows 与 Linux 的单行等价命令登记在 `docs/TEST_MATRIX.md`。
 

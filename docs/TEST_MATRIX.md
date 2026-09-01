@@ -6,6 +6,20 @@
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
 
+性能指标口径：`selected_*` 只描述最终选中的单个 solver；请求级 `total_expanded_nodes / total_transitions / total_choice_branches` 对正常、失败和取消的每个 solver 精确记录一次。`total_solver_ms`、solver 分配与 GC 累计只覆盖正常返回并被 coordinator 合并的层，不包含取消中的部分工作，因此完整耗时使用请求/阶段墙钟，内存使用进程峰值工作集。Smart 多层的取消时点可能令请求总工作量小幅波动，语义验收优先比较胜负、战损、回合和动作路线。峰值工作集是瞬时进程峰值，不能跨阶段相加；`16 GB` NoGC 是运行时请求预算，不等于实际占用或硬上限；NoGC 活跃时 `GC.GetTotalMemory(false)` 不是严格 live-set 测量。
+
+## 下一版本（开发中；基于 0.25.1）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `INFESTED-PRISMS-V0251-FULL-SMART-DOP8-A/B` | 通过（最终 DLL、最新上游同根完整搜索） | 上游/候选阶段墙钟 `112798.755 → 16637.581 ms`，加速 `6.78×`；候选峰值工作集 `12,251,885,568 B`。请求累计 `24109/157893/69006` 展开/转移/选牌分支，选中 solver 为 `5861/31244/12125`；保持 `42 HP`、预计战损 `18`、第 `7` 回合和同一动作路线。候选 runId `1d06fe91c3854fb2aa70dd7c66ead7fd`。 | 2026-09-02 |
+| `LONG-LINE-V0251-FULL-SMART-DOP8-A/B` | 通过（四个公开合成长线根） | Silent 396、Necrobinder、Mecha、Queen 的上游→候选阶段墙钟为 `120464.516→55984.737`、`120399.236→29898.891`、`23853.522→8034.665`、`67789.142→29062.616 ms`，加速 `2.15×/4.03×/2.97×/2.33×`；胜负、战损、回合与动作语义不退化。 | 2026-09-02 |
+| `SILENT-396-NOGC-BUDGET-BALANCE` | 通过（同根 16/4/2 GB） | `4 GB` 为 `53440.887 ms`、峰值工作集 `4.60 GB`，同 16 GB 路线和工作量且相对上游加速 `2.25×`；`2 GB` 为 `54006.365 ms`、峰值约 `3.4 GB`，同路线且加速 `2.23×`。证明预算是玩家可见的速度/内存权衡，不被预设改写或静默钳制。runId `86b10633dd78400fb9176877855074d3` / `fb93590ed2c04cc7b602fe16ea33f824`。 | 2026-09-02 |
+| `PERF-NOGC-TOGGLE-DOP-LIFECYCLE-V0251` | 通过（headless GC/DOP 时序门） | 实际覆盖 NoGC→常规 GC→NoGC、切换中手动回收、关闭模式活动计数、搜索检查点吸收手动回收、引用释放后生命周期补账、`1→2 GB` 重建、取消工作量精确一次、节点快照释放及 DOP1/DOP2 全字段等价和真实并发。runId `df0ab7f8f52c41a2b856aea39c411f49`。 | 2026-09-02 |
+| `SEARCH-GC-CLR-UPSTREAM-SHORT-FINAL` | 通过（关闭态端到端） | 配置保留 `false / 17,000,000,000 B`，实际为区域未激活、预算 `0 B`、latency `Interactive`；CLR 可自主回收，不把 GC 次数或 pause 错断言为零。runId `6473c714239b4f63a8735b9291d47629`。 | 2026-09-02 |
+| `NOGC-SETTINGS-CONTROLLER-LIFECYCLE-FINAL` | 通过（设置页与 Reset 生命周期） | 新装默认开关与 16 GB、旧 JSON、关闭后预算保留、UI 控件归属均通过；全程关闭的 Reset 不建立自动 GC 根屏障，已启用模式的旧义务仍安全结清。runId `50b51af7a92f42948862686001b1b2cb`。 | 2026-09-02 |
+| `PERF-V0251-VISIBLE-STEAM` | 未验证（Steam 客户端阻断） | 可见门已尝试三次，最近一次仍未在 `60 s` 内启动游戏；没有留下游戏进程，协议文件已恢复。当前数据来自隔离 Linux headless，不替代完整 Mod 组合下的主线程 p95/p99/max 和可见搜索吞吐。 | 2026-09-02 |
+
 ## 0.25.1（已发布）
 
 | 场景 | 结果 | 验证内容 | 日期 |
@@ -23,11 +37,7 @@
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
 | `POTION-PERSISTENCE-BOUNDED-AUDIT-0244` | 通过（headless 设置、搜索与控制器生命周期） | 强制/保护策略按槽位 + 药水 ID 完成 JSON 往返，同槽新药仍为 Smart，恢复 Smart 后不保留覆盖项；Smart 主搜索和药水后验共享 `1.2 s` 请求预算，累计耗时与进度不倒退。runId `0911df45b8b34a04b761d9239f530e9f`。 | 2026-09-01 |
-| `PR25-RUNTIME-GC-INTEGRATION-0244` | 历史集成门通过；性能结论已被下项推翻 | 当时默认关闭求解器 No-GC、补账回收与显式自动收集并保留“手动 GC”；只跑了合并态编译、结构和药水/控制器夹具，没有重复贡献者性能基准。runId `ffe6bad16592496ea1b02fbc6715930a`。后续感染棱晶实机包证明该政策产生严重 GC 暂停，不能再作为当前通过结论。 | 2026-09-01 |
-| `INFESTED-PRISMS-NOGC-RESTORE-0250` | 通过（问题包同首根 DOP1/DOP2） | 原包从请求到导出约 `138.330 s`，末端 `14756` 展开、约 `106.1/s`，`11.730 GB` 分配与 `107.842 s` GC 暂停；详细诊断使配置 DOP8 实际为 DOP1。关闭诊断的同根 `10 s` DOP1 在恢复 No-GC 前后为 `3603 → 5664` 展开、GC 暂停 `2321.2 → 0 ms`；DOP2 恢复后 `7205 ms` 自然穷尽 `5858` 节点并保持同一路线。runId `83801742d7b6472d985705d2e63f51e3` / `b7a86577c6c2444da83f834c9165df9c` / `32070b8271e746c4a9a59eada861f143`。 | 2026-09-01 |
-| `INFESTED-PRISMS-FIXED1200-0250` | 通过（问题包固定工作量严格 A/B） | DOP1、固定 `1200` 节点的全部动作、评分、`8056` transitions、剪枝/分支/复用/释放计数、六回合、一洗牌、预计战损 `10`、一瓶药和终局 `50 HP / 17 block / 0 enemy HP` 完全一致。改动前后为 `139493 → 99282 B/transition`、worker 分配 `1,123,759,680 → 799,820,800 B`、worker 耗时 `7474 → 6023 ms`，即分配/耗时下降 `28.83%/19.41%`；runId `0801b5882d63444fb3136c85ea89570a` / `c9f496a4c93147688f0faf05f807072b`。 | 2026-09-01 |
-| `INFESTED-PRISMS-FINAL-GC-DOP-LIFECYCLE` | 通过（headless GC/DOP 时序门） | 高分支 Queen 固定根覆盖真实 `1 → 2 GB` No-GC 切换、搜索中 checkpoint reclaim、combat/release reference barrier、exhaustion coverage、节点快照释放，以及固定 `250` 节点 DOP1/DOP2 全字段等价和实际并发；runId `ad5aad1386f44b2aa4da32085f901c81`。 | 2026-09-01 |
-| `INFESTED-PRISMS-PERF-VISIBLE-STEAM` | 未验证（Steam 客户端阻断） | 当前严格语义与分配 A/B 来自隔离 Linux headless；该宿主约 `25 fps` 并触发 frame-recovery wait。可见门尝试两次都未生成游戏进程：首次停在 `SynchronizingCloud/pendingcloudsessions` 后触发 Steam shader-cache assertion，第二次补齐图形/DBus 会话仍未进入 LaunchApp；脚本均已恢复协议文件。发布前仍需在客户端恢复后记录完整 Mod 组合下的主线程 p95/p99/max 与搜索吞吐。 | 2026-09-01 |
+| `PR25-RUNTIME-GC-INTEGRATION-0244` | 贡献者实测通过；本地集成门禁通过 | 默认关闭求解器 No-GC、补账回收与显式自动收集，保留玩家“手动 GC”入口。贡献者报告实机可行且内存占用下降；本轮不重复性能基准。合并态编译与结构门禁通过，药水/控制器夹具 runId `ffe6bad16592496ea1b02fbc6715930a`。 | 2026-09-01 |
 | `POTION-SLIM-SIDEBAR-ANCHOR-0244` | 通过（headless UI 结构与生命周期） | 药水策略为约 `184 px` 单列窄侧栏；展开侧栏时标题栏预留同宽区域，药水策略、设置和收起按钮仍锚定在主面板右缘。runId `7c0d24e7f3b9448da0e596651d853e15`。 | 2026-09-01 |
 | `POTION-SEARCH-MULTI-PHASE-LABELS-0244` | 通过（headless UI 文案与搜索阶段） | 战损提示包含性能预设建议，点击后持久关闭且不再跳转；搜索阶段覆盖无药、恰好 `N` 瓶的智能梯度，以及固定政策的单药、双药和三药药名。 | 2026-09-01 |
 | `SMART-POTION-GRADIENT-EXACT-0244` | 通过（headless 搜索结构与阈值） | Smart 以无药为唯一基线，普通药按 `9/18/27 HP` 开放恰好 `1/2/3` 瓶额度，同层药水共同竞争并在第一条合格梯度停止。runId `406220b4b3b7482a97ebef4a16a330e9`。 | 2026-09-01 |

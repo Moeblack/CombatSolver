@@ -648,7 +648,8 @@ internal static class PlayerTurnSetupCoordinator
                     Math.Max(
                         0,
                         GC.GetTotalAllocatedBytes(precise: false) - rootCaptureAllocatedAtStart),
-                    "turn_setup_root_snapshot");
+                    "turn_setup_root_snapshot",
+                    settings.EnableNoGcRegion);
             }
             initialSearch = new InitialSearchContext(
                 displayNames,
@@ -992,6 +993,7 @@ internal static class PlayerTurnSetupCoordinator
                 try
                 {
                     using IDisposable gcPolicy = SearchGcPolicy.EnterLowLatencySearch(
+                        refreshed.Settings.EnableNoGcRegion,
                         refreshed.Settings.NoGcRegionBudgetBytes,
                         refreshed.SearchPolicy.MemoryPressureSignal,
                         active.Token);
@@ -1104,6 +1106,7 @@ internal static class PlayerTurnSetupCoordinator
                 try
                 {
                     using IDisposable gcPolicy = SearchGcPolicy.EnterLowLatencySearch(
+                        initialSearch.Settings.EnableNoGcRegion,
                         initialSearch.Settings.NoGcRegionBudgetBytes,
                         initialSearch.SearchPolicy.MemoryPressureSignal,
                         active.Token);

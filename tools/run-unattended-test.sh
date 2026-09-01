@@ -191,6 +191,7 @@ add_option deployment-fast-mode-for-test "" string optional_string "FollowGame|N
 add_option performance-preset-for-test "" string optional_string "Low|Medium|High|VeryHigh|Custom"
 add_option potion-policy-for-test "" string optional_string "Disabled|Smart|RequireAtLeastOne"
 add_option theft-policy-for-test "" string optional_string "PreserveResources|LetEscape"
+add_option enable-no-gc-region-for-test -1 int tri_bool
 add_option no-gc-region-budget-gigabytes-for-test -1 number positive_number
 add_option deployment-inter-action-delay-seconds-for-test -1 number nonnegative_number
 for name in assert-deployment-speed-restored export-bug-report-after-setup export-bug-report-after-combat; do
@@ -350,7 +351,7 @@ search_max_dop="${option_value[search-max-degree-of-parallelism-for-test]}"
     die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 8"
 for name in expected-initial-deep-search-triggered expected-initial-deep-search-improved-result \
     expected-initial-only-death-routes-found expected-initial-act-ending-boss \
-    enable-detailed-diagnostic-logs-for-test; do
+    enable-no-gc-region-for-test enable-detailed-diagnostic-logs-for-test; do
     value="${option_value[$name]}"
     ((value == -1 || value == 0 || value == 1)) || die "--$name must be -1, 0, or 1"
 done

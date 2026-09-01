@@ -6,6 +6,8 @@ namespace CombatSolver;
 internal sealed partial class SolverSettingsPanel
 {
     private OptionButton _performancePreset = null!;
+    private CheckButton _noGcRegionEnabled = null!;
+    private LineEdit _noGcRegionBudget = null!;
     private Button _manualGcButton = null!;
     private Control _advancedParameters = null!;
     private Button _advancedParametersToggle = null!;
@@ -21,23 +23,42 @@ internal sealed partial class SolverSettingsPanel
                 {
                     PerformanceMigrationVersion = 0,
                     PerformancePreset = SolverPerformancePreset.VeryHigh,
+                    EnableNoGcRegion = false,
                     NoGcRegionBudgetGigabytes = 8d,
                 });
             bool migrationApplied = migrated.PerformanceMigrationVersion
                     == SolverSettings.CurrentPerformanceMigrationVersion
                 && SolverSettings.ResolvePerformancePreset(migrated) == SolverPerformancePreset.Medium
+                && !migrated.EnableNoGcRegion
                 && migrated.NoGcRegionBudgetGigabytes == SolverSettings.DefaultNoGcRegionBudgetGigabytes;
+            string legacyJson =
+                "{\"performanceMigrationVersion\":" +
+                SolverSettings.CurrentPerformanceMigrationVersion +
+                ",\"noGcRegionBudgetGigabytes\":32}";
+            SolverSettingsData legacy = SolverSettings.DeserializeForTesting(legacyJson);
+            bool legacyDefaultApplied = legacy.EnableNoGcRegion
+                                        && legacy.NoGcRegionBudgetGigabytes == 32d;
             SolverSettingsData preset = SolverSettings.ApplyPerformancePreset(
-                original with { NoGcRegionBudgetGigabytes = 64d },
+                original with
+                {
+                    EnableNoGcRegion = false,
+                    NoGcRegionBudgetGigabytes = 64d,
+                },
                 SolverPerformancePreset.High);
+            SolverSettingsData roundTripped = SolverSettings.RoundTripForTesting(preset);
             SolverSettings.ApplyForTesting(preset);
             Reload();
             return migrationApplied
+                   && legacyDefaultApplied
                    && preset.NoGcRegionBudgetGigabytes == 64d
+                   && !roundTripped.EnableNoGcRegion
+                   && roundTripped.NoGcRegionBudgetGigabytes == 64d
                    && CommitPending()
                    && SolverSettings.ResolvePerformancePreset(SolverSettings.Current)
                    == SolverPerformancePreset.High
-                   && SolverSettings.Current.NoGcRegionBudgetGigabytes == 64d;
+                   && !SolverSettings.Current.EnableNoGcRegion
+                   && SolverSettings.Current.NoGcRegionBudgetGigabytes == 64d
+                   && !_noGcRegionBudget.Editable;
         }
         finally
         {
@@ -58,16 +79,24 @@ internal sealed partial class SolverSettingsPanel
             "搜索并行度",
             CreateSearchParallelismInput(),
             "关闭时使用单线程搜索；2–8 表示同时展开的候选数量，实际不会超过可用逻辑处理器。提高可能加快大型搜索，也会增加 CPU、峰值内存和帧率压力。默认按可用逻辑处理器自动选择 4、2 或单线程；遇到疑似并行问题时请先上传问题包，再切换为关闭。");
+        _noGcRegionEnabled = CreateToggle();
+        _noGcRegionEnabled.Toggled += OnNoGcRegionEnabledToggled;
+        AddBasicRow(
+            budgetGrid,
+            "启用 NoGC 区域",
+            _noGcRegionEnabled,
+            "开启时按下方预算建立战斗级 NoGC 区域，并在安全分配检查点回收后继续；关闭时搜索期间使用 CLR 常规分代 GC。切换在下次搜索生效。");
+        _noGcRegionBudget = CreateRequiredDoubleInput(
+            data => data.NoGcRegionBudgetGigabytes
+                ?? SolverSettings.DefaultNoGcRegionBudgetGigabytes,
+            (data, value) => data with { NoGcRegionBudgetGigabytes = value },
+            1d,
+            SolverSettings.MaximumNoGcRegionBudgetGigabytes);
         AddBasicRow(
             budgetGrid,
             "搜索内存预算（GB）",
-            CreateRequiredDoubleInput(
-                data => data.NoGcRegionBudgetGigabytes
-                    ?? SolverSettings.DefaultNoGcRegionBudgetGigabytes,
-                (data, value) => data with { NoGcRegionBudgetGigabytes = value },
-                1d,
-                SolverSettings.MaximumNoGcRegionBudgetGigabytes),
-            "这是独立于性能预设的单个搜索 No-GC 区域请求预算，不是进程总内存上限。设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
+            _noGcRegionBudget,
+            "这是独立于性能预设的单个搜索 NoGC 区域请求预算，不是进程总内存上限。开启 NoGC 后设置值会原样传给运行时；提高后可减少长搜索中的回收，但会增加内存占用与系统换页风险。搜索到与该预算成比例的安全分配检查点时，会保留活动 Beam、回收后继续。");
         _manualGcButton = SolverUiTokens.CreateButton(
             "手动 GC",
             SolverButtonStyle.Secondary);
@@ -78,7 +107,7 @@ internal sealed partial class SolverSettingsPanel
             budgetGrid,
             "内存维护",
             _manualGcButton,
-            "立即执行一次完整内存回收。执行期间游戏会短暂停顿。");
+            "排队执行一次生命周期托管的完整内存回收；若搜索仍在运行，会等待搜索退出或下一个安全内存检查点，不阻塞当前 UI 点击。");
         content.AddChild(budgetGrid);
 
         _advancedParametersToggle = SolverUiTokens.CreateButton(
@@ -156,10 +185,19 @@ internal sealed partial class SolverSettingsPanel
         => _manualGcButton.Text == "手动 GC"
            && _performancePage.IsAncestorOf(_manualGcButton);
 
+    internal bool NoGcControlsConfiguredForTesting
+        => _performancePage.IsAncestorOf(_noGcRegionEnabled)
+           && _performancePage.IsAncestorOf(_noGcRegionBudget)
+           && _noGcRegionEnabled.ButtonPressed == SolverSettings.Current.EnableNoGcRegion
+           && _noGcRegionBudget.Text == SolverSettings.FormatSeconds(
+               SolverSettings.Current.NoGcRegionBudgetGigabytes
+               ?? SolverSettings.DefaultNoGcRegionBudgetGigabytes)
+           && _noGcRegionBudget.Editable == SolverSettings.Current.EnableNoGcRegion;
+
     private void OnManualGcPressed()
     {
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=manual_gc");
-        SearchGcPolicy.ForceManualGc();
+        _ = SearchGcPolicy.ForceManualGc();
         SetStatus("内存回收已安排", SolverUiTokens.Palette.Success);
     }
 
@@ -167,7 +205,20 @@ internal sealed partial class SolverSettingsPanel
     {
         SolverPerformancePreset preset = SolverSettings.ResolvePerformancePreset(data);
         _performancePreset.Selected = _performancePreset.GetItemIndex((int)preset);
+        _noGcRegionEnabled.ButtonPressed = data.EnableNoGcRegion;
+        _noGcRegionBudget.Editable = data.EnableNoGcRegion;
         SetAdvancedParametersExpanded(preset == SolverPerformancePreset.Custom);
+    }
+
+    private void OnNoGcRegionEnabledToggled(bool enabled)
+    {
+        if (_loading)
+            return;
+        SolverSettings.Update(SolverSettings.Current with { EnableNoGcRegion = enabled });
+        _noGcRegionBudget.Editable = enabled;
+        SetStatus(
+            enabled ? "NoGC 已启用，下次搜索生效" : "NoGC 已关闭，下次搜索使用常规 GC",
+            SolverUiTokens.Palette.Success);
     }
 
     private OptionButton CreatePerformancePresetInput()

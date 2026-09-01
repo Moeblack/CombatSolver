@@ -886,7 +886,8 @@ internal static class SolverController
                     Math.Max(
                         0,
                         GC.GetTotalAllocatedBytes(precise: false) - rootCaptureAllocatedAtStart),
-                    "combat_root_snapshot");
+                    "combat_root_snapshot",
+                    settings.EnableNoGcRegion);
             }
             Entry.Logger.Info(
                 $"[CombatSolver/Test] COMBAT_ROOT_CAPTURE generation={generation} " +
@@ -920,6 +921,8 @@ internal static class SolverController
                 $"frame_baseline_ms={FramePressureSignal.BaselineFrameGapMilliseconds:F1} " +
                 $"frame_pressure_threshold_ms={FramePressureSignal.PressureFrameGapMilliseconds:F1} " +
                 $"frame_recovery_enabled={FramePressureSignal.RecoveryEnabled} " +
+                $"no_gc_enabled={settings.EnableNoGcRegion.ToString().ToLowerInvariant()} " +
+                $"no_gc_budget_bytes={settings.NoGcRegionBudgetBytes} " +
                 $"max_dop={searchPolicy.MaxDegreeOfParallelism}");
             Entry.Logger.Info(SolverDiagnostics.DescribeStart(
                 state,
@@ -936,6 +939,7 @@ internal static class SolverController
                 try
                 {
                     using IDisposable gcPolicy = SearchGcPolicy.EnterLowLatencySearch(
+                        settings.EnableNoGcRegion,
                         settings.NoGcRegionBudgetBytes,
                         searchPolicy.MemoryPressureSignal,
                         token);
@@ -1447,11 +1451,13 @@ internal static class SolverController
             reason,
             CurrentResultForBugReport,
             DescribeReplanAudit());
+        bool automaticGcLifecycleUsed = SearchGcPolicy.AutomaticGcLifecycleUsed;
         SearchGcPolicy.ReportCombatLifecycleAllocation(
             Math.Max(
                 0,
                 GC.GetTotalAllocatedBytes(precise: false) - forensicCaptureAllocatedAtStart),
-            "combat_forensic_capture");
+            "combat_forensic_capture",
+            automaticGcLifecycleUsed);
         SearchGcPolicy.CombatLifecyclePressure lifecyclePressure =
             SearchGcPolicy.DetachCombatLifecyclePressure(reason);
         bool hadState = _search != null
@@ -1494,10 +1500,11 @@ internal static class SolverController
         {
             TaskHelper.RunSafely(UnattendedAsyncActivityTracker.Track(referenceRelease));
         }
-        else if (hadState
-                 || searchCanceled
-                 || !referenceRelease.IsCompletedSuccessfully
-                 || lifecyclePressure.AllocatedBytes > 0)
+        else if (automaticGcLifecycleUsed
+                 && (hadState
+                     || searchCanceled
+                     || !referenceRelease.IsCompletedSuccessfully
+                     || lifecyclePressure.AllocatedBytes > 0))
         {
             Stopwatch referenceReleaseStopwatch = Stopwatch.StartNew();
             TaskHelper.RunSafely(SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(

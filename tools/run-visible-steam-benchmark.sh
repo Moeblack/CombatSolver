@@ -316,6 +316,8 @@ jq -n \
         verifyIncrementalSearch: false,
         verifyBaseLibCardModifierBoundary: $verify_baselib,
         performancePresetForTest: "Medium",
+        enableNoGcRegionForTest: true,
+        noGcRegionBudgetGigabytesForTest: 16,
         deploymentFastModeForTest: "Instant",
         deploymentInterActionDelaySecondsForTest: 0,
         assertDeploymentSpeedRestored: true,

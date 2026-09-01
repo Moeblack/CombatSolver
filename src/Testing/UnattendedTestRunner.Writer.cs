@@ -25,6 +25,10 @@ internal sealed partial class UnattendedTestRunner
         public void CaptureSolverResult(SolverResult result)
         {
             RuntimeMemorySnapshot memory = CaptureRuntimeMemory();
+            SolverSettingsSnapshot configuredSettings = SolverSettings.Capture();
+            GCLatencyMode gcLatencyMode = GCSettings.LatencyMode;
+            long activeNoGcRegionBudgetBytes =
+                SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting;
             _solverMetrics = new UnattendedSolverMetrics
             {
                 Phase = result.SearchPhase,
@@ -60,8 +64,11 @@ internal sealed partial class UnattendedTestRunner
                 ManagedFragmentedBytes = memory.ManagedFragmentedBytes,
                 WorkingSetBytes = memory.WorkingSetBytes,
                 PrivateMemoryBytes = memory.PrivateMemoryBytes,
-                NoGcRegionActive = GCSettings.LatencyMode == GCLatencyMode.NoGCRegion,
-                NoGcRegionBudgetBytes = SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting,
+                ConfiguredNoGcRegionEnabled = configuredSettings.EnableNoGcRegion,
+                ConfiguredNoGcRegionBudgetBytes = configuredSettings.NoGcRegionBudgetBytes,
+                GcLatencyMode = gcLatencyMode,
+                NoGcRegionActive = gcLatencyMode == GCLatencyMode.NoGCRegion,
+                NoGcRegionBudgetBytes = activeNoGcRegionBudgetBytes,
                 NoGcRegionRolloverCount = SearchGcPolicy.RolloverCountForTesting,
             };
         }

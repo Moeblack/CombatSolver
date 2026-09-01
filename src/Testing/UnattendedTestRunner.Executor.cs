@@ -144,7 +144,8 @@ internal sealed partial class UnattendedTestRunner
             else
                 SolverController.SetFullAuto(runner._host, combatState, enabled: true);
 
-            if (runner.HasInitialSolverExpectation())
+            if (runner.HasInitialSolverExpectation()
+                || request.StopAfterInitialSolverResultAssertion)
                 await runner.AssertInitialSolverResultAsync(startedTurn);
 
             if (request.StopAfterInitialSolverResultAssertion)
@@ -518,6 +519,7 @@ internal sealed partial class UnattendedTestRunner
                 && !request.ShortMaxCardBranchesPerNodeForTest.HasValue
                 && !request.DeepMaxCardBranchesPerNodeForTest.HasValue
                 && !request.PotionPolicyForTest.HasValue
+                && !request.EnableNoGcRegionForTest.HasValue
                 && !request.NoGcRegionBudgetGigabytesForTest.HasValue
                 && !request.DeploymentFastModeForTest.HasValue
                 && !request.DeploymentInterActionDelaySecondsForTest.HasValue
@@ -557,6 +559,8 @@ internal sealed partial class UnattendedTestRunner
             }
             SolverSettings.ApplyForTesting(testSettings with
             {
+                EnableNoGcRegion = request.EnableNoGcRegionForTest
+                    ?? testSettings.EnableNoGcRegion,
                 DeploymentFastMode = request.DeploymentFastModeForTest
                     ?? _settingsBeforeTest.DeploymentFastMode,
                 DeploymentInterActionDelaySeconds = request.DeploymentInterActionDelaySecondsForTest
@@ -575,6 +579,12 @@ internal sealed partial class UnattendedTestRunner
                         : expectedPreset);
             }
             SolverSettingsSnapshot snapshot = SolverSettings.Capture();
+            if (request.EnableNoGcRegionForTest is { } expectedNoGcEnabled
+                && snapshot.EnableNoGcRegion != expectedNoGcEnabled)
+            {
+                throw new InvalidOperationException(
+                    $"No-GC 开关为 {snapshot.EnableNoGcRegion}，预期 {expectedNoGcEnabled}。");
+            }
             if (request.ShortMaxCardBranchesPerNodeForTest is { } expectedShortBranches
                 && snapshot.ShortProfile.MaxCardBranchesPerNode != expectedShortBranches)
             {

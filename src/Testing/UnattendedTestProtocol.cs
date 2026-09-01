@@ -1,3 +1,4 @@
+using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Godot;
@@ -163,6 +164,7 @@ internal sealed class UnattendedTestRequest
     public int? DeepMaxCardBranchesPerNodeForTest { get; init; }
     public SolverPotionPolicy? PotionPolicyForTest { get; init; }
     public SolverTheftPolicy? TheftPolicyForTest { get; init; }
+    public bool? EnableNoGcRegionForTest { get; init; }
     public double? NoGcRegionBudgetGigabytesForTest { get; init; }
     public double? DeploymentInterActionDelaySecondsForTest { get; init; }
     public bool AssertDeploymentSpeedRestored { get; init; }
@@ -468,6 +470,9 @@ internal sealed class UnattendedSolverMetrics
     public long ManagedFragmentedBytes { get; init; }
     public long WorkingSetBytes { get; init; }
     public long PrivateMemoryBytes { get; init; }
+    public bool ConfiguredNoGcRegionEnabled { get; init; }
+    public long ConfiguredNoGcRegionBudgetBytes { get; init; }
+    public GCLatencyMode GcLatencyMode { get; init; }
     public bool NoGcRegionActive { get; init; }
     public long NoGcRegionBudgetBytes { get; init; }
     public int NoGcRegionRolloverCount { get; init; }

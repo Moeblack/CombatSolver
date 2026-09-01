@@ -1,3 +1,4 @@
+using System.Runtime;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Players;
@@ -22,7 +23,8 @@ internal sealed partial class UnattendedTestRunner
                 $"Beam={snapshot.ShortProfile.BeamWidth}/{snapshot.DeepProfile.BeamWidth}:" +
                 $"Nodes={snapshot.ShortProfile.MaxExpandedNodes}/{snapshot.DeepProfile.MaxExpandedNodes}:" +
                 $"Branches={snapshot.ShortProfile.MaxCardBranchesPerNode}/" +
-                $"{snapshot.DeepProfile.MaxCardBranchesPerNode}:NoGC={snapshot.NoGcRegionBudgetBytes}");
+                $"{snapshot.DeepProfile.MaxCardBranchesPerNode}:" +
+                $"NoGC={snapshot.EnableNoGcRegion}/{snapshot.NoGcRegionBudgetBytes}");
             return;
         }
         (int ShortMs, int DeepMs, int ShortBeam, int DeepBeam, int ShortNodes, int DeepNodes,
@@ -48,36 +50,46 @@ internal sealed partial class UnattendedTestRunner
         _completedChecks.Add(
             $"PerformancePreset:{preset}:{expected.ShortMs}/{expected.DeepMs}ms:" +
             $"Beam={expected.ShortBeam}/{expected.DeepBeam}:Nodes={expected.ShortNodes}/{expected.DeepNodes}:" +
-            $"Branches={expected.ShortBranches}/{expected.DeepBranches}:NoGC={snapshot.NoGcRegionBudgetBytes}");
+            $"Branches={expected.ShortBranches}/{expected.DeepBranches}:" +
+            $"NoGC={snapshot.EnableNoGcRegion}/{snapshot.NoGcRegionBudgetBytes}");
     }
 
-    private void AssertAppliedNoGcRegionBudget()
+    private void AssertAppliedNoGcConfiguration()
     {
         if (!_request.PerformancePresetForTest.HasValue
+            && !_request.EnableNoGcRegionForTest.HasValue
             && !_request.NoGcRegionBudgetGigabytesForTest.HasValue)
         {
             return;
         }
 
-        long expected = _request.NoGcRegionBudgetGigabytesForTest is { } customGigabytes
-            ? checked((long)Math.Round(
-                customGigabytes * 1_000_000_000d,
-                MidpointRounding.AwayFromZero))
-            : _request.PerformancePresetForTest switch
+        SolverSettingsSnapshot configured = SolverSettings.Capture();
+        bool actualActive = GCSettings.LatencyMode == GCLatencyMode.NoGCRegion;
+        long actualBudget = SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting;
+        if (configured.EnableNoGcRegion)
+        {
+            if (!actualActive || actualBudget != configured.NoGcRegionBudgetBytes)
             {
-                SolverPerformancePreset.Low => 16_000_000_000L,
-                SolverPerformancePreset.Medium => 16_000_000_000L,
-                SolverPerformancePreset.High => 16_000_000_000L,
-                SolverPerformancePreset.VeryHigh => 16_000_000_000L,
-                _ => SolverSettings.Capture().NoGcRegionBudgetBytes,
-            };
-        long actual = SearchGcPolicy.LastEstablishedNoGcRegionBudgetBytesForTesting;
-        if (actual != expected)
+                throw new InvalidOperationException(
+                    $"No-GC 设置没有原值应用到运行时区域：" +
+                    $"configured_enabled=true configured_budget={configured.NoGcRegionBudgetBytes} " +
+                    $"actual_active={actualActive} actual_budget={actualBudget} " +
+                    $"latency={GCSettings.LatencyMode}。");
+            }
+        }
+        else if (actualActive || actualBudget != 0)
         {
             throw new InvalidOperationException(
-                $"No-GC 设置没有原值应用到运行时区域：configured={expected} active={actual}。");
+                $"关闭 No-GC 后仍保留运行时区域：" +
+                $"configured_budget={configured.NoGcRegionBudgetBytes} " +
+                $"actual_active={actualActive} actual_budget={actualBudget} " +
+                $"latency={GCSettings.LatencyMode}。");
         }
-        _completedChecks.Add($"NoGcRegionBudgetApplied:{actual}");
+
+        _completedChecks.Add(
+            $"NoGcConfigurationApplied:Configured={configured.EnableNoGcRegion}/" +
+            $"{configured.NoGcRegionBudgetBytes}:Actual={actualActive}/{actualBudget}:" +
+            $"Latency={GCSettings.LatencyMode}");
     }
 
     private bool HasInitialSolverExpectation()
@@ -159,7 +171,7 @@ internal sealed partial class UnattendedTestRunner
         }
 
         _writer.CaptureSolverResult(result);
-        AssertAppliedNoGcRegionBudget();
+        AssertAppliedNoGcConfiguration();
         long reviewedWorldlines = (long)result.ShortExpandedNodes + result.DeepExpandedNodes;
         SolverOverlaySnapshot reviewSnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
             result,
