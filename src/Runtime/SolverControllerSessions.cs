@@ -40,6 +40,7 @@ internal sealed class SolverCombatSession
     public Dictionary<(int Slot, string PotionId), SolverPotionDirective> PotionDirectives { get; } = [];
     public Dictionary<ReplanCause, int> ReplanCounts { get; } = [];
     public int SearchesStarted { get; set; }
+    public long ExploredNodesTotal { get; set; }
     public int ContinuationsReused { get; set; }
     public IReadOnlyList<string> LastContinuationDifferences { get; set; } = [];
     public int? LastSolverDeployedTurn { get; set; }

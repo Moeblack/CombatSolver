@@ -39,6 +39,7 @@ internal static class SolverOverlay
     private static Label? _deathOutcomeLabel;
     private static Label? _potionOutcomeLabel;
     private static Label? _hpOutcomeLabel;
+    private static Label? _explorationLabel;
     private static RichTextLabel? _detailsText;
     private static SolverDetailsButton? _detailsButton;
     private static Button? _recalculateButton;
@@ -199,6 +200,7 @@ internal static class SolverOverlay
             _searchProgressBar.MaxValue = Math.Max(1, progress.MaxNodes);
             _searchProgressBar.Value = Math.Clamp(progress.ExpandedNodes, 0, progress.MaxNodes);
         }
+        UpdateExplorationLabel(progress.ExpandedNodes);
         RefreshControls();
     }
 
@@ -234,6 +236,7 @@ internal static class SolverOverlay
             _hpOutcomeLabel.Visible = false;
         if (_deathOutcomeLabel != null)
             _deathOutcomeLabel.Visible = false;
+        UpdateExplorationLabel(0);
         for (int index = 0; index < SolverWeights.UiTurnRows; index++)
         {
             SetRouteRowVisible(index, index < 3);
@@ -321,6 +324,8 @@ internal static class SolverOverlay
             _hpOutcomeLabel.Text = snapshot.HpOutcomeText;
             _hpOutcomeLabel.AddThemeColorOverride("font_color", snapshot.ProjectedBattleHpLost > 0 ? Danger : Success);
         }
+        if (_explorationLabel != null)
+            _explorationLabel.Text = $"已查阅 {SolverController.ExploredNodesTotal:N0} 个世界线";
         if (_detailsButton != null)
             _detailsButton.Visible = true;
         if (_detailsText != null)
@@ -871,6 +876,13 @@ internal static class SolverOverlay
         _potionStrategyButton.Pressed += TogglePotionStrategy;
         header.AddChild(_potionStrategyButton);
 
+        _explorationLabel = CreateTextLabel(
+            "已查阅 0 个世界线",
+            SolverUiTokens.Type.Caption,
+            SolverUiTokens.Palette.TextSecondary,
+            FontType.Regular);
+        _explorationLabel.SizeFlagsHorizontal = Control.SizeFlags.ShrinkEnd;
+        header.AddChild(_explorationLabel);
         _settingsButton = CreateHeaderButton("设置", 54);
         _settingsButton.Pressed += ToggleSettings;
         if (SolverUiTokens.IsLightTheme)
@@ -893,6 +905,11 @@ internal static class SolverOverlay
         return header;
     }
 
+    private static void UpdateExplorationLabel(long liveExpanded)
+    {
+        if (_explorationLabel != null)
+            _explorationLabel.Text = $"已查阅 {SolverController.ExploredNodesTotal + liveExpanded:N0} 个世界线";
+    }
     private static Control CreateFeedbackBanner()
     {
         _feedbackBanner = new PanelContainer

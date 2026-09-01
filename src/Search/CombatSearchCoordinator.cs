@@ -15,6 +15,31 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile shortProfile = policy.ShortProfile;
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
             shortProfile = shortProfile with { SoftTimeBudgetMilliseconds = shortBudget };
+        // 让“已查阅世界线”跨主搜与药水审计单调递增：给进度回调包一层累计偏移，
+        // 每个新求解器从上次累计处继续，避免展示层在审计接手时归零。
+        if (progressCallback != null)
+        {
+            long sessionBase = 0;
+            int lastExpanded = 0;
+            Action<SolverProgress> original = progressCallback;
+            progressCallback = p =>
+            {
+                if (p.ExpandedNodes < lastExpanded)
+                    sessionBase += lastExpanded;
+                lastExpanded = p.ExpandedNodes;
+                original(new SolverProgress(
+                    p.StartTurnNumber,
+                    p.CurrentTurnNumber,
+                    p.CompletedTurnLayers,
+                    p.PlayDepth,
+                    checked((int)Math.Min(int.MaxValue, sessionBase + p.ExpandedNodes)),
+                    p.MaxNodes,
+                    p.FrontierNodes,
+                    p.EndedNodes,
+                    p.ElapsedMilliseconds,
+                    p.Phase));
+            };
+        }
         if (policy.ForceShortOnly)
         {
             SolverResult shortResult = new CombatBeamSolver(

@@ -89,6 +89,7 @@ internal static class SolverController
     public static bool StopFullAutoOnWorseRecalculation => _stopFullAutoOnWorseRecalculation;
     public static SolverTheftPolicy? TheftPolicy => _combat.TheftPolicy;
     internal static SolverResult? CurrentResultForBugReport => _combat.LatestResult ?? _combat.ContinuationSource;
+    internal static long ExploredNodesTotal => _combat.ExploredNodesTotal;
     internal static string ReplanAuditForBugReport => DescribeReplanAudit();
     internal static string BuildBugReportDescription(string playerDescription)
         => CombatBugReportDescription.AppendAutomaticClassification(
@@ -387,6 +388,7 @@ internal static class SolverController
         CancelSearch();
         _combat.State = state;
         _combat.LatestResult = result;
+        _combat.ExploredNodesTotal += result.ShortExpandedNodes + result.DeepExpandedNodes;
         _combat.LatestStamp = stamp;
         _combat.ContinuationSource = result;
         _combat.SearchesStarted++;
@@ -1726,6 +1728,7 @@ internal static class SolverController
         result.MainThreadFramesOver50Milliseconds = search.FramesOver50Milliseconds;
         result.MainThreadFramesOver100Milliseconds = search.FramesOver100Milliseconds;
         _combat.LatestResult = result;
+        _combat.ExploredNodesTotal += result.ShortExpandedNodes + result.DeepExpandedNodes;
         _combat.LatestStamp = searchedStamp;
         if (UnattendedTestRunner.IsActive)
             LastCompletedResultForTesting = result;
