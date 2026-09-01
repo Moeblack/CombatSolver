@@ -125,7 +125,7 @@ internal sealed partial class SimulatedCombatState
         foreach (PredictedCard card in simulator.State.GetPlayerCombatState(player).AllCards)
         {
             if (card.Preview.Affliction is Smog)
-                card.MutablePreview.ClearAfflictionInternal();
+                card.ClearAffliction();
         }
     }
 
@@ -159,7 +159,7 @@ internal sealed partial class SimulatedCombatState
                 if (card.Preview.Affliction is Tainted)
                 {
                     if (!hasVitalSpark)
-                        card.MutablePreview.ClearAfflictionInternal();
+                        card.ClearAffliction();
                     else
                         card.MutablePreview.Affliction!.Amount = vitalSparkAmount;
                     continue;

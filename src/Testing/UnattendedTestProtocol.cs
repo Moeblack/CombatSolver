@@ -58,6 +58,7 @@ internal sealed class UnattendedTestRequest
     public int? ExpectedFinishedPlayerHpAtLeast { get; init; }
     public bool ClearPlayerHand { get; init; }
     public bool ClearPlayerPiles { get; init; }
+    public bool ClearRunDeck { get; init; }
     public bool ClearAllPowers { get; init; }
     public bool VerifyPredictionFailureBoundaries { get; init; }
     public bool VerifySearchPolicySnapshot { get; init; }

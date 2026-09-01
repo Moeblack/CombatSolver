@@ -44,6 +44,7 @@ internal static class SolverController
     private static SolverDeploymentSession? _deployment;
     private static CombatBugReportClassificationSnapshot? _lastBugReportClassification;
     private static int _nextSearchGeneration;
+    private static int _combatLifecycleGeneration;
     private static bool _solverDisabled;
     private static bool _stopFullAutoOnCombatEnd;
     private static bool _stopFullAutoOnDeathTurn = true;
@@ -51,8 +52,24 @@ internal static class SolverController
     private static readonly SearchFramePressureSignal FramePressureSignal = new();
     private static readonly HashSet<string> DeployedCardIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> DeployedPotionIdsForTesting = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly List<Task> PendingSearchReferenceReleases = [];
+    private static readonly List<Task> PendingDeploymentReferenceReleases = [];
+    private static readonly List<Task> PendingDeferredSearchReleases = [];
+    private static readonly List<Task> PendingCombatDeferredOperations = [];
+    private static int _searchReferenceReleaseScheduledCountForTesting;
+    private static int _searchReferenceReleaseCompletedCountForTesting;
+    private static int _searchCtsDisposeCountForTesting;
+    private static int _deploymentReferenceReleaseScheduledCountForTesting;
+    private static int _deploymentReferenceReleaseCompletedCountForTesting;
+    private static int _deploymentCtsDisposeCountForTesting;
+    private static CancellationTokenSource? _deferredSearchCts;
+    private static int _deferredSearchId;
+    private static CancellationTokenSource _combatDeferredOperationCancellation = new();
 
-    public static bool IsSearching => _search != null || PlayerTurnSetupCoordinator.IsSearching;
+    public static bool IsSearching
+        => _search != null
+           || _deferredSearchCts != null
+           || PlayerTurnSetupCoordinator.IsSearching;
     public static bool IsDeploying => _deployment != null;
     public static bool SolverDisabled => _solverDisabled;
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
@@ -100,6 +117,17 @@ internal static class SolverController
     internal static int NoGcRegionRolloverCountForTesting
         => SearchGcPolicy.RolloverCountForTesting;
     internal static long LastDeployedActionStartedAtMillisecondsForTesting { get; private set; }
+    internal static Task LastCombatReferenceReleaseForTesting { get; private set; } = Task.CompletedTask;
+    internal static int CombatLifecycleGeneration
+        => Volatile.Read(ref _combatLifecycleGeneration);
+    internal static int SearchReferenceReleaseScheduledCountForTesting
+        => Volatile.Read(ref _searchReferenceReleaseScheduledCountForTesting);
+    internal static int SearchReferenceReleaseCompletedCountForTesting
+        => Volatile.Read(ref _searchReferenceReleaseCompletedCountForTesting);
+    internal static int SearchCtsDisposeCountForTesting
+        => Volatile.Read(ref _searchCtsDisposeCountForTesting);
+    internal static int PendingSearchReferenceReleaseCountForTesting
+        => PendingSearchReferenceReleases.Count(static task => !task.IsCompleted);
     internal static bool WasCardDeployedForTesting(string cardId)
         => DeployedCardIdsForTesting.Contains(cardId);
     internal static bool WasPotionDeployedForTesting(string potionId)
@@ -111,6 +139,85 @@ internal static class SolverController
         if (!UnattendedTestRunner.IsActive)
             throw new InvalidOperationException("搜索会话取消入口只能在无人测试中使用。");
         CancelSearch();
+    }
+
+    internal static Task StartCombatDeferredOperation(
+        Func<CancellationToken, Task> operationFactory)
+    {
+        AssertMainThread();
+        ArgumentNullException.ThrowIfNull(operationFactory);
+        CancellationToken token = _combatDeferredOperationCancellation.Token;
+        Task operation = RunCombatDeferredOperationAsync(operationFactory, token);
+        PendingCombatDeferredOperations.RemoveAll(static task => task.IsCompleted);
+        if (!operation.IsCompleted)
+            PendingCombatDeferredOperations.Add(operation);
+        return operation;
+    }
+
+    private static async Task RunCombatDeferredOperationAsync(
+        Func<CancellationToken, Task> operationFactory,
+        CancellationToken token)
+    {
+        try
+        {
+            await operationFactory(token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Reset owns cancellation. The operation remains in the reference-release barrier
+            // until its state machine has dropped every captured combat/result reference.
+        }
+    }
+
+    internal static async Task<(
+        bool StaleCompletionPreservedCurrentSession,
+        bool BarrierWaitedForBothOperations,
+        int ReleasesScheduled,
+        int ReleasesCompleted,
+        int CancellationsDisposed)> ExerciseDeploymentSessionLifecycleForTestingAsync()
+    {
+        AssertMainThread();
+        if (!UnattendedTestRunner.IsActive)
+            throw new InvalidOperationException("部署会话生命周期测试只能在无人测试中使用。");
+        PendingDeploymentReferenceReleases.RemoveAll(static task => task.IsCompleted);
+        if (_deployment != null || PendingDeploymentReferenceReleases.Count != 0)
+            throw new InvalidOperationException("部署会话生命周期测试要求控制器初始空闲。");
+
+        int releasesScheduledBefore = Volatile.Read(
+            ref _deploymentReferenceReleaseScheduledCountForTesting);
+        int releasesCompletedBefore = Volatile.Read(
+            ref _deploymentReferenceReleaseCompletedCountForTesting);
+        int cancellationsDisposedBefore = Volatile.Read(
+            ref _deploymentCtsDisposeCountForTesting);
+        TaskCompletionSource firstCompletion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource secondCompletion = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        SolverDeploymentSession first = new() { Operation = firstCompletion.Task };
+        _deployment = first;
+        CancelDeployment();
+        SolverDeploymentSession second = new() { Operation = secondCompletion.Task };
+        _deployment = second;
+        CompleteDeployment(first);
+        bool staleCompletionPreservedCurrentSession = ReferenceEquals(_deployment, second);
+        CancelDeployment();
+        Task referenceRelease = DrainDeploymentReferenceReleases();
+        bool barrierWaitedForBothOperations = !referenceRelease.IsCompleted;
+        firstCompletion.TrySetResult();
+        barrierWaitedForBothOperations &= !referenceRelease.IsCompleted;
+        secondCompletion.TrySetResult();
+        await referenceRelease.ConfigureAwait(false);
+
+        return (
+            staleCompletionPreservedCurrentSession,
+            barrierWaitedForBothOperations,
+            Volatile.Read(ref _deploymentReferenceReleaseScheduledCountForTesting)
+                - releasesScheduledBefore,
+            Volatile.Read(ref _deploymentReferenceReleaseCompletedCountForTesting)
+                - releasesCompletedBefore,
+            Volatile.Read(ref _deploymentCtsDisposeCountForTesting)
+                - cancellationsDisposedBefore);
     }
 
     internal static void RecordManualProjectionComparisonForTesting(
@@ -126,23 +233,56 @@ internal static class SolverController
             currentProjectedBattleHpLost);
     }
 
-    internal static void RecordTurnSetupFailure(
+    internal static bool IsCurrentCombatLifecycle(
+        CombatState combat,
+        int lifecycleGeneration)
+        => lifecycleGeneration == Volatile.Read(ref _combatLifecycleGeneration)
+           && CombatManager.Instance.IsInProgress
+           && !CombatManager.Instance.IsOverOrEnding
+           && ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), combat);
+
+    internal static bool RecordTurnSetupFailure(
+        CombatState combat,
+        int lifecycleGeneration,
         Exception exception,
         bool parallelSearchWasEnabled = false)
     {
+        AssertMainThread();
+        if (!IsCurrentCombatLifecycle(combat, lifecycleGeneration))
+        {
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] TURN_SETUP_FAILURE_IGNORED reason=stale_lifecycle " +
+                $"operation_epoch={lifecycleGeneration} " +
+                $"current_epoch={Volatile.Read(ref _combatLifecycleGeneration)}");
+            return false;
+        }
         _combat.BugReportIssues.RecordFailure(
             CombatBugReportIssueKind.TurnSetupFailure,
             exception);
         if (NGame.Instance is { } host)
             SolverOverlay.Show(host, FormatTurnSetupFailure(exception, parallelSearchWasEnabled));
+        return true;
     }
 
-    internal static void RecordTurnSetupStateMismatch(string difference)
+    internal static bool RecordTurnSetupStateMismatch(
+        CombatState combat,
+        int lifecycleGeneration,
+        string difference)
     {
+        AssertMainThread();
+        if (!IsCurrentCombatLifecycle(combat, lifecycleGeneration))
+        {
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] TURN_SETUP_MISMATCH_IGNORED reason=stale_lifecycle " +
+                $"operation_epoch={lifecycleGeneration} " +
+                $"current_epoch={Volatile.Read(ref _combatLifecycleGeneration)}");
+            return false;
+        }
         _combat.BugReportIssues.Record(
             CombatBugReportIssueKind.TurnSetupStateMismatch,
             difference);
         SolverOverlay.RefreshControls();
+        return true;
     }
 
     public static void ApplyPersistentSettings(SolverSettingsSnapshot settings)
@@ -191,7 +331,7 @@ internal static class SolverController
     public static void BeginCombat(ICombatState? state)
     {
         AssertMainThread();
-        Reset("combat_starting");
+        ResetCore("combat_starting");
         DeployedCardIdsForTesting.Clear();
         DeployedPotionIdsForTesting.Clear();
         LastDeployedActionStartedAtMillisecondsForTesting = 0;
@@ -209,11 +349,16 @@ internal static class SolverController
             $"[CombatSolver/Test] THEFT_POLICY_INIT policy={_combat.TheftPolicy?.ToString() ?? "-"}");
     }
 
-    public static bool ActivateTurnSetupResult(NGame host, CombatState state, SolverResult result)
+    internal static bool ActivateTurnSetupResult(
+        NGame host,
+        CombatState state,
+        int lifecycleGeneration,
+        SolverResult result)
     {
         AssertMainThread();
         Player? player = LocalContext.GetMe(state);
-        if (_solverDisabled
+        if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
+            || _solverDisabled
             || _combat.AutomaticSearchPaused
             || !CombatManager.Instance.IsInProgress
             || state.Players.Count != 1
@@ -253,7 +398,8 @@ internal static class SolverController
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
         if (_combat.FullAutoEnabled)
         {
-            Task fullAutoTask = StartFullAutoAfterTurnSetupAsync(host, state, result);
+            Task fullAutoTask = StartCombatDeferredOperation(
+                token => StartFullAutoAfterTurnSetupAsync(host, state, result, token));
             if (UnattendedAsyncActivityTracker.IsRequestActive)
                 fullAutoTask = UnattendedAsyncActivityTracker.Track(fullAutoTask);
             TaskHelper.RunSafely(fullAutoTask);
@@ -300,7 +446,13 @@ internal static class SolverController
         NGame host,
         CombatState state,
         SolverResult result)
-        => TaskHelper.RunSafely(StartDeploymentAfterTurnSetupAsync(host, state, result));
+    {
+        Task deploymentTask = StartCombatDeferredOperation(
+            token => StartDeploymentAfterTurnSetupAsync(host, state, result, token));
+        if (UnattendedAsyncActivityTracker.IsRequestActive)
+            deploymentTask = UnattendedAsyncActivityTracker.Track(deploymentTask);
+        TaskHelper.RunSafely(deploymentTask);
+    }
 
     internal static bool TryGetPlannedTurnSetupChoices(
         CombatState state,
@@ -332,10 +484,13 @@ internal static class SolverController
     internal static async Task ResumeAfterTurnSetupAsync(
         NGame host,
         CombatState state,
+        int lifecycleGeneration,
         int turn,
         bool deployWhenReady = false,
-        bool waitForDeploymentDelay = false)
+        bool waitForDeploymentDelay = false,
+        CancellationToken token = default)
     {
+        token.ThrowIfCancellationRequested();
         long deadline = System.Environment.TickCount64 + 30_000;
         while (CombatManager.Instance.IsInProgress
                && !CombatManager.Instance.IsOverOrEnding
@@ -347,9 +502,11 @@ internal static class SolverController
             if (System.Environment.TickCount64 >= deadline)
                 throw new TimeoutException("回合准备页面完成后 30 秒内没有进入可复用状态。");
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            token.ThrowIfCancellationRequested();
         }
 
-        if (_solverDisabled
+        if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
+            || _solverDisabled
             || !CombatManager.Instance.IsInProgress
             || CombatManager.Instance.IsOverOrEnding
             || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
@@ -360,9 +517,10 @@ internal static class SolverController
         }
 
         if (waitForDeploymentDelay)
-            await WaitForTurnStartDeploymentDelayAsync(host, turn);
+            await WaitForTurnStartDeploymentDelayAsync(host, turn, token);
 
-        if (_solverDisabled
+        if (!IsCurrentCombatLifecycle(state, lifecycleGeneration)
+            || _solverDisabled
             || !CombatManager.Instance.IsInProgress
             || CombatManager.Instance.IsOverOrEnding
             || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
@@ -378,7 +536,8 @@ internal static class SolverController
     private static async Task StartFullAutoAfterTurnSetupAsync(
         NGame host,
         CombatState state,
-        SolverResult result)
+        SolverResult result,
+        CancellationToken token)
     {
         long deadline = System.Environment.TickCount64 + 30_000;
         while (CombatManager.Instance.IsInProgress
@@ -388,8 +547,10 @@ internal static class SolverController
             if (System.Environment.TickCount64 >= deadline)
                 throw new TimeoutException("回合准备完成后 30 秒内没有进入可部署状态。");
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            token.ThrowIfCancellationRequested();
         }
-        await WaitForTurnStartDeploymentDelayAsync(host, result.StartTurnNumber);
+        await WaitForTurnStartDeploymentDelayAsync(host, result.StartTurnNumber, token);
+        token.ThrowIfCancellationRequested();
         if (_combat.FullAutoEnabled
             && ReferenceEquals(_combat.LatestResult, result)
             && IsSamePlayableTurn(state, result.StartTurnNumber))
@@ -401,7 +562,8 @@ internal static class SolverController
     private static async Task StartDeploymentAfterTurnSetupAsync(
         NGame host,
         CombatState state,
-        SolverResult result)
+        SolverResult result,
+        CancellationToken token)
     {
         long deadline = System.Environment.TickCount64 + 30_000;
         while (CombatManager.Instance.IsInProgress
@@ -411,8 +573,10 @@ internal static class SolverController
             if (System.Environment.TickCount64 >= deadline)
                 throw new TimeoutException("回合准备完成后 30 秒内没有进入可部署状态。");
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            token.ThrowIfCancellationRequested();
         }
-        await WaitForTurnStartDeploymentDelayAsync(host, result.StartTurnNumber);
+        await WaitForTurnStartDeploymentDelayAsync(host, result.StartTurnNumber, token);
+        token.ThrowIfCancellationRequested();
         if (!_combat.FullAutoEnabled
             && ReferenceEquals(_combat.LatestResult, result)
             && IsSamePlayableTurn(state, result.StartTurnNumber))
@@ -425,6 +589,20 @@ internal static class SolverController
     {
         AssertMainThread();
         SolverDispatcher.Ensure(host);
+        Task rootCaptureBarrier = SearchGcPolicy.CaptureRootSnapshotBarrier();
+        if (!rootCaptureBarrier.IsCompleted)
+        {
+            DeferSearchUntilRootCaptureBarrier(
+                host,
+                state,
+                reason,
+                deployWhenReady,
+                rootCaptureBarrier);
+            return;
+        }
+        // A direct request can arrive after the barrier opened but before the deferred
+        // callback reached the dispatcher. The newest request owns the search slot.
+        CancelDeferredSearch();
         if (reason == SearchReason.Manual)
         {
             if (_combat.AutomaticSearchPaused)
@@ -592,7 +770,20 @@ internal static class SolverController
                 theftPolicy: theftPolicy);
             search.MaxDegreeOfParallelism = searchPolicy.MaxDegreeOfParallelism;
             setupStage = "combat_root_snapshot";
-            CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(state);
+            long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+            CombatRootSnapshot rootSnapshot;
+            try
+            {
+                rootSnapshot = CombatRootSnapshot.Capture(state);
+            }
+            finally
+            {
+                SearchGcPolicy.ReportCombatLifecycleAllocation(
+                    Math.Max(
+                        0,
+                        GC.GetTotalAllocatedBytes(precise: false) - rootCaptureAllocatedAtStart),
+                    "combat_root_snapshot");
+            }
             Entry.Logger.Info(
                 $"[CombatSolver/Test] COMBAT_ROOT_CAPTURE generation={generation} " +
                 $"elapsed_ms={rootSnapshot.CaptureElapsedMilliseconds:F3} " +
@@ -649,6 +840,7 @@ internal static class SolverController
                     worker.Priority = previousPriority;
                 }
             }, token);
+            search.WorkerCompletion = solveTask;
             if (!UnattendedAsyncActivityTracker.IsRequestActive)
             {
                 // Preserve the production continuation path exactly. The extra lifecycle
@@ -657,6 +849,7 @@ internal static class SolverController
                 {
                     SolverDispatcher.Post(() => CompleteSearch(host, search, task));
                 }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+                search.CallbackScheduled = true;
                 return;
             }
 
@@ -683,6 +876,7 @@ internal static class SolverController
                     throw;
                 }
             }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            search.CallbackScheduled = true;
         }
         catch (Exception ex)
         {
@@ -810,7 +1004,10 @@ internal static class SolverController
                     deployAfterSetup: false))
             {
                 InvalidOperationException failure = new("回合开始选牌页在全自动接管时失去活动状态。");
-                RecordTurnSetupFailure(failure);
+                _ = RecordTurnSetupFailure(
+                    state,
+                    Volatile.Read(ref _combatLifecycleGeneration),
+                    failure);
                 throw failure;
             }
             return;
@@ -854,8 +1051,9 @@ internal static class SolverController
         Entry.Logger.Info($"[CombatSolver/Test] SOLVER_DISABLED disabled={disabled}");
         if (disabled)
         {
-            bool controllerSearchCanceled = _search != null;
+            bool controllerSearchCanceled = _search != null || _deferredSearchCts != null;
             PlayerTurnSetupCoordinator.CancelForSolverDisabled();
+            CancelDeferredSearch();
             CancelSearch();
             if (controllerSearchCanceled)
                 SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
@@ -891,10 +1089,11 @@ internal static class SolverController
         if (!IsSearching)
             return;
 
-        bool controllerSearchCanceled = _search != null;
+        bool controllerSearchCanceled = _search != null || _deferredSearchCts != null;
         int? generation = _search?.Generation;
         _combat.FullAutoEnabled = false;
         _combat.AutomaticSearchPaused = true;
+        CancelDeferredSearch();
         CancelSearch();
         bool stoppedTurnSetupSearch = PlayerTurnSetupCoordinator.StopSearchByUser();
         if (controllerSearchCanceled || stoppedTurnSetupSearch)
@@ -985,12 +1184,32 @@ internal static class SolverController
     public static void Reset(string reason = "unspecified")
     {
         AssertMainThread();
-        bool searchCanceled = _search != null || PlayerTurnSetupCoordinator.IsSearching;
-        PlayerTurnSetupCoordinator.Reset(reason);
-        CombatBugReportExporter.CompleteCombat(
+        ResetCore(reason);
+    }
+
+    private static void ResetCore(string reason)
+    {
+        int lifecycleGeneration = Interlocked.Increment(ref _combatLifecycleGeneration);
+        bool deferredSearchCanceled = _deferredSearchCts != null;
+        CancelDeferredSearch();
+        Task deferredSearchRelease = DrainDeferredSearchReleases();
+        Task combatDeferredRelease = CancelAndDrainCombatDeferredOperations();
+        bool searchCanceled = deferredSearchCanceled
+            || _search != null
+            || PlayerTurnSetupCoordinator.IsSearching;
+        Task turnSetupRelease = PlayerTurnSetupCoordinator.Reset(reason);
+        long forensicCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
+        Task forensicCaptureRelease = CombatBugReportExporter.CompleteCombat(
             reason,
             CurrentResultForBugReport,
             DescribeReplanAudit());
+        SearchGcPolicy.ReportCombatLifecycleAllocation(
+            Math.Max(
+                0,
+                GC.GetTotalAllocatedBytes(precise: false) - forensicCaptureAllocatedAtStart),
+            "combat_forensic_capture");
+        SearchGcPolicy.CombatLifecyclePressure lifecyclePressure =
+            SearchGcPolicy.DetachCombatLifecyclePressure(reason);
         bool hadState = _search != null
             || _deployment != null
             || _combat.State != null
@@ -1000,22 +1219,133 @@ internal static class SolverController
             Entry.Logger.Info($"[CombatSolver/Test] REPLAN_SUMMARY reason={reason} {DescribeReplanCounts()}");
         _lastBugReportClassification = CaptureBugReportClassification();
         CancelSearch();
+        Task searchReferenceRelease = DrainSearchReferenceReleases();
         if (searchCanceled)
             SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
         CancelDeployment();
+        Task deploymentReferenceRelease = DrainDeploymentReferenceReleases();
         _combat = new SolverCombatSession();
         LastFullAutoStoppedForWorseRecalculationForTesting = false;
         LastFullAutoStoppedAtLiveRiskForTesting = false;
         LastSearchFailureForTesting = null;
         BattleDamageTracker.Reset();
         SolverOverlay.Hide();
+        bool unattendedRequestActive = UnattendedAsyncActivityTracker.IsRequestActive;
+        Task regionExit = unattendedRequestActive
+            ? Task.CompletedTask
+            : SearchGcPolicy.ExitNoGcRegionWhenSearchesIdleAsync(reason);
         // The unattended protocol performs one reclaim only after the game and every tracked
         // callback are quiescent. Starting a fire-and-forget reclaim here would make the 0.18
         // serialized reclaim chain request a second collection when the protocol joins it.
-        if (!UnattendedAsyncActivityTracker.IsRequestActive)
-            TaskHelper.RunSafely(SearchGcPolicy.ReclaimIfPendingAsync(reason));
+        Task referenceRelease = Task.WhenAll(
+            searchReferenceRelease,
+            deploymentReferenceRelease,
+            deferredSearchRelease,
+            combatDeferredRelease,
+            turnSetupRelease,
+            forensicCaptureRelease,
+            regionExit);
+        LastCombatReferenceReleaseForTesting = referenceRelease;
+        if (unattendedRequestActive)
+        {
+            TaskHelper.RunSafely(UnattendedAsyncActivityTracker.Track(referenceRelease));
+        }
+        else if (hadState
+                 || searchCanceled
+                 || !referenceRelease.IsCompletedSuccessfully
+                 || lifecyclePressure.AllocatedBytes > 0)
+        {
+            Stopwatch referenceReleaseStopwatch = Stopwatch.StartNew();
+            TaskHelper.RunSafely(SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+                reason,
+                lifecyclePressure.RequiresCollection,
+                includeCombatLifecyclePressure: false,
+                referenceRelease,
+                () => LogCombatReferenceBarrier(
+                    reason,
+                    lifecycleGeneration,
+                    lifecyclePressure,
+                    referenceReleaseStopwatch)));
+        }
         if (hadState)
             Entry.Logger.Info($"[CombatSolver/Test] RESET reason={reason}");
+    }
+
+    private static async Task ReleaseSearchSessionAsync(SolverSearchSession? search)
+    {
+        if (search == null)
+            return;
+        try
+        {
+            await search.WorkerCompletion.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await search.CallbackCompletion.Task.ConfigureAwait(false);
+            search.WorkerCompletion = Task.CompletedTask;
+        }
+        finally
+        {
+            DisposeSearchCancellationOnce(search);
+            Interlocked.Increment(ref _searchReferenceReleaseCompletedCountForTesting);
+        }
+    }
+
+    private static void QueueSearchReferenceRelease(SolverSearchSession search)
+    {
+        if (Interlocked.Exchange(ref search.ReferenceReleaseState, 1) != 0)
+            return;
+        PendingSearchReferenceReleases.RemoveAll(static task => task.IsCompleted);
+        Interlocked.Increment(ref _searchReferenceReleaseScheduledCountForTesting);
+        PendingSearchReferenceReleases.Add(ReleaseSearchSessionAsync(search));
+    }
+
+    private static Task DrainSearchReferenceReleases()
+    {
+        if (PendingSearchReferenceReleases.Count == 0)
+            return Task.CompletedTask;
+        Task[] releases = [.. PendingSearchReferenceReleases];
+        PendingSearchReferenceReleases.Clear();
+        return Task.WhenAll(releases);
+    }
+
+    private static void DisposeSearchCancellationOnce(SolverSearchSession search)
+    {
+        if (Interlocked.Exchange(ref search.CancellationDisposeState, 1) != 0)
+            return;
+        search.Cancellation.Dispose();
+        Interlocked.Increment(ref _searchCtsDisposeCountForTesting);
+    }
+
+    private static void LogCombatReferenceBarrier(
+        string reason,
+        int lifecycleGeneration,
+        SearchGcPolicy.CombatLifecyclePressure lifecyclePressure,
+        Stopwatch stopwatch)
+    {
+        int currentLifecycleGeneration = Volatile.Read(ref _combatLifecycleGeneration);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] HEAP_REFERENCE_BARRIER reason={reason} " +
+            $"elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F1} " +
+            $"lifecycle_epoch={lifecycleGeneration} " +
+            $"current_lifecycle_epoch={currentLifecycleGeneration} " +
+            $"crossed_combat={(currentLifecycleGeneration != lifecycleGeneration).ToString().ToLowerInvariant()} " +
+            $"lifecycle_allocated_bytes={lifecyclePressure.AllocatedBytes} " +
+            $"lifecycle_requires_gen2={lifecyclePressure.RequiresCollection.ToString().ToLowerInvariant()} " +
+            $"managed_live_bytes={GC.GetTotalMemory(forceFullCollection: false)}");
+    }
+
+    internal static void ReleaseUnattendedResultReferencesForTesting()
+    {
+        AssertMainThread();
+        if (!UnattendedTestRunner.IsActive)
+        {
+            throw new InvalidOperationException(
+                "无人测试结果引用只能在活动请求的最终清理阶段释放。");
+        }
+        // Executor assertions intentionally inspect the final result after combat teardown.
+        // Release it once those assertions are finished and before the protocol's reuse Gen2;
+        // IntentForecast can otherwise retain live creatures and move states from the old fight.
+        LastCompletedResultForTesting = null;
+        LastTurnSetupResultForTesting = null;
+        LastSearchFailureForTesting = null;
     }
 
     public static void MonitorCombatPresence()
@@ -1127,6 +1457,22 @@ internal static class SolverController
         };
 
     private static void CompleteSearch(
+        NGame host,
+        SolverSearchSession search,
+        Task<SolverResult> task)
+    {
+        try
+        {
+            CompleteSearchCore(host, search, task);
+        }
+        finally
+        {
+            search.CallbackCompletion.TrySetResult();
+            DisposeSearchCancellationOnce(search);
+        }
+    }
+
+    private static void CompleteSearchCore(
         NGame host,
         SolverSearchSession search,
         Task<SolverResult> task)
@@ -1337,6 +1683,7 @@ internal static class SolverController
             deploymentSettings,
             deployment,
             deployment.Cancellation.Token);
+        deployment.Operation = deploymentTask;
         if (UnattendedAsyncActivityTracker.IsRequestActive)
             deploymentTask = UnattendedAsyncActivityTracker.Track(deploymentTask);
         TaskHelper.RunSafely(deploymentTask);
@@ -1491,13 +1838,10 @@ internal static class SolverController
                 if (actionIndex + 1 < actions.Count
                     && deploymentSettings.DeploymentInterActionDelaySeconds > 0d)
                 {
-                    SceneTreeTimer delay = host.GetTree().CreateTimer(
+                    await WaitForDeploymentDelayAsync(
+                        host,
                         deploymentSettings.DeploymentInterActionDelaySeconds,
-                        processAlways: false,
-                        processInPhysics: false,
-                        ignoreTimeScale: false);
-                    await host.ToSignal(delay, SceneTreeTimer.SignalName.Timeout);
-                    token.ThrowIfCancellationRequested();
+                        token);
                 }
             }
 
@@ -1619,20 +1963,27 @@ internal static class SolverController
         }
         finally
         {
-            if (overrideFastMode.HasValue)
+            try
             {
-                SaveManager.Instance.PrefsSave.FastMode = originalFastMode;
-                Entry.Logger.Info(
-                    $"[CombatSolver/Test] DEPLOY_SPEED_RESTORED turn={turn} restored={originalFastMode}");
+                if (overrideFastMode.HasValue)
+                {
+                    SaveManager.Instance.PrefsSave.FastMode = originalFastMode;
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] DEPLOY_SPEED_RESTORED turn={turn} restored={originalFastMode}");
+                }
+                if (measureDeploymentTiming)
+                {
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] DEPLOY_FINISH turn={turn} " +
+                        $"elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}");
+                }
             }
-            if (measureDeploymentTiming)
+            finally
             {
-                Entry.Logger.Info(
-                    $"[CombatSolver/Test] DEPLOY_FINISH turn={turn} " +
-                    $"elapsed_ms={Stopwatch.GetElapsedTime(deploymentStartedAt).TotalMilliseconds:F1}");
+                CompleteDeployment(deployment);
+                DisposeDeploymentCancellationOnce(deployment);
+                SolverOverlay.RefreshControls();
             }
-            CompleteDeployment(deployment);
-            SolverOverlay.RefreshControls();
         }
     }
 
@@ -1688,7 +2039,10 @@ internal static class SolverController
         }
     }
 
-    internal static async Task WaitForTurnStartDeploymentDelayAsync(NGame host, int turn)
+    internal static async Task WaitForTurnStartDeploymentDelayAsync(
+        NGame host,
+        int turn,
+        CancellationToken token = default)
     {
         double seconds = SolverSettings.Capture().DeploymentInterActionDelaySeconds;
         if (seconds <= 0d)
@@ -1696,21 +2050,174 @@ internal static class SolverController
         long startedAt = System.Environment.TickCount64;
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_START_DEPLOY_DELAY turn={turn} seconds={seconds:0.###}");
-        SceneTreeTimer delay = host.GetTree().CreateTimer(
-            seconds,
-            processAlways: false,
-            processInPhysics: false,
-            ignoreTimeScale: false);
-        await host.ToSignal(delay, SceneTreeTimer.SignalName.Timeout);
+        await WaitForDeploymentDelayAsync(host, seconds, token);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_START_DEPLOY_DELAY_COMPLETE turn={turn} " +
             $"elapsed_ms={System.Environment.TickCount64 - startedAt}");
     }
 
+    private static async Task WaitForDeploymentDelayAsync(
+        NGame host,
+        double seconds,
+        CancellationToken token)
+    {
+        SceneTreeTimer delay = host.GetTree().CreateTimer(
+            seconds,
+            processAlways: false,
+            processInPhysics: false,
+            ignoreTimeScale: false);
+        await AwaitSceneTreeTimerAsync(host, delay).WaitAsync(token);
+    }
+
+    private static async Task AwaitSceneTreeTimerAsync(NGame host, SceneTreeTimer delay)
+        => await host.ToSignal(delay, SceneTreeTimer.SignalName.Timeout);
+
+    private static void DeferSearchUntilRootCaptureBarrier(
+        NGame host,
+        CombatState state,
+        SearchReason reason,
+        bool deployWhenReady,
+        Task barrier)
+    {
+        CancelDeferredSearch();
+        CancellationTokenSource cancellation = new();
+        _deferredSearchCts = cancellation;
+        int requestId = ++_deferredSearchId;
+        int lifecycleGeneration = Volatile.Read(ref _combatLifecycleGeneration);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] SEARCH_ROOT_CAPTURE_DEFERRED reason={reason} " +
+            $"lifecycle_epoch={lifecycleGeneration}");
+        PendingDeferredSearchReleases.RemoveAll(static task => task.IsCompleted);
+        Task operation = ResumeDeferredSearchAsync(
+            host,
+            state,
+            reason,
+            deployWhenReady,
+            barrier,
+            cancellation,
+            requestId,
+            lifecycleGeneration);
+        PendingDeferredSearchReleases.Add(operation);
+        TaskHelper.RunSafely(operation);
+    }
+
+    private static async Task ResumeDeferredSearchAsync(
+        NGame host,
+        CombatState state,
+        SearchReason reason,
+        bool deployWhenReady,
+        Task barrier,
+        CancellationTokenSource cancellation,
+        int requestId,
+        int lifecycleGeneration)
+    {
+        CancellationToken token = cancellation.Token;
+        try
+        {
+            await barrier.WaitAsync(token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            TaskCompletionSource callbackCompleted = new(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            SolverDispatcher.Post(() =>
+            {
+                try
+                {
+                    bool ownsDeferredRequest = requestId == _deferredSearchId
+                        && ReferenceEquals(_deferredSearchCts, cancellation);
+                    if (token.IsCancellationRequested
+                        || !ownsDeferredRequest
+                        || Volatile.Read(ref _combatLifecycleGeneration) != lifecycleGeneration
+                        || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state))
+                    {
+                        if (ownsDeferredRequest)
+                            _deferredSearchCts = null;
+                        return;
+                    }
+                    _deferredSearchCts = null;
+                    Entry.Logger.Info(
+                        $"[CombatSolver/Test] SEARCH_ROOT_CAPTURE_RESUMED reason={reason} " +
+                        $"lifecycle_epoch={lifecycleGeneration}");
+                    RequestSearch(host, state, reason, deployWhenReady);
+                }
+                finally
+                {
+                    callbackCompleted.TrySetResult();
+                }
+            });
+            // Even a canceled request waits for its queued callback. That callback owns the
+            // final references to the old combat graph, so the combat-end barrier must not
+            // declare quiescence merely because its token was canceled.
+            await callbackCompleted.Task.ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Reset/newer request owns the deferred-search cancellation.
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
+    }
+
+    private static void CancelDeferredSearch()
+    {
+        CancellationTokenSource? cancellation = _deferredSearchCts;
+        _deferredSearchCts = null;
+        if (cancellation == null)
+            return;
+        _deferredSearchId++;
+        cancellation.Cancel();
+    }
+
+    private static Task DrainDeferredSearchReleases()
+    {
+        if (PendingDeferredSearchReleases.Count == 0)
+            return Task.CompletedTask;
+        Task[] releases = PendingDeferredSearchReleases.ToArray();
+        PendingDeferredSearchReleases.Clear();
+        return Task.WhenAll(releases);
+    }
+
+    private static Task CancelAndDrainCombatDeferredOperations()
+    {
+        CancellationTokenSource cancellation = _combatDeferredOperationCancellation;
+        _combatDeferredOperationCancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        if (PendingCombatDeferredOperations.Count == 0)
+        {
+            cancellation.Dispose();
+            return Task.CompletedTask;
+        }
+        Task[] operations = PendingCombatDeferredOperations.ToArray();
+        PendingCombatDeferredOperations.Clear();
+        return ReleaseCombatDeferredOperationsAsync(operations, cancellation);
+    }
+
+    private static async Task ReleaseCombatDeferredOperationsAsync(
+        Task[] operations,
+        CancellationTokenSource cancellation)
+    {
+        try
+        {
+            await Task.WhenAll(operations)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+        finally
+        {
+            cancellation.Dispose();
+        }
+    }
+
     private static void CancelSearch()
     {
-        _search?.Cancellation.Cancel();
+        SolverSearchSession? search = _search;
         _search = null;
+        if (search == null)
+            return;
+        search.Cancellation.Cancel();
+        if (!search.CallbackScheduled)
+            search.CallbackCompletion.TrySetResult();
+        QueueSearchReferenceRelease(search);
     }
 
     private static void RecordManualProjectionComparison(
@@ -1777,8 +2284,52 @@ internal static class SolverController
 
     private static void CancelDeployment()
     {
-        _deployment?.Cancellation.Cancel();
+        SolverDeploymentSession? deployment = _deployment;
         _deployment = null;
+        if (deployment == null)
+            return;
+        deployment.Cancellation.Cancel();
+        QueueDeploymentReferenceRelease(deployment);
+    }
+
+    private static async Task ReleaseDeploymentSessionAsync(SolverDeploymentSession deployment)
+    {
+        try
+        {
+            await deployment.Operation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            deployment.Operation = Task.CompletedTask;
+        }
+        finally
+        {
+            DisposeDeploymentCancellationOnce(deployment);
+            Interlocked.Increment(ref _deploymentReferenceReleaseCompletedCountForTesting);
+        }
+    }
+
+    private static void QueueDeploymentReferenceRelease(SolverDeploymentSession deployment)
+    {
+        if (Interlocked.Exchange(ref deployment.ReferenceReleaseState, 1) != 0)
+            return;
+        PendingDeploymentReferenceReleases.RemoveAll(static task => task.IsCompleted);
+        Interlocked.Increment(ref _deploymentReferenceReleaseScheduledCountForTesting);
+        PendingDeploymentReferenceReleases.Add(ReleaseDeploymentSessionAsync(deployment));
+    }
+
+    private static Task DrainDeploymentReferenceReleases()
+    {
+        if (PendingDeploymentReferenceReleases.Count == 0)
+            return Task.CompletedTask;
+        Task[] releases = [.. PendingDeploymentReferenceReleases];
+        PendingDeploymentReferenceReleases.Clear();
+        return Task.WhenAll(releases);
+    }
+
+    private static void DisposeDeploymentCancellationOnce(SolverDeploymentSession deployment)
+    {
+        if (Interlocked.Exchange(ref deployment.CancellationDisposeState, 1) != 0)
+            return;
+        deployment.Cancellation.Dispose();
+        Interlocked.Increment(ref _deploymentCtsDisposeCountForTesting);
     }
 
     private static CombatBugReportClassificationSnapshot CaptureBugReportClassification()

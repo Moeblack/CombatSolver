@@ -9,4 +9,7 @@ internal sealed record LiveCombatStamp(string StateText)
 {
     public static LiveCombatStamp Capture(CombatState state)
         => new(ContinuationStamp.CaptureLive(state).StateText);
+
+    public static LiveCombatStamp FromContinuation(ContinuationStamp continuation)
+        => new(continuation.StateText);
 }

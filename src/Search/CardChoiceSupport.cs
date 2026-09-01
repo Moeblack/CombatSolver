@@ -1,3 +1,4 @@
+using System.Text;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
@@ -453,26 +454,44 @@ internal static partial class CardChoiceSupport
             : 0d;
 
     internal static string ChoiceCardKey(CardModel card)
+        => ChoiceCardKey(card, discoverUnregisteredBaseLibModifiers: true);
+
+    private static string ChoiceCardKey(
+        CardModel card,
+        bool discoverUnregisteredBaseLibModifiers)
     {
         string vars = string.Join(';', card.DynamicVars
             .OrderBy(item => item.Key)
             .Select(item => $"{item.Key}={item.Value.BaseValue}"));
         string keywords = string.Join(',', card.GetKeywordsWithSources(KeywordSources.Local).Order());
-        return $"{card.Id.Entry}+{card.CurrentUpgradeLevel}|" +
-               $"energy={card.EnergyCost.CostsX}:{card.EnergyCost.GetWithModifiers(CostModifiers.Local)}|" +
-               $"stars={card.HasStarCostX}:{card.CurrentStarCost}|replay={card.BaseReplayCount}|" +
-               $"exhaust={card.ExhaustOnNextPlay}|sly={card.IsSlyThisTurn}|retain={card.ShouldRetainThisTurn}|" +
-               $"deck={card.DeckVersion != null}|" +
-               $"keywords={keywords}|vars={vars}|" +
-               $"{(card.Enchantment == null ? "-" : EnchantmentStateSupport.Describe(card.Enchantment))}|" +
-               $"{card.Affliction?.Id.Entry}:{card.Affliction?.Amount ?? 0}";
+        StringBuilder key = new();
+        key.Append(card.Id.Entry).Append('+').Append(card.CurrentUpgradeLevel)
+            .Append("|energy=").Append(card.EnergyCost.CostsX).Append(':')
+            .Append(card.EnergyCost.GetWithModifiers(CostModifiers.Local))
+            .Append("|stars=").Append(card.HasStarCostX).Append(':').Append(card.CurrentStarCost)
+            .Append("|replay=").Append(card.BaseReplayCount)
+            .Append("|exhaust=").Append(card.ExhaustOnNextPlay)
+            .Append("|sly=").Append(card.IsSlyThisTurn)
+            .Append("|retain=").Append(card.ShouldRetainThisTurn)
+            .Append("|deck=").Append(card.DeckVersion != null)
+            .Append("|keywords=").Append(keywords)
+            .Append("|vars=").Append(vars).Append('|')
+            .Append(card.Enchantment == null ? "-" : EnchantmentStateSupport.Describe(card.Enchantment))
+            .Append('|').Append(card.Affliction?.Id.Entry).Append(':').Append(card.Affliction?.Amount ?? 0)
+            .Append("|baselib=");
+        if (!PredictionModModelSupport.AppendBaseLibCardModifierState(
+                key,
+                card,
+                discoverUnregisteredBaseLibModifiers))
+            key.Append('-');
+        return key.ToString();
     }
 
     internal static string ChoiceCardKey(PredictedCard card)
     {
         if (card.TryGetCachedChoiceKey(out string key))
             return key;
-        key = ChoiceCardKey(card.Preview);
+        key = ChoiceCardKey(card.Preview, discoverUnregisteredBaseLibModifiers: false);
         card.SetCachedChoiceKey(key);
         return key;
     }

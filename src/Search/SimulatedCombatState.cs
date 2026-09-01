@@ -202,7 +202,9 @@ internal sealed partial class SimulatedCombatState
     private bool _rootMaterialized;
     private CombatPredictionState? _predictionState;
 
-    public SimulatedCombatState(CombatState inner)
+    public SimulatedCombatState(
+        CombatState inner,
+        AbstractModel[]? capturedCombatHookListeners = null)
     {
         if (!NGame.IsMainThread())
             throw new InvalidOperationException("Live combat state can only be captured on the main thread.");
@@ -303,7 +305,8 @@ internal sealed partial class SimulatedCombatState
                     rootModelClones.Add(original, potion!);
             }
         }
-        AbstractModel[] liveCombatHookListeners = inner.IterateHookListeners().ToArray();
+        AbstractModel[] liveCombatHookListeners =
+            capturedCombatHookListeners ?? inner.IterateHookListeners().ToArray();
         RunState concreteRunState = inner.RunState as RunState
             ?? throw new InvalidOperationException("Combat prediction requires a concrete RunState.");
         _modHookSubscribers = PredictionModHookSubscriberCapture.Capture(
@@ -1304,7 +1307,7 @@ internal sealed partial class SimulatedCombatState
                          || (tangled <= 0 && card.Preview.Affliction is Entangled)
                          || (ringing <= 0 && card.Preview.Affliction is Ringing))
                 {
-                    card.MutablePreview.ClearAfflictionInternal();
+                    card.ClearAffliction();
                 }
             }
         }
@@ -1418,7 +1421,7 @@ internal sealed partial class SimulatedCombatState
 
     private IReadOnlyList<AbstractModel> GetEffectiveRunHookListeners()
     {
-        if (_effectiveRunHookListeners != null)
+        if (CanReuseHookListenerCache && _effectiveRunHookListeners != null)
             return _effectiveRunHookListeners;
         IReadOnlyList<AbstractModel> combatListeners = GetEffectiveHookListeners();
         if (_rootRunHookListeners.Length == 0)
@@ -1435,7 +1438,7 @@ internal sealed partial class SimulatedCombatState
 
     private IReadOnlyList<AbstractModel> GetEffectiveHookListeners()
     {
-        if (_effectiveHookListeners is not null)
+        if (CanReuseHookListenerCache && _effectiveHookListeners is not null)
             return _effectiveHookListeners;
 
         IReadOnlyList<AbstractModel> baseListeners = GetBaseHookListeners();
@@ -1530,7 +1533,7 @@ internal sealed partial class SimulatedCombatState
 
     private IReadOnlyList<AbstractModel> GetBaseHookListeners()
     {
-        if (_baseHookListeners != null)
+        if (CanReuseHookListenerCache && _baseHookListeners != null)
             return _baseHookListeners;
         int initialCapacity = _rootHookListeners.Length
             + (_registeredCombatCards?.Count ?? 0)
@@ -1612,7 +1615,11 @@ internal sealed partial class SimulatedCombatState
             .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
             .ToList();
         foreach (PredictedCard card in _registeredCombatCards)
-            card.SetMutationObserver(InvalidateBaseHookListenersObserver);
+        {
+            if (_modHookSubscribers.HasBaseLibCardModifiers)
+                card.EnableAttachedModelForkIsolation();
+            ObserveCardMutations(card);
+        }
         _ = GetBaseHookListeners();
         foreach (PowerModel power in _rootHookListeners.OfType<PowerModel>())
         {
@@ -1717,14 +1724,16 @@ internal sealed partial class SimulatedCombatState
     {
         if (_registeredCombatCards?.Contains(card) != true)
             (_registeredCombatCards ??= []).Add(card);
-        card.SetMutationObserver(InvalidateBaseHookListenersObserver);
+        if (_modHookSubscribers.HasBaseLibCardModifiers)
+            card.EnableAttachedModelForkIsolation();
+        ObserveCardMutations(card);
         if (_rootHookListeners.Any(card.References)
             || _generatedCombatCards?.Contains(card) == true)
         {
             return;
         }
         (_generatedCombatCards ??= []).Add(card);
-        card.SetMutationObserver(InvalidateBaseHookListenersObserver);
+        ObserveCardMutations(card);
         InvalidateBaseHookListeners();
     }
 
@@ -1745,6 +1754,20 @@ internal sealed partial class SimulatedCombatState
 
     private Action InvalidateBaseHookListenersObserver
         => _invalidateBaseHookListenersObserver ??= InvalidateBaseHookListeners;
+
+    // BaseLib stores CardModifier membership in an opaque side table. Its public add/remove APIs
+    // can update that table without touching PredictedCard.MutablePreview, so no mutation observer
+    // can reliably version the cached listener sequence. Rebuild on enumeration for those roots;
+    // vanilla roots retain the optimized identity-based cache.
+    private bool CanReuseHookListenerCache
+        => !_modHookSubscribers.HasBaseLibCardModifiers;
+
+    private void ObserveCardMutations(PredictedCard card)
+    {
+        card.SetMutationObserver(
+            InvalidateBaseHookListenersObserver,
+            observeEveryPreviewMutation: _modHookSubscribers.HasBaseLibCardModifiers);
+    }
 
     public void AppendFingerprint(
         ref StateFingerprintBuilder fingerprint,

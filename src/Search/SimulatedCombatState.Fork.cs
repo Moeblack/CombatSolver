@@ -113,7 +113,7 @@ internal sealed partial class SimulatedCombatState
         if (fork._registeredCombatCards is not null)
         {
             foreach (PredictedCard card in fork._registeredCombatCards)
-                card.SetMutationObserver(fork.InvalidateBaseHookListenersObserver);
+                fork.ObserveCardMutations(card);
         }
         fork._generatedCombatCards = ForkCardList(_generatedCombatCards, context);
 
@@ -139,6 +139,18 @@ internal sealed partial class SimulatedCombatState
         SimulatedCombatState fork,
         PredictionForkContext context)
     {
+        // CardModifier membership cannot change which Power models are active. Preserve this
+        // independently invalidated projection even when listener arrays must stay conservative.
+        if (_effectivePowers is not null)
+            fork._effectivePowers = RemapCachedPowers(_effectivePowers, context);
+
+        // BaseLib CardModifier membership lives in an opaque side table and can change
+        // without invalidating these caches. Those roots always rebuild listeners on
+        // enumeration, so remapping the cached arrays here only allocates short-lived
+        // fork-local copies that can never be consumed.
+        if (!CanReuseHookListenerCache)
+            return;
+
         if (_baseHookListeners is not null)
             fork._baseHookListeners = RemapCachedModels(_baseHookListeners, context);
 
@@ -158,8 +170,6 @@ internal sealed partial class SimulatedCombatState
                 : RemapCachedModels(_effectiveRunHookListeners, context);
         }
 
-        if (_effectivePowers is not null)
-            fork._effectivePowers = RemapCachedPowers(_effectivePowers, context);
     }
 
     private static IReadOnlyList<AbstractModel> RemapCachedModels(

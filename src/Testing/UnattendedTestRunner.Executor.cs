@@ -149,7 +149,9 @@ internal sealed partial class UnattendedTestRunner
                 if (!runner.HasInitialSolverExpectation())
                     await runner.AssertInitialSolverResultAsync(startedTurn);
                 await Task.Delay(2000);
-                await SearchGcPolicy.ReclaimIfPendingAsync("unattended_hold");
+                await SearchGcPolicy.ReclaimIfPendingAsync(
+                    "unattended_hold",
+                    forceCollection: true);
                 return Observation(combatEnded: false, initialSearchHeld: true);
             }
 

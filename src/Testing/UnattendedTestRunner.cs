@@ -127,6 +127,9 @@ internal sealed partial class UnattendedTestRunner
                 return RunCompletion.InitialSearchHeld;
             }
             _assertions.AssertAfterExecution(scenario, outcome);
+            // SolverResult test observations are required through the post-combat assertions,
+            // but must not survive into ReturnToMainMenu and the protocol's reuse Gen2.
+            SolverController.ReleaseUnattendedResultReferencesForTesting();
 
             SetStage("cleanup");
             await _host.ReturnToMainMenu();
@@ -267,6 +270,7 @@ internal sealed partial class UnattendedTestRunner
                 entry.FullName.StartsWith(checkpointPrefix, StringComparison.Ordinal)
                 && entry.FullName.EndsWith(".json", StringComparison.Ordinal))
             ?? throw new InvalidDataException($"问题包缺少 {forensicSlot} 战斗检查点。");
+        AssertUtf8JsonArchiveEntry(checkpoint, $"{forensicSlot} 检查点 metadata");
         using Stream checkpointStream = checkpoint.Open();
         using JsonDocument checkpointDocument = JsonDocument.Parse(checkpointStream);
         JsonElement root = checkpointDocument.RootElement;
@@ -303,6 +307,7 @@ internal sealed partial class UnattendedTestRunner
         if (nativeState.Length == 0)
             throw new InvalidDataException("问题包中的游戏原生战斗状态包为空。");
 
+        AssertUtf8JsonArchiveEntry(replayState, $"{forensicSlot} 检查点 replay-state");
         using Stream replayStateStream = replayState.Open();
         using JsonDocument replayStateDocument = JsonDocument.Parse(replayStateStream);
         JsonElement replayRoot = replayStateDocument.RootElement;
@@ -357,6 +362,47 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidDataException(
                 $"问题包玩法标记不符：预期 {expectedControlMode}，" +
                 $"会话为 {sessionControlMode.GetString()}，上下文为 {contextControlMode.GetString()}。");
+        }
+    }
+
+    private static void AssertUtf8JsonArchiveEntry(ZipArchiveEntry entry, string description)
+    {
+        using (Stream prefixStream = entry.Open())
+        {
+            Span<byte> prefix = stackalloc byte[3];
+            int prefixLength = 0;
+            while (prefixLength < prefix.Length)
+            {
+                int read = prefixStream.Read(prefix[prefixLength..]);
+                if (read == 0)
+                    break;
+                prefixLength += read;
+            }
+            if (prefixLength == prefix.Length
+                && prefix.SequenceEqual(Encoding.UTF8.Preamble))
+            {
+                throw new InvalidDataException($"问题包的 {description} 不应包含 UTF-8 BOM。");
+            }
+        }
+
+        UTF8Encoding strictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+        using Stream input = entry.Open();
+        using StreamReader reader = new(
+            input,
+            strictUtf8,
+            detectEncodingFromByteOrderMarks: false,
+            bufferSize: 8192,
+            leaveOpen: false);
+        Span<char> buffer = stackalloc char[4096];
+        try
+        {
+            while (reader.Read(buffer) > 0)
+            {
+            }
+        }
+        catch (DecoderFallbackException ex)
+        {
+            throw new InvalidDataException($"问题包的 {description} 不是有效 UTF-8。", ex);
         }
     }
 

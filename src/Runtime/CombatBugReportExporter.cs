@@ -29,7 +29,7 @@ internal static class CombatBugReportExporter
     private const long MaximumLogBytes = 2L * 1024 * 1024;
     private const long MaximumCombatLogBytes = 4L * 1024 * 1024;
     private const long MaximumCapturedSaveBytes = 4L * 1024 * 1024;
-    private const int MaximumCheckpoints = 12;
+    private const int MaximumCheckpoints = 6;
     private const int MaximumArchivedCheckpoints = 6;
     private const int MaximumGeneralLogFiles = 1;
 
@@ -48,9 +48,8 @@ internal static class CombatBugReportExporter
     private sealed record CapturedFile(string SourceRelativePath, byte[] Bytes);
     private sealed record ForensicCheckpoint(
         string Label,
-        string StateText,
-        string MetadataJson,
-        string ReplayStateJson,
+        byte[] MetadataJsonUtf8,
+        byte[] ReplayStateJsonUtf8,
         byte[] NativeCombatState,
         byte[] InMemoryRunSave);
     private sealed record ForensicCheckpointCapture(
@@ -105,8 +104,8 @@ internal static class CombatBugReportExporter
     private sealed record ForensicLogRange(string Path, string EntryName, long Start, long End);
     private sealed record ForensicArchiveCheckpoint(
         string Name,
-        string MetadataJson,
-        string ReplayStateJson,
+        byte[] MetadataJsonUtf8,
+        byte[] ReplayStateJsonUtf8,
         byte[] NativeCombatState,
         byte[] InMemoryRunSave);
 
@@ -216,7 +215,10 @@ internal static class CombatBugReportExporter
             return;
 
         if (_currentSession != null)
-            CompleteCombat("combat_replaced", null, string.Empty);
+            _ = CompleteCombat("combat_replaced", null, string.Empty);
+        // Once a new combat exists, exports intentionally select that current session and never
+        // the previous one. Drop the old serialized checkpoints instead of retaining both fights.
+        _lastSession = null;
         string userDataDirectory = OS.GetUserDataDir();
         _currentSession = new ForensicSession
         {
@@ -243,18 +245,18 @@ internal static class CombatBugReportExporter
         RecordCheckpointCore(state, label, result, replanAudit);
     }
 
-    public static void CompleteCombat(string reason, SolverResult? result, string replanAudit)
+    public static Task CompleteCombat(string reason, SolverResult? result, string replanAudit)
     {
         if (!NGame.IsMainThread())
             throw new InvalidOperationException("战斗取证只能从游戏主线程采集。");
         ForensicSession? session = _currentSession;
         if (session == null)
-            return;
+            return Task.CompletedTask;
 
         CombatState? live = CombatManager.Instance.DebugOnlyGetState();
         if (live != null && live.RunState.Rng.StringSeed == session.Seed)
             RecordCheckpointCore(live, "combat_end", result, replanAudit);
-        QueueSessionCompletion(
+        Task completion = QueueSessionCompletion(
             session,
             reason,
             result,
@@ -263,6 +265,7 @@ internal static class CombatBugReportExporter
             CaptureLogEndOffsets(session));
         _lastSession = session;
         _currentSession = null;
+        return completion;
     }
 
     public static Task<string> ExportCurrentAsync(string? outputDirectory = null)
@@ -406,11 +409,14 @@ internal static class CombatBugReportExporter
         AddText(archive, $"{root}/session.json", session.SessionJson);
         foreach (ForensicArchiveCheckpoint checkpoint in session.Checkpoints)
         {
-            AddText(archive, $"{root}/checkpoints/{checkpoint.Name}", checkpoint.MetadataJson);
-            AddText(
+            AddBytes(
+                archive,
+                $"{root}/checkpoints/{checkpoint.Name}",
+                checkpoint.MetadataJsonUtf8);
+            AddBytes(
                 archive,
                 $"{root}/replay-state/{checkpoint.Name}",
-                checkpoint.ReplayStateJson);
+                checkpoint.ReplayStateJsonUtf8);
             string stem = Path.GetFileNameWithoutExtension(checkpoint.Name);
             AddBytes(
                 archive,
@@ -586,9 +592,8 @@ internal static class CombatBugReportExporter
                     session.InMemoryRunSave = new CapturedFile("in-memory", runSave);
                 ForensicCheckpoint checkpoint = new(
                     capture.Label,
-                    capture.StateText,
-                    SerializeSnapshot(BuildCheckpointMetadata(session, capture)),
-                    SerializeSnapshot(BuildReplayState(capture)),
+                    SerializeSnapshotToUtf8Bytes(BuildCheckpointMetadata(session, capture)),
+                    SerializeSnapshotToUtf8Bytes(BuildReplayState(capture)),
                     SerializeNativeCombatState(capture.Combat.NativeCombatState),
                     runSave);
                 if (session.Checkpoints.Count >= MaximumCheckpoints)
@@ -672,7 +677,7 @@ internal static class CombatBugReportExporter
         };
     }
 
-    private static void QueueSessionCompletion(
+    private static Task QueueSessionCompletion(
         ForensicSession session,
         string reason,
         SolverResult? result,
@@ -684,7 +689,7 @@ internal static class CombatBugReportExporter
         string route = DescribeRoute(result);
         string controlMode = SolverController.ControlModeForBugReport;
         int? lastSolverDeployedTurn = SolverController.LastSolverDeployedTurnForBugReport;
-        _ = QueueBackground(() =>
+        return QueueBackground(() =>
         {
             try
             {
@@ -703,6 +708,19 @@ internal static class CombatBugReportExporter
             catch (Exception ex)
             {
                 RegisterBackgroundFailure(session, "combat_end", ex);
+            }
+            finally
+            {
+                // Every earlier checkpoint write shares this FIFO worker, so reaching the
+                // completion item proves no serializer still needs the detached live capture.
+                session.CachedCombatCapture = null;
+                session.CachedCombatStateText = null;
+                session.CachedCombatProfiles = null;
+                session.CachedCombatCaptureFrame = 0;
+                session.CachedCombatHistoryCount = 0;
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] BUG_REPORT_COMBAT_CACHE_RELEASED " +
+                    $"session={session.SessionId} checkpoints={session.Checkpoints.Count}");
             }
             return true;
         });
@@ -829,8 +847,8 @@ internal static class CombatBugReportExporter
         IReadOnlyList<ForensicArchiveCheckpoint> checkpoints = selectedCheckpoints
             .Select(item => new ForensicArchiveCheckpoint(
                 $"{item.Index:D3}-{SanitizeFileName(item.Checkpoint.Label)}.json",
-                item.Checkpoint.MetadataJson,
-                item.Checkpoint.ReplayStateJson,
+                item.Checkpoint.MetadataJsonUtf8,
+                item.Checkpoint.ReplayStateJsonUtf8,
                 item.Checkpoint.NativeCombatState,
                 item.Checkpoint.InMemoryRunSave))
             .ToArray();
@@ -1253,8 +1271,8 @@ internal static class CombatBugReportExporter
         return bytes;
     }
 
-    private static string SerializeSnapshot(object snapshot)
-        => JsonSerializer.Serialize(snapshot, snapshot.GetType(), JsonOptions);
+    private static byte[] SerializeSnapshotToUtf8Bytes(object snapshot)
+        => JsonSerializer.SerializeToUtf8Bytes(snapshot, snapshot.GetType(), JsonOptions);
 
     private static byte[] ReadSharedFile(string path, long maximumBytes)
     {

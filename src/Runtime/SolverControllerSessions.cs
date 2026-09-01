@@ -58,6 +58,12 @@ internal sealed class SolverSearchSession(
     public CombatState State { get; } = state;
     public LiveCombatStamp Stamp { get; } = stamp;
     public CancellationTokenSource Cancellation { get; } = new();
+    public Task WorkerCompletion { get; set; } = Task.CompletedTask;
+    public TaskCompletionSource CallbackCompletion { get; } = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    public bool CallbackScheduled { get; set; }
+    public int ReferenceReleaseState;
+    public int CancellationDisposeState;
     public bool DeployWhenReady { get; set; } = deployWhenReady;
     public int MaxDegreeOfParallelism { get; set; } = 1;
     public SolverProgress? Progress;
@@ -114,4 +120,7 @@ internal sealed class SolverSearchSession(
 internal sealed class SolverDeploymentSession
 {
     public CancellationTokenSource Cancellation { get; } = new();
+    public Task Operation { get; set; } = Task.CompletedTask;
+    public int ReferenceReleaseState;
+    public int CancellationDisposeState;
 }

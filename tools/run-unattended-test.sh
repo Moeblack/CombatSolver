@@ -92,7 +92,7 @@ add_option expected-finished-turn 0 int positive_int
 add_option expected-finished-turn-at-most 0 int positive_int
 add_option expected-finished-player-hp-at-least -1 int nonnegative_int
 for name in \
-    clear-player-hand clear-player-piles clear-all-powers \
+    clear-player-hand clear-player-piles clear-run-deck clear-all-powers \
     verify-prediction-failure-boundaries verify-search-policy-snapshot \
     verify-controller-session-lifecycle verify-fork-boundaries \
     verify-combat-root-snapshot verify-base-lib-card-modifier-boundary \

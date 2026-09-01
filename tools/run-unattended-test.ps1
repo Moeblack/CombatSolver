@@ -67,6 +67,7 @@ param(
     [int]$ExpectedFinishedPlayerHpAtLeast = -1,
     [switch]$ClearPlayerHand,
     [switch]$ClearPlayerPiles,
+    [switch]$ClearRunDeck,
     [switch]$ClearAllPowers,
     [switch]$VerifyPredictionFailureBoundaries,
     [switch]$VerifySearchPolicySnapshot,
@@ -656,6 +657,7 @@ $request = [ordered]@{
     expectedFinishedPlayerHpAtLeast = if ($ExpectedFinishedPlayerHpAtLeast -ge 0) { $ExpectedFinishedPlayerHpAtLeast } else { $null }
     clearPlayerHand = $ClearPlayerHand.IsPresent
     clearPlayerPiles = $ClearPlayerPiles.IsPresent -or $null -ne $replayStateCards
+    clearRunDeck = $ClearRunDeck.IsPresent
     clearAllPowers = $ClearAllPowers.IsPresent
     verifyPredictionFailureBoundaries = $VerifyPredictionFailureBoundaries.IsPresent
     verifySearchPolicySnapshot = $VerifySearchPolicySnapshot.IsPresent

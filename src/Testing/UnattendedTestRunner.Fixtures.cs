@@ -22,6 +22,18 @@ namespace CombatSolver;
 
 internal sealed partial class UnattendedTestRunner
 {
+    private const int MaxBulkCardInjectionCount = 4096;
+
+    private static void ClearRunDeck(RunState runState, Player player)
+    {
+        CardModel[] cards = player.Deck.Cards.ToArray();
+        player.Deck.Clear(silent: true);
+        foreach (CardModel card in cards)
+            runState.RemoveCard(card);
+        if (player.Deck.Cards.Count != 0)
+            throw new InvalidOperationException("无人测试未能完整清空跑局牌组。");
+    }
+
     private static async Task ApplyRunSnapshotAsync(
         RunState runState,
         Player player,
@@ -52,10 +64,7 @@ internal sealed partial class UnattendedTestRunner
         if (savedPlayer.TryGetProperty("gold", out JsonElement savedGold))
             player.Gold = savedGold.GetInt32();
 
-        CardModel[] startingDeck = player.Deck.Cards.ToArray();
-        player.Deck.Clear(silent: true);
-        foreach (CardModel card in startingDeck)
-            runState.RemoveCard(card);
+        ClearRunDeck(runState, player);
         foreach (JsonElement savedCard in savedPlayer.GetProperty("deck").EnumerateArray())
         {
             CardModel card = runState.LoadCard(ParseSerializableCard(savedCard), player);
@@ -321,8 +330,11 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException($"无人测试不支持注入牌堆 {injection.Pile}。");
         }
-        if (injection.Count is < 1 or > 20)
-            throw new InvalidOperationException($"注入卡牌数量 {injection.Count} 超出 1-20。");
+        if (injection.Count is < 1 or > MaxBulkCardInjectionCount)
+        {
+            throw new InvalidOperationException(
+                $"注入卡牌数量 {injection.Count} 超出 1-{MaxBulkCardInjectionCount}。");
+        }
 
         CardModel canonical = ResolveUnique(ModelDb.AllCards, injection.CardId, "卡牌");
         List<CardModel> cards = [];
@@ -380,8 +392,11 @@ internal sealed partial class UnattendedTestRunner
         Player player,
         UnattendedCardInjection injection)
     {
-        if (injection.Count is < 1 or > 20)
-            throw new InvalidOperationException($"注入跑局卡牌数量 {injection.Count} 超出 1-20。");
+        if (injection.Count is < 1 or > MaxBulkCardInjectionCount)
+        {
+            throw new InvalidOperationException(
+                $"注入跑局卡牌数量 {injection.Count} 超出 1-{MaxBulkCardInjectionCount}。");
+        }
         CardModel canonical = ResolveUnique(ModelDb.AllCards, injection.CardId, "卡牌");
         for (int index = 0; index < injection.Count; index++)
         {

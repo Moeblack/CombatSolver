@@ -118,7 +118,7 @@ foreach ($check in $forkBoundaryChecks) {
 $searchGcPolicyPath = Join-Path $repositoryRoot "src\Runtime\SearchGcPolicy.cs"
 foreach ($gcChainRule in @(
     "return WaitForReclaimChainAsync(_reclaimTask)",
-    "failure == null && _reclaimRequired")) {
+    "failure == null && (_regionExitRequired || _reclaimRequired)")) {
     if (-not (Select-String -LiteralPath $searchGcPolicyPath -SimpleMatch $gcChainRule -Quiet)) {
         $violations.Add("${searchGcPolicyPath}: missing serialized reclaim-chain rule '$gcChainRule'")
     }

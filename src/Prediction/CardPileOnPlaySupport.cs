@@ -1,4 +1,3 @@
-using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
@@ -99,7 +98,7 @@ internal static class CardPileOnPlaySupport
     {
         IReadOnlyList<PredictedCard> shivs = GenerateShivs(simulator, owner, count, upgraded: false);
         foreach (PredictedCard shiv in shivs)
-            CardCmd.Enchant<Inky>(shiv.MutablePreview, 1m);
+            shiv.Enchant(ModelDb.Enchantment<Inky>().ToMutable(), 1m);
     }
 
     internal static IReadOnlyList<PredictedCard> GenerateShivs(

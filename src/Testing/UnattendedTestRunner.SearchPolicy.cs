@@ -1,4 +1,5 @@
 using System.Runtime;
+using System.Runtime.CompilerServices;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Random;
 using MegaCrit.Sts2.Core.Saves;
@@ -148,8 +149,11 @@ internal sealed partial class UnattendedTestRunner
         using CancellationTokenSource deadline = new(TimeSpan.FromSeconds(30));
         using CancellationTokenSource firstSearchCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
-        await SearchGcPolicy.ReclaimIfPendingAsync("unattended_no_gc_budget_transition_setup");
+        await SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_no_gc_budget_transition_setup",
+            forceCollection: true);
         await AssertInSearchReclaimAsync(deadline.Token);
+        await AssertCombatEndReclaimPolicyAsync(deadline.Token);
         SearchGcPolicy.ResetCountersForTesting();
 
         TaskCompletionSource firstSearchEntered = new(
@@ -237,7 +241,9 @@ internal sealed partial class UnattendedTestRunner
                 }
             }
             changedScope?.Dispose();
-            await SearchGcPolicy.ReclaimIfPendingAsync("unattended_no_gc_budget_transition_cleanup");
+            await SearchGcPolicy.ReclaimIfPendingAsync(
+                "unattended_no_gc_budget_transition_cleanup",
+                forceCollection: true);
         }
     }
 
@@ -254,7 +260,386 @@ internal sealed partial class UnattendedTestRunner
             if (signal.ReclaimCount != 1)
                 throw new InvalidOperationException("搜索内存检查点没有完成一次全代回收后继续。");
         }
-        await SearchGcPolicy.ReclaimIfPendingAsync("unattended_in_search_reclaim_cleanup");
+        await SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_in_search_reclaim_cleanup",
+            forceCollection: true);
+    }
+
+    private static async Task AssertCombatEndReclaimPolicyAsync(
+        CancellationToken cancellationToken)
+    {
+        const long budgetBytes = 1_000_000_000L;
+        SearchGcPolicy.ResetCountersForTesting();
+        SearchGcPolicy.ReportCombatLifecycleAllocation(
+            1024 * 1024,
+            "unattended_low_allocation_root_snapshot");
+        IDisposable lowAllocationScope = SearchGcPolicy.EnterLowLatencySearch(
+            budgetBytes,
+            new SearchMemoryPressureSignal(),
+            cancellationToken);
+        Task earlyRegionExit = SearchGcPolicy.ExitNoGcRegionWhenSearchesIdleAsync(
+            "unattended_low_allocation_combat_end");
+        if (earlyRegionExit.IsCompleted)
+        {
+            lowAllocationScope.Dispose();
+            throw new InvalidOperationException("活跃搜索尚未退出时提前结束了 No-GC 区域。");
+        }
+        lowAllocationScope.Dispose();
+        await earlyRegionExit.WaitAsync(cancellationToken);
+        await SearchGcPolicy.ReclaimIfPendingAsync("unattended_low_allocation_combat_end");
+        if (SearchGcPolicy.NoGcRegionExitWithoutCollectionCountForTesting != 1
+            || SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 0
+            || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 0
+            || GCSettings.LatencyMode == GCLatencyMode.NoGCRegion)
+        {
+            throw new InvalidOperationException(
+                $"低分配战斗结束没有只退出 No-GC 区域：" +
+                $"region_exits={SearchGcPolicy.NoGcRegionExitWithoutCollectionCountForTesting} " +
+                $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting} " +
+                $"latency={GCSettings.LatencyMode}。");
+        }
+        await AssertReferenceReleaseBarrierAsync(budgetBytes, cancellationToken);
+
+        SearchGcPolicy.ResetCountersForTesting();
+        long rootAllocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        WeakReference transientRoot = AllocateTransientSearchGraphForGcPolicyTest();
+        long rootAllocated = GC.GetTotalAllocatedBytes(precise: true) - rootAllocatedBefore;
+        SearchGcPolicy.ReportCombatLifecycleAllocation(
+            rootAllocated,
+            "unattended_high_allocation_root_snapshot");
+        if (rootAllocated < 270L * 1024 * 1024)
+        {
+            throw new InvalidOperationException(
+                $"战斗根快照回收门禁只产生了 {rootAllocated} bytes，未越过 256 MiB 阈值。");
+        }
+        await SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_high_allocation_root_snapshot").WaitAsync(cancellationToken);
+        long rootManagedLiveReleased =
+            SearchGcPolicy.LastBackgroundReclaimManagedLiveBeforeForTesting
+            - SearchGcPolicy.LastBackgroundReclaimManagedLiveAfterForTesting;
+        if (SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 1
+            || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 1
+            || transientRoot.IsAlive)
+        {
+            throw new InvalidOperationException(
+                $"No-GC 区域外的战斗根快照压力没有完成一次有效 Gen2：" +
+                $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting} " +
+                $"managed_live_released={rootManagedLiveReleased}。");
+        }
+
+        SearchGcPolicy.ResetCountersForTesting();
+        long allocatedBefore = GC.GetTotalAllocatedBytes(precise: true);
+        WeakReference transientAllocation;
+        using (SearchGcPolicy.EnterLowLatencySearch(
+                   budgetBytes,
+                   new SearchMemoryPressureSignal(),
+                   cancellationToken))
+        {
+            transientAllocation = AllocateTransientSearchGraphForGcPolicyTest();
+        }
+        long allocated = GC.GetTotalAllocatedBytes(precise: true) - allocatedBefore;
+        if (allocated < 270L * 1024 * 1024)
+        {
+            throw new InvalidOperationException(
+                $"重分配回收门禁只产生了 {allocated} bytes，未越过 256 MiB 阈值。");
+        }
+        Task reclaim = SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_high_allocation_combat_end");
+        Task joined = SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_high_allocation_combat_end_join");
+        await Task.WhenAll(reclaim, joined).WaitAsync(cancellationToken);
+        long managedLiveReleased =
+            SearchGcPolicy.LastBackgroundReclaimManagedLiveBeforeForTesting
+            - SearchGcPolicy.LastBackgroundReclaimManagedLiveAfterForTesting;
+        if (SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 1
+            || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 1
+            || SearchGcPolicy.BackgroundReclaimJoinCountForTesting != 1
+            || transientAllocation.IsAlive)
+        {
+            throw new InvalidOperationException(
+                $"重分配战斗结束没有完成恰好一次有效 Gen2：" +
+                $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting} " +
+                $"joins={SearchGcPolicy.BackgroundReclaimJoinCountForTesting} " +
+                $"managed_live_released={managedLiveReleased}。");
+        }
+        await AssertExhaustionReclaimReferenceCoverageAsync(cancellationToken);
+    }
+
+    private static async Task AssertExhaustionReclaimReferenceCoverageAsync(
+        CancellationToken cancellationToken)
+    {
+        await AssertExhaustionReclaimReferenceCoverageTimingAsync(
+            pauseAfterCoverageCapture: false,
+            expectedGeneration2Collections: 1,
+            cancellationToken);
+        await AssertExhaustionReclaimReferenceCoverageTimingAsync(
+            pauseAfterCoverageCapture: true,
+            expectedGeneration2Collections: 2,
+            cancellationToken);
+    }
+
+    private static async Task AssertExhaustionReclaimReferenceCoverageTimingAsync(
+        bool pauseAfterCoverageCapture,
+        int expectedGeneration2Collections,
+        CancellationToken cancellationToken)
+    {
+        SearchGcPolicy.ResetCountersForTesting();
+        TaskCompletionSource referencesReleased = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        (WeakReference graph, Task release) = CreateHeldGraphForGcPolicyTest(
+            referencesReleased.Task);
+        Task earlyReclaim = Task.CompletedTask;
+        Task cleanup = Task.CompletedTask;
+        try
+        {
+            long releaseEpochBefore = SearchGcPolicy.ReferenceReleaseEpochForTesting;
+            (Task Reclaim, Task CoverageBoundaryReached) reclaimRequest =
+                SearchGcPolicy.RequestNoGcExhaustionReclaimForTesting(
+                    pauseAfterCoverageCapture);
+            earlyReclaim = reclaimRequest.Reclaim;
+            Task coverageBoundaryReached = reclaimRequest.CoverageBoundaryReached;
+            Task firstCompleted = await Task.WhenAny(
+                    coverageBoundaryReached,
+                    earlyReclaim)
+                .WaitAsync(cancellationToken);
+            if (ReferenceEquals(firstCompleted, earlyReclaim))
+            {
+                await earlyReclaim;
+                throw new InvalidOperationException(
+                    "exhaustion 回收没有停在预期的 Gen2 覆盖边界。");
+            }
+            await coverageBoundaryReached;
+            if (!graph.IsAlive)
+            {
+                throw new InvalidOperationException(
+                    "exhaustion 测试图在引用释放前已不可达。");
+            }
+
+            int referenceCallbackCount = 0;
+            string timing = pauseAfterCoverageCapture
+                ? "after_coverage_capture"
+                : "before_coverage_capture";
+            cleanup = SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+                $"unattended_exhaustion_reference_coverage_{timing}",
+                forceCollection: true,
+                includeCombatLifecyclePressure: false,
+                release,
+                () => Interlocked.Increment(ref referenceCallbackCount));
+            if (cleanup.IsCompleted)
+                throw new InvalidOperationException("exhaustion 引用释放门没有等待测试图解绑。");
+            referencesReleased.SetResult();
+            while (SearchGcPolicy.ReferenceReleaseEpochForTesting == releaseEpochBefore)
+                await Task.Delay(10, cancellationToken);
+            if (SearchGcPolicy.ReferenceReleaseEpochForTesting
+                != checked(releaseEpochBefore + 1))
+            {
+                throw new InvalidOperationException(
+                    "exhaustion 覆盖边界测试观察到了意外的并发引用释放。");
+            }
+            SearchGcPolicy.ResumeGeneration2CoverageForTesting();
+            await Task.WhenAll(earlyReclaim, cleanup).WaitAsync(cancellationToken);
+            await SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+                    $"unattended_exhaustion_reference_coverage_{timing}_settled",
+                    forceCollection: false,
+                    includeCombatLifecyclePressure: false,
+                    Task.CompletedTask,
+                    static () => { })
+                .WaitAsync(cancellationToken);
+            int expectedJoinCount = pauseAfterCoverageCapture ? 0 : 1;
+            if (referenceCallbackCount != 1
+                || SearchGcPolicy.ReferenceReleaseEpochForTesting
+                    != checked(releaseEpochBefore + 2)
+                || SearchGcPolicy.BackgroundReclaimStartedCountForTesting
+                    != expectedGeneration2Collections
+                || SearchGcPolicy.BackgroundGen2CompletedCountForTesting
+                    != expectedGeneration2Collections
+                || SearchGcPolicy.BackgroundReclaimJoinCountForTesting != expectedJoinCount
+                || graph.IsAlive)
+            {
+                throw new InvalidOperationException(
+                    $"exhaustion 引用释放覆盖时序不正确：timing={timing} " +
+                    $"callback={referenceCallbackCount} " +
+                    $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                    $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting} " +
+                    $"joins={SearchGcPolicy.BackgroundReclaimJoinCountForTesting} " +
+                    $"graph_alive={graph.IsAlive}。");
+            }
+        }
+        finally
+        {
+            referencesReleased.TrySetResult();
+            SearchGcPolicy.ResumeGeneration2CoverageForTesting();
+            await Task.WhenAll(earlyReclaim, cleanup)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static (WeakReference Reference, Task Release) CreateHeldGraphForGcPolicyTest(
+        Task releaseGate)
+    {
+        byte[][] graph = new byte[128][];
+        for (int index = 0; index < graph.Length; index++)
+        {
+            graph[index] = new byte[32 * 1024];
+            graph[index][0] = unchecked((byte)index);
+        }
+        StrongBox<object?> holder = new(graph);
+        WeakReference reference = new(graph);
+        Task release = ReleaseHeldGraphForGcPolicyTestAsync(holder, releaseGate);
+        GC.KeepAlive(graph);
+        return (reference, release);
+    }
+
+    private static async Task ReleaseHeldGraphForGcPolicyTestAsync(
+        StrongBox<object?> holder,
+        Task releaseGate)
+    {
+        await releaseGate;
+        holder.Value = null;
+    }
+
+    private static async Task AssertReferenceReleaseBarrierAsync(
+        long budgetBytes,
+        CancellationToken cancellationToken)
+    {
+        IDisposable activeScope = SearchGcPolicy.EnterLowLatencySearch(
+            budgetBytes,
+            new SearchMemoryPressureSignal(),
+            cancellationToken);
+        TaskCompletionSource referencesReleased = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Task regionExit = SearchGcPolicy.ExitNoGcRegionWhenSearchesIdleAsync(
+            "unattended_reference_barrier_region_exit");
+        int referenceCallbackCount = 0;
+        Task cleanup = SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+            "unattended_reference_barrier",
+            forceCollection: false,
+            includeCombatLifecyclePressure: false,
+            Task.WhenAll(regionExit, referencesReleased.Task),
+            () => Interlocked.Increment(ref referenceCallbackCount));
+        Task rootCaptureBarrier = SearchGcPolicy.CaptureRootSnapshotBarrier();
+        if (rootCaptureBarrier.IsCompleted)
+            throw new InvalidOperationException("根快照入口没有观察到旧战斗引用释放屏障。");
+
+        TaskCompletionSource entrantStarted = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource entrantEntered = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Task entrant = Task.Run(() =>
+        {
+            entrantStarted.TrySetResult();
+            using IDisposable scope = SearchGcPolicy.EnterLowLatencySearch(
+                budgetBytes,
+                new SearchMemoryPressureSignal(),
+                cancellationToken);
+            entrantEntered.TrySetResult();
+        }, cancellationToken);
+        try
+        {
+            await entrantStarted.Task.WaitAsync(cancellationToken);
+            await Task.Delay(50, cancellationToken);
+            if (entrantEntered.Task.IsCompleted)
+                throw new InvalidOperationException("新搜索在旧战斗引用释放屏障完成前进入了 GC 区域。");
+
+            activeScope.Dispose();
+            await regionExit.WaitAsync(cancellationToken);
+            if (cleanup.IsCompleted)
+                throw new InvalidOperationException("forensic/callback 引用尚未释放时提前完成了回收屏障。");
+            referencesReleased.SetResult();
+            await cleanup.WaitAsync(cancellationToken);
+            await rootCaptureBarrier.WaitAsync(cancellationToken);
+            await entrant.WaitAsync(cancellationToken);
+            if (referenceCallbackCount != 1
+                || !rootCaptureBarrier.IsCompletedSuccessfully
+                || !entrantEntered.Task.IsCompletedSuccessfully)
+            {
+                throw new InvalidOperationException(
+                    $"引用释放屏障没有按序放行新搜索：callback={referenceCallbackCount} " +
+                    $"root_capture={rootCaptureBarrier.Status} entrant={entrantEntered.Task.Status}。");
+            }
+        }
+        finally
+        {
+            activeScope.Dispose();
+            referencesReleased.TrySetResult();
+            await cleanup.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await entrant.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await SearchGcPolicy.ExitNoGcRegionWhenSearchesIdleAsync(
+                    "unattended_reference_barrier_cleanup")
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+
+        int suppressedReferenceCallbacks = 0;
+        await SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+            "unattended_reference_barrier_fault",
+            forceCollection: false,
+            includeCombatLifecyclePressure: false,
+            Task.FromException(new InvalidOperationException("expected reference fault")),
+            () => Interlocked.Increment(ref suppressedReferenceCallbacks));
+        using CancellationTokenSource canceled = new();
+        canceled.Cancel();
+        await SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+            "unattended_reference_barrier_cancel",
+            forceCollection: false,
+            includeCombatLifecyclePressure: false,
+            Task.FromCanceled(canceled.Token),
+            () => Interlocked.Increment(ref suppressedReferenceCallbacks));
+        if (suppressedReferenceCallbacks != 2)
+            throw new InvalidOperationException("fault/cancel 引用任务使后续 GC 屏障中毒。");
+
+        List<int> serializedCallbacks = [];
+        TaskCompletionSource firstReferences = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource secondReferences = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Task firstCleanup = SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+            "unattended_reference_barrier_first",
+            forceCollection: false,
+            includeCombatLifecyclePressure: false,
+            firstReferences.Task,
+            () => serializedCallbacks.Add(1));
+        Task secondCleanup = SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+            "unattended_reference_barrier_second",
+            forceCollection: false,
+            includeCombatLifecyclePressure: false,
+            secondReferences.Task,
+            () => serializedCallbacks.Add(2));
+        try
+        {
+            secondReferences.SetResult();
+            await Task.Delay(20, cancellationToken);
+            if (secondCleanup.IsCompleted)
+                throw new InvalidOperationException("后登记的跨战斗屏障越过了前一屏障。");
+            firstReferences.SetResult();
+            await Task.WhenAll(firstCleanup, secondCleanup).WaitAsync(cancellationToken);
+            if (!serializedCallbacks.SequenceEqual([1, 2]))
+                throw new InvalidOperationException("跨战斗引用释放屏障没有保持 FIFO 顺序。");
+        }
+        finally
+        {
+            firstReferences.TrySetResult();
+            secondReferences.TrySetResult();
+            await Task.WhenAll(firstCleanup, secondCleanup)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference AllocateTransientSearchGraphForGcPolicyTest()
+    {
+        byte[][] graph = new byte[9_000][];
+        for (int index = 0; index < graph.Length; index++)
+        {
+            graph[index] = new byte[32 * 1024];
+            graph[index][0] = unchecked((byte)index);
+        }
+        WeakReference reference = new(graph);
+        GC.KeepAlive(graph);
+        return reference;
     }
 
     private static void AssertEquivalentSearchResults(

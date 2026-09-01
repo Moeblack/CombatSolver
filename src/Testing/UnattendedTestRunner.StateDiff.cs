@@ -227,11 +227,22 @@ internal sealed partial class UnattendedTestRunner
         => powers
             .Where(static power => power.Amount != 0)
             .SelectMany(power => power.DynamicVars.Select(dynamicVar =>
-                $"{power.Id.Entry}.{dynamicVar.Key}={dynamicVar.Value.BaseValue}" +
-                (dynamicVar.Value is StringVar stringVar ? $":{stringVar.StringValue}" : string.Empty)))
+                NormalizePowerState(power, dynamicVar.Key, dynamicVar.Value)))
             .GroupBy(static state => state, StringComparer.Ordinal)
             .OrderBy(static group => group.Key, StringComparer.Ordinal)
             .ToDictionary(static group => group.Key, static group => group.Count(), StringComparer.Ordinal);
+
+    private static string NormalizePowerState(PowerModel power, string fieldName, DynamicVar value)
+    {
+        string state = $"{power.Id.Entry}.{fieldName}={value.BaseValue}";
+        if (value is not StringVar stringVar)
+            return state;
+
+        return SemanticStateFieldPolicy.Classify(power, fieldName, value) ==
+            SemanticStateFieldRole.PresentationOnly
+                ? state
+                : $"{state}:{stringVar.StringValue}";
+    }
 
     private static Dictionary<string, int> NormalizeActualPiles(Player player)
     {

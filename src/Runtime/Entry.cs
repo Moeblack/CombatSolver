@@ -88,13 +88,17 @@ public static class Entry
             return;
         int turn = LocalContext.GetMe(state)?.PlayerCombatState?.TurnNumber ?? -1;
         Logger.Info($"[CombatSolver/Test] AUTO_SEARCH_DEFERRED turn={turn} frames=3");
-        Task deferredSearch = RequestAutoSearchAfterVisualSetup(state, turn);
+        Task deferredSearch = SolverController.StartCombatDeferredOperation(
+            token => RequestAutoSearchAfterVisualSetup(state, turn, token));
         if (UnattendedAsyncActivityTracker.IsRequestActive)
             deferredSearch = UnattendedAsyncActivityTracker.Track(deferredSearch);
         TaskHelper.RunSafely(deferredSearch);
     }
 
-    private static async Task RequestAutoSearchAfterVisualSetup(CombatState state, int turn)
+    private static async Task RequestAutoSearchAfterVisualSetup(
+        CombatState state,
+        int turn,
+        CancellationToken token)
     {
         NGame? host = NGame.Instance;
         if (host == null)
@@ -102,16 +106,18 @@ public static class Entry
         for (int frame = 0; frame < 60; frame++)
         {
             await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
+            token.ThrowIfCancellationRequested();
             if (frame >= 2 && LocalContext.GetMe(state)?.PlayerCombatState?.Phase == PlayerTurnPhase.Play)
                 break;
         }
 
-        await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        await RunManager.Instance.ActionExecutor.FinishedExecutingActions().WaitAsync(token);
         await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
-        await UnattendedTestRunner.ApplyScheduledStateDriftAsync(state, turn);
+        token.ThrowIfCancellationRequested();
+        await UnattendedTestRunner.ApplyScheduledStateDriftAsync(state, turn).WaitAsync(token);
 
         if (SolverController.FullAutoEnabled)
-            await SolverController.WaitForTurnStartDeploymentDelayAsync(host, turn);
+            await SolverController.WaitForTurnStartDeploymentDelayAsync(host, turn, token);
 
         if (!Enabled
             || SolverController.SolverDisabled
