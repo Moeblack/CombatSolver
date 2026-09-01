@@ -621,6 +621,24 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("Smart 药水补查没有按每瓶 9 HP 限制多药层数。");
         }
+        if (CombatSearchCoordinator.IsInterimResourceTradeImprovementForTesting(
+                candidateHpLost: 2,
+                candidatePotionCost: 9,
+                currentHpLost: 10,
+                currentPotionCost: 0)
+            || !CombatSearchCoordinator.IsInterimResourceTradeImprovementForTesting(
+                candidateHpLost: 1,
+                candidatePotionCost: 9,
+                currentHpLost: 10,
+                currentPotionCost: 0)
+            || CombatSearchCoordinator.IsInterimResourceTradeImprovementForTesting(
+                candidateHpLost: 10,
+                candidatePotionCost: 0,
+                currentHpLost: 10,
+                currentPotionCost: 0))
+        {
+            throw new InvalidOperationException("搜索中间路线没有按每瓶 9 HP 成本保持严格递增优。");
+        }
         if (CombatBeamSolver.DescribePotionProgressPhase(
                 displayNames,
                 SolverPotionPolicy.Disabled,

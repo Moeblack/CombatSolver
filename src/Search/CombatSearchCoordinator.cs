@@ -23,7 +23,7 @@ internal static class CombatSearchCoordinator
                 || result.Snapshot.PlayerDead
                 || result.Snapshot.ProjectedPlayerHp <= 0
                 || currentAdoptableResult != null
-                    && !IsBetterInterimResult(result, currentAdoptableResult))
+                    && !IsBetterInterimResult(root, result, currentAdoptableResult))
             {
                 return;
             }
@@ -1192,6 +1192,7 @@ internal static class CombatSearchCoordinator
     }
 
     private static bool IsBetterInterimResult(
+        CombatRootSnapshot root,
         SolverResult candidate,
         SolverResult current)
     {
@@ -1205,13 +1206,41 @@ internal static class CombatSearchCoordinator
             return candidateWon;
         if (candidate.OutstandingStolenResource != current.OutstandingStolenResource)
             return candidate.OutstandingStolenResource < current.OutstandingStolenResource;
-        if (candidate.ProjectedBattleHpLost != current.ProjectedBattleHpLost)
-            return candidate.ProjectedBattleHpLost < current.ProjectedBattleHpLost;
+        int candidatePotionCost = SmartPotionHpRequired(root, candidate);
+        int currentPotionCost = SmartPotionHpRequired(root, current);
+        if (IsInterimResourceTradeImprovementForTesting(
+                candidate.ProjectedBattleHpLost,
+                candidatePotionCost,
+                current.ProjectedBattleHpLost,
+                currentPotionCost))
+        {
+            return true;
+        }
+        if (IsInterimResourceTradeImprovementForTesting(
+                current.ProjectedBattleHpLost,
+                currentPotionCost,
+                candidate.ProjectedBattleHpLost,
+                candidatePotionCost))
+        {
+            return false;
+        }
         if (candidate.ProjectedBattlePotionCount != current.ProjectedBattlePotionCount)
             return candidate.ProjectedBattlePotionCount < current.ProjectedBattlePotionCount;
         if (candidate.Snapshot.EnemyHp != current.Snapshot.EnemyHp)
             return candidate.Snapshot.EnemyHp < current.Snapshot.EnemyHp;
         return candidate.BestNode.Score > current.BestNode.Score;
+    }
+
+    internal static bool IsInterimResourceTradeImprovementForTesting(
+        int candidateHpLost,
+        int candidatePotionCost,
+        int currentHpLost,
+        int currentPotionCost)
+    {
+        int candidateBurden = checked(candidateHpLost + candidatePotionCost);
+        int currentBurden = checked(currentHpLost + currentPotionCost);
+        return candidateBurden < currentBurden
+            || candidateBurden == currentBurden && candidateHpLost < currentHpLost;
     }
 
     private static bool IsBetterCompletedResult(
