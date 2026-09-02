@@ -12,6 +12,7 @@ using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Events;
 using MegaCrit.Sts2.Core.Models.Orbs;
 using MegaCrit.Sts2.Core.Models.Powers;
+using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
@@ -238,7 +239,12 @@ internal sealed partial class CombatBeamSolver
             simulator,
             combat,
             playerState,
-            _player.Creature);
+            _player.Creature)
+            + VoidFormOpportunityValue(
+                simulator,
+                combat,
+                playerState,
+                _player.Creature);
         int summonNextTurn = combat.GetAmount<SummonNextTurnPower>(_player.Creature);
         int summonNextTurnValue = summonNextTurn == 0
             ? 0
@@ -456,6 +462,63 @@ internal sealed partial class CombatBeamSolver
         }
         return (best[energyCapacity, starCapacity], zeroCostPlayableCount);
     }
+
+    /// <summary>
+    /// Void Form waives the cost of the first N cards played each turn. Unlike the free-attack powers it is not
+    /// limited to one card type and it waives stars as well as energy, so the slots are worth what the most
+    /// expensive cards in hand would have cost - not what the whole hand would have cost.
+    /// </summary>
+    /// <remarks>
+    /// Without this the hand looks strictly cheaper than it is. The cost hook only asks whether any free slot is
+    /// left, not which card would occupy it, so while the counter is below the amount every card in hand reports
+    /// zero and <see cref="CalculateReachableHandPotential"/> concludes the entire hand is affordable.
+    ///
+    /// X-cost cards are excluded on purpose. <c>GetStarCostWithModifiers</c> and its energy counterpart return the
+    /// whole resource pool for them before the cost-modifier hook runs, so an X card still spends everything
+    /// inside the free window: the slot is consumed and buys nothing. Counting it here would recreate the same
+    /// over-statement one card at a time.
+    /// </remarks>
+    private static int VoidFormOpportunityValue(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        SimPlayerCombatState playerState,
+        Creature owner)
+    {
+        if (combat.GetPower<VoidFormPower>(owner) is not { } power)
+            return 0;
+        // Peek so that merely scoring a state does not make every later fork copy the counter.
+        int freeUses = power.Amount
+            - simulator.StateStore.Peek(power, () => new VoidFormPredictionState(power)).CardsPlayedThisTurn;
+        if (freeUses <= 0)
+            return 0;
+
+        return playerState.Hand.Cards
+            .Where(card => !card.Preview.EnergyCost.CostsX
+                && !card.Preview.HasStarCostX
+                && combat.CanPlayCard(simulator, card))
+            .Select(card =>
+            {
+                int normalEnergy = Math.Max(
+                    0,
+                    (int)Math.Ceiling((double)card.Preview.EnergyCost.GetWithModifiers(CostModifiers.Local)));
+                int currentEnergy = Math.Max(0, card.GetEnergyCostWithModifiers(simulator, playerState));
+                int normalStars = Math.Max(0, card.Preview.CurrentStarCost);
+                int currentStars = Math.Max(0, card.GetStarCostWithModifiers(simulator, playerState));
+                return Math.Max(0, normalEnergy - currentEnergy) * 16
+                    + Math.Max(0, normalStars - currentStars) * 8
+                    + Math.Min(16, Math.Max(1, (int)Math.Ceiling(CardChoiceSupport.CardValue(card.Preview))));
+            })
+            .OrderDescending()
+            .Take(freeUses)
+            .Sum();
+    }
+
+    internal static int CaptureVoidFormOpportunityValueForTesting(
+        CombatPredictionSimulator simulator,
+        SimulatedCombatState combat,
+        SimPlayerCombatState playerState,
+        Creature owner)
+        => VoidFormOpportunityValue(simulator, combat, playerState, owner);
 
     private static int FreeCardOpportunityValue(
         CombatPredictionSimulator simulator,

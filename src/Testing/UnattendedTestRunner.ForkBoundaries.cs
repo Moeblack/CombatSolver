@@ -49,6 +49,7 @@ internal sealed partial class UnattendedTestRunner
         AssertBeforeCardPlayedPowerConsumptionCommits(combat, player);
         AssertPlayerPowerHooksPrecedeCombatCards(combat, player);
         AssertNestedVoidFormRequestsTurnEnd(combat, player);
+        AssertVoidFormOpportunityUsesAreFinite(combat, player);
         AssertKnowledgeDemonCurseStaysOutOfCardChoiceCursor();
         AssertExistingPilePotionChoiceReplaysAcrossFork(combat, player);
         AssertGeneratedCardCreatorDrivesSupermassive(combat, player);
@@ -457,6 +458,43 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("横祸自动打出虚空形态后没有产生一次性结束回合请求。");
         }
         _ = simulator.Fork();
+    }
+
+    private static void AssertVoidFormOpportunityUsesAreFinite(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(player);
+        simulator.RemoveFromCombat(playerState.Hand.Cards.ToArray());
+        for (int index = 0; index < 2; index++)
+        {
+            simulator.AddGeneratedCardToCombat(
+                PredictedCard.Create(ModelDb.Card<DefendDefect>(), player),
+                PileType.Hand,
+                player,
+                resultKind: CardGenerationResultKind.Fixed);
+        }
+        simulatedCombat.Apply<VoidFormPower>(player.Creature, 1, player.Creature);
+        VoidFormPower power = simulatedCombat.GetPower<VoidFormPower>(player.Creature)
+            ?? throw new InvalidOperationException("虚空形态机会价值测试没有建立 Power。");
+        int oneFreeUse = CombatBeamSolver.CaptureVoidFormOpportunityValueForTesting(
+            simulator,
+            simulatedCombat,
+            playerState,
+            player.Creature);
+        simulatedCombat.SetPowerAmount(power, 2);
+        int twoFreeUses = CombatBeamSolver.CaptureVoidFormOpportunityValueForTesting(
+            simulator,
+            simulatedCombat,
+            playerState,
+            player.Creature);
+        if (oneFreeUse <= 0 || twoFreeUses != oneFreeUse * 2)
+        {
+            throw new InvalidOperationException(
+                $"虚空形态免费格没有按剩余次数计价：one={oneFreeUse} two={twoFreeUses}。");
+        }
     }
 
     private static void AssertExistingPilePotionChoiceReplaysAcrossFork(
