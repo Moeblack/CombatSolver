@@ -1191,6 +1191,7 @@ internal sealed partial class UnattendedTestRunner
         AddMismatch(mismatches, "death_turn", expected.DeathTurn, actual.DeathTurn);
         AddMismatch(mismatches, "only_death_routes", expected.OnlyDeathRoutesFound, actual.OnlyDeathRoutesFound);
         AddMismatch(mismatches, "act_ending_boss", expected.IsActEndingBoss, actual.IsActEndingBoss);
+        AddMismatch(mismatches, "boss_hp_relief", expected.BossHpRelief, actual.BossHpRelief);
 
         AddMismatch(mismatches, "snapshot.risk", expected.Snapshot.HasRisk, actual.Snapshot.HasRisk);
         AddMismatch(mismatches, "snapshot.player_dead", expected.Snapshot.PlayerDead, actual.Snapshot.PlayerDead);

@@ -253,12 +253,32 @@ internal sealed partial class CombatBeamSolver
     }
 
     private int SoldHpThreshold()
+        => ResolveSoldHpThreshold(
+            root.InitialPlayerMaxHp,
+            root.EncounterRoomType,
+            _bossHpRelief,
+            _theftPolicy);
+
+    internal static int ResolveSoldHpThreshold(
+        int initialPlayerMaxHp,
+        RoomType? encounterRoomType,
+        BossHpRelief bossHpRelief,
+        SolverTheftPolicy? theftPolicy)
     {
-        if (_theftPolicy == SolverTheftPolicy.PreserveResources)
-            return root.InitialPlayerMaxHp;
-        if (_isActEndingBoss)
-            return Math.Max(0, root.InitialPlayerMaxHp - 1);
-        return root.EncounterRoomType switch
+        if (theftPolicy == SolverTheftPolicy.PreserveResources)
+            return initialPlayerMaxHp;
+        int survivalLimit = Math.Max(0, initialPlayerMaxHp - 1);
+        if (bossHpRelief == BossHpRelief.RunEnding)
+            return survivalLimit;
+        if (bossHpRelief == BossHpRelief.ActClearHeal)
+        {
+            return Math.Min(
+                survivalLimit,
+                ActEndingBossPolicy.RawHpRequiredForPersistentValue(
+                    SolverWeights.BossSoldHpThreshold,
+                    bossHpRelief));
+        }
+        return encounterRoomType switch
         {
             RoomType.Boss => SolverWeights.BossSoldHpThreshold,
             RoomType.Elite => SolverWeights.EliteSoldHpThreshold,

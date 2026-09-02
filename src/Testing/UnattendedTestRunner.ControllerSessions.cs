@@ -5,6 +5,7 @@ using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Rooms;
 
 namespace CombatSolver;
 
@@ -679,35 +680,67 @@ internal sealed partial class UnattendedTestRunner
         int expectedMinimumPotionCost = PotionUsePolicy.StrategicHpCost(
             potion.Potion,
             root.HasRenewablePotionShapedRock);
+        int expectedMinimumPotionHpSaved = PotionUsePolicy.SmartRequiredHpSaved(
+            expectedMinimumPotionCost,
+            root.BossHpRelief);
         if (root.MinimumSearchablePotionStrategicCost != expectedMinimumPotionCost
             || CombatSearchCoordinator.CanAnySmartPotionQualify(
                 root,
                 policy,
                 potionFreeWon: true,
-                potionFreeHpDeficit: Math.Max(0, expectedMinimumPotionCost - 1))
+                potionFreeHpDeficit: Math.Max(0, expectedMinimumPotionHpSaved - 1))
             || !CombatSearchCoordinator.CanAnySmartPotionQualify(
                 root,
                 policy,
                 potionFreeWon: true,
-                potionFreeHpDeficit: expectedMinimumPotionCost))
+                potionFreeHpDeficit: expectedMinimumPotionHpSaved))
         {
             throw new InvalidOperationException("Smart 药水补查没有按最大可能省血收束。");
         }
+        if (PotionUsePolicy.SmartRequiredHpSaved(
+                SolverWeights.PotionMinimumHpSaved,
+                BossHpRelief.ActClearHeal) != 45
+            || CombatBeamSolver.ResolveSoldHpThreshold(
+                initialPlayerMaxHp: 80,
+                RoomType.Boss,
+                BossHpRelief.ActClearHeal,
+                theftPolicy: null) != 75)
+        {
+            throw new InvalidOperationException("跨幕回复没有按 80% 同步缩放药水与卖血阈值。");
+        }
         if (root.ZeroCostSearchablePotionCount == 0 && root.SearchablePotionCount >= 3
             && (CombatSearchCoordinator.MaximumSmartPotionUses(
-                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 8) != 0
+                    root,
+                    policy,
+                    potionFreeWon: true,
+                    potionFreeHpDeficit: expectedMinimumPotionHpSaved - 1) != 0
                 || CombatSearchCoordinator.MaximumSmartPotionUses(
-                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 9) != 1
+                    root,
+                    policy,
+                    potionFreeWon: true,
+                    potionFreeHpDeficit: expectedMinimumPotionHpSaved) != 1
                 || CombatSearchCoordinator.MaximumSmartPotionUses(
-                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 17) != 1
+                    root,
+                    policy,
+                    potionFreeWon: true,
+                    potionFreeHpDeficit: expectedMinimumPotionHpSaved * 2 - 1) != 1
                 || CombatSearchCoordinator.MaximumSmartPotionUses(
-                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 18) != 2
+                    root,
+                    policy,
+                    potionFreeWon: true,
+                    potionFreeHpDeficit: expectedMinimumPotionHpSaved * 2) != 2
                 || CombatSearchCoordinator.MaximumSmartPotionUses(
-                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 26) != 2
+                    root,
+                    policy,
+                    potionFreeWon: true,
+                    potionFreeHpDeficit: expectedMinimumPotionHpSaved * 3 - 1) != 2
                 || CombatSearchCoordinator.MaximumSmartPotionUses(
-                    root, policy, potionFreeWon: true, potionFreeHpDeficit: 27) != 3))
+                    root,
+                    policy,
+                    potionFreeWon: true,
+                    potionFreeHpDeficit: expectedMinimumPotionHpSaved * 3) != 3))
         {
-            throw new InvalidOperationException("Smart 药水补查没有按每瓶 9 HP 限制多药层数。");
+            throw new InvalidOperationException("Smart 药水补查没有按当前战斗的药水价值限制多药层数。");
         }
         if (searchablePotions.Length >= 2)
         {

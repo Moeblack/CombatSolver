@@ -12,6 +12,7 @@
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
+| `PR21-BOSS-HP-RELIEF-0254` | 通过（第一/二幕 Boss、第三幕第二 Boss，DOP4） | 第一、二幕分类为 `ActClearHeal`，普通药按 `45 HP/瓶` 开梯度，Boss 卖血阈值为 `75`；第三幕第二 Boss 分类为 `RunEnding`，血量只保留存活边界。runId `444c43b31b3745ef9d94758b2ed79d96`、`4cb4e5936f9b45a09b1ea4ba3091913d`、`da035809ed9243cc850b97085415b3af`。 | 2026-09-02 |
 | `PR30-VOID-FORM-SCARCITY` | 通过（合并态 Fork 边界、DOP4） | 两张同成本牌下，虚空形态一个剩余免费格只计一张的机会价值，两个免费格精确计为两倍；PR #27 的奥斯蒂未来价值同时保留。具体玩家实战选牌未稳定复现。runId `aaaa1a2b47924f8b8774a1b6df0b017c`。 | 2026-09-02 |
 | `PR29-KNOWLEDGE-CURSOR` | 通过（Fork 边界、DOP4） | 强制结束回合的出牌回放中，知识恶魔诅咒不进入卡牌选择游标；普通动作选择与普通回合选择仍保留并接受消费校验。runId `bb84ece61ac7453e8befa2bb37220f86`。 | 2026-09-02 |
 | `PR27-MERGE-FORK-PARALLEL` | 通过（合并态 Fork 边界、DOP4） | PR #27 的低分配状态、roster、缓存与分支所有权断言通过，同时保留 `0.25.3` 的选牌、复活、自动出牌历史和球死亡召唤断言；结构门禁 `REFACTOR_BOUNDARIES_OK search_files=59`。runId `a1747125352741efa72ec01a2ae64c4a`。 | 2026-09-02 |

@@ -122,6 +122,7 @@ internal sealed class UnattendedTestRequest
     public int? ExpectedInitialDeathTurnAtLeast { get; init; }
     public int? ExpectedInitialFinalEnemyHpAtMost { get; init; }
     public bool? ExpectedInitialActEndingBoss { get; init; }
+    public BossHpRelief? ExpectedInitialBossHpRelief { get; init; }
     public string? ExpectedInitialPlannedChoiceCardId { get; init; }
     public int? ExpectedInitialTurnStartChoiceTurn { get; init; }
     public string? ExpectedInitialTurnStartChoiceSourceId { get; init; }

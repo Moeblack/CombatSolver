@@ -12,7 +12,7 @@ internal enum BossHpRelief
     /// <summary>Normal fight: HP carries straight into the next one and is weighted in full.</summary>
     None,
 
-    /// <summary>Clearing the act restores most of the damage taken, so HP spent here is largely refunded.</summary>
+    /// <summary>Clearing acts one and two restores 80% of the damage taken.</summary>
     ActClearHeal,
 
     /// <summary>Nothing follows this fight, so only surviving it matters.</summary>
@@ -21,6 +21,20 @@ internal enum BossHpRelief
 
 internal static class ActEndingBossPolicy
 {
+    public static int RawHpRequiredForPersistentValue(
+        int persistentHpValue,
+        BossHpRelief bossHpRelief)
+    {
+        if (persistentHpValue <= 0)
+            return 0;
+        return bossHpRelief switch
+        {
+            BossHpRelief.ActClearHeal => persistentHpValue * 5,
+            BossHpRelief.RunEnding => int.MaxValue / 4,
+            _ => persistentHpValue,
+        };
+    }
+
     public static BossHpRelief ResolveHpRelief(CombatState combatState)
     {
         if (combatState.Encounter?.RoomType != RoomType.Boss)

@@ -134,6 +134,7 @@ internal sealed partial class UnattendedTestRunner
             || _request.ExpectedInitialDeathTurnAtLeast.HasValue
             || _request.ExpectedInitialFinalEnemyHpAtMost.HasValue
             || _request.ExpectedInitialActEndingBoss.HasValue
+            || _request.ExpectedInitialBossHpRelief.HasValue
             || _request.ExpectedFullAutoPausedAtDeathTurn
             || _request.ExpectedInitialSetupChoiceCountAtLeast.HasValue
             || !string.IsNullOrWhiteSpace(_request.ExpectedInitialSetupChoiceSourceId)
@@ -503,6 +504,12 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException(
                 $"首轮幕末 Boss 标记为 {result.IsActEndingBoss}，预期为 {expectedActEndingBoss}。");
         }
+        if (_request.ExpectedInitialBossHpRelief is { } expectedBossHpRelief
+            && result.BossHpRelief != expectedBossHpRelief)
+        {
+            throw new InvalidOperationException(
+                $"首轮 Boss 战后血量政策为 {result.BossHpRelief}，预期为 {expectedBossHpRelief}。");
+        }
         if (!string.IsNullOrWhiteSpace(_request.ExpectedInitialPlannedChoiceCardId))
         {
             bool found = result.BestNode.Actions
@@ -734,7 +741,8 @@ internal sealed partial class UnattendedTestRunner
             $"Frame={result.MaxMainThreadFrameGapMilliseconds:F1}msMax/{result.MainThreadFramesOver50Milliseconds}Over50;" +
             $"CacheHits={result.TransitionCacheHits};ChoiceBranches={result.ChoiceBranchesEvaluated};Actions={initialExecutableActions};" +
             $"OnlyDeath={result.OnlyDeathRoutesFound};CombatEndedTurn={result.CombatEndedTurn?.ToString() ?? "-"};" +
-            $"DeathTurn={result.DeathTurn?.ToString() ?? "-"};ActEndingBoss={result.IsActEndingBoss}");
+            $"DeathTurn={result.DeathTurn?.ToString() ?? "-"};ActEndingBoss={result.IsActEndingBoss};" +
+            $"BossHpRelief={result.BossHpRelief}");
     }
 
     private void ForceInitialEnemyMoves(CombatState combatState)

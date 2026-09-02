@@ -1297,7 +1297,7 @@ internal static class CombatSearchCoordinator
             result.PotionStrategicCostByTurn.Values.Sum(),
             ambergrisCount,
             root.InitialPlayerMaxHp);
-        return PotionUsePolicy.SmartRequiredHpSaved(strategicHpCost);
+        return PotionUsePolicy.SmartRequiredHpSaved(strategicHpCost, root.BossHpRelief);
     }
 
     private static int StrategicHpDeficit(CombatRootSnapshot root, SolverResult result)
@@ -1326,8 +1326,12 @@ internal static class CombatSearchCoordinator
             .ToArray();
         if (!potionFreeWon || policy.TheftPolicy == SolverTheftPolicy.PreserveResources)
             return allowedPotions.Length;
-        int paidPotionCapacity = Math.Max(0, potionFreeHpDeficit)
-            / SolverWeights.PotionMinimumHpSaved;
+        int paidPotionHpRequired = PotionUsePolicy.SmartRequiredHpSaved(
+            SolverWeights.PotionMinimumHpSaved,
+            root.BossHpRelief);
+        int paidPotionCapacity = paidPotionHpRequired >= int.MaxValue / 4
+            ? 0
+            : Math.Max(0, potionFreeHpDeficit) / paidPotionHpRequired;
         return Math.Min(
             allowedPotions.Length,
             allowedPotions.Count(potion => potion.StrategicHpCost == 0) + paidPotionCapacity);

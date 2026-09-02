@@ -17,14 +17,14 @@ internal sealed partial class CombatBeamSolver
         BattleDamageSnapshot battleDamage)
     {
         /// <summary>
-        /// Quarters of a normal fight's HP weight. A boss whose act clear refunds most of the damage is worth a
-        /// quarter; the run's last fight is worth nothing beyond surviving it.
+        /// Fifths of a normal fight's HP weight. Clearing acts one and two restores 80% of combat HP loss, while
+        /// the run's last fight only needs a surviving route.
         /// </summary>
-        private readonly int _hpWeightQuarters = bossHpRelief switch
+        private readonly int _hpWeightFifths = bossHpRelief switch
         {
             BossHpRelief.RunEnding => 0,
             BossHpRelief.ActClearHeal => 1,
-            _ => 4,
+            _ => 5,
         };
 
         /// <summary>
@@ -33,9 +33,7 @@ internal sealed partial class CombatBeamSolver
         /// <see cref="PotionUsePolicy.IsEligible"/> can still admit one.
         /// </summary>
         private int ScalePotionCost(int strategicHpCost)
-            => _hpWeightQuarters == 0
-                ? int.MaxValue / 4
-                : strategicHpCost * 4 / _hpWeightQuarters;
+            => PotionUsePolicy.SmartRequiredHpSaved(strategicHpCost, bossHpRelief);
 
         public FinalPlanSelection Select(
             IReadOnlyList<(SearchNode Node, SimulationSnapshot Snapshot)> evaluated,
@@ -223,8 +221,8 @@ internal sealed partial class CombatBeamSolver
                 .ThenBy(candidate => theftPolicy == SolverTheftPolicy.PreserveResources
                     ? candidate.Features.OutstandingStolenResource
                     : 0)
-                .ThenBy(candidate => candidate.PolicyHpDeficit * _hpWeightQuarters)
-                .ThenBy(candidate => candidate.HealthResourceCost * _hpWeightQuarters)
+                .ThenBy(candidate => candidate.PolicyHpDeficit * _hpWeightFifths)
+                .ThenBy(candidate => candidate.HealthResourceCost * _hpWeightFifths)
                 .ThenByDescending(candidate => candidate.Features.LongTermResourceValue)
                 .ThenBy(candidate => candidate.Features.AngerCopiesGenerated)
                 .ThenBy(candidate => CombatBeamSolver.PolicyBoundaryRank(candidate.Features.BoundaryReason))
@@ -282,7 +280,8 @@ internal sealed partial class CombatBeamSolver
                 && potionFreeWon)
             {
                 potionHpRequired = PotionUsePolicy.SmartRequiredHpSaved(
-                    potionHpRequired);
+                    potionHpRequired,
+                    bossHpRelief);
             }
             if (selectedCandidate.EffectivePotionPolicy == SolverPotionPolicy.RequireAtLeastOne)
             {

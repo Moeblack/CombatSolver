@@ -137,6 +137,8 @@ param(
     [int]$ExpectedInitialFinalEnemyHpAtMost = -1,
     [ValidateSet(-1, 0, 1)]
     [int]$ExpectedInitialActEndingBoss = -1,
+    [ValidateSet("", "None", "ActClearHeal", "RunEnding")]
+    [string]$ExpectedInitialBossHpRelief = "",
     [string]$ExpectedInitialPlannedChoiceCardId = "",
     [int]$ExpectedInitialTurnStartChoiceTurn = 0,
     [string]$ExpectedInitialTurnStartChoiceSourceId = "",
@@ -726,6 +728,7 @@ $request = [ordered]@{
     expectedInitialDeathTurnAtLeast = if ($ExpectedInitialDeathTurnAtLeast -gt 0) { $ExpectedInitialDeathTurnAtLeast } else { $null }
     expectedInitialFinalEnemyHpAtMost = if ($ExpectedInitialFinalEnemyHpAtMost -ge 0) { $ExpectedInitialFinalEnemyHpAtMost } else { $null }
     expectedInitialActEndingBoss = if ($ExpectedInitialActEndingBoss -ge 0) { [bool]$ExpectedInitialActEndingBoss } else { $null }
+    expectedInitialBossHpRelief = if ([string]::IsNullOrWhiteSpace($ExpectedInitialBossHpRelief)) { $null } else { $ExpectedInitialBossHpRelief }
     expectedInitialPlannedChoiceCardId = if ([string]::IsNullOrWhiteSpace($ExpectedInitialPlannedChoiceCardId)) { $null } else { $ExpectedInitialPlannedChoiceCardId }
     expectedInitialTurnStartChoiceTurn = if ($ExpectedInitialTurnStartChoiceTurn -gt 0) { $ExpectedInitialTurnStartChoiceTurn } else { $null }
     expectedInitialTurnStartChoiceSourceId = if ([string]::IsNullOrWhiteSpace($ExpectedInitialTurnStartChoiceSourceId)) { $null } else { $ExpectedInitialTurnStartChoiceSourceId }

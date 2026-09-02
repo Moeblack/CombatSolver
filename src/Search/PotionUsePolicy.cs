@@ -47,8 +47,12 @@ internal static class PotionUsePolicy
     public static int HpSaved(int potionFreeHpDeficit, int potionRouteHpDeficit)
         => Math.Max(0, potionFreeHpDeficit - potionRouteHpDeficit);
 
-    public static int SmartRequiredHpSaved(int strategicHpCost)
-        => strategicHpCost;
+    public static int SmartRequiredHpSaved(
+        int strategicHpCost,
+        BossHpRelief bossHpRelief = BossHpRelief.None)
+        => ActEndingBossPolicy.RawHpRequiredForPersistentValue(
+            strategicHpCost,
+            bossHpRelief);
 
     public static int AmbergrisRequiredHpSaved(int maximumHp)
         => (int)Math.Ceiling(maximumHp * AmbergrisMinimumHpSavedFraction);
