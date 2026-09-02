@@ -1,6 +1,6 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.26.0`（当前创意工坊稳定版；下一版本待定）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.26.0`（当前创意工坊稳定版）、`0.27.0`（当前开发版）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
@@ -8,7 +8,7 @@
 
 性能指标口径：`selected_*` 只描述最终选中的单个 solver；请求级 `total_expanded_nodes / total_transitions / total_choice_branches` 对正常、失败和取消的每个 solver 精确记录一次。`total_solver_ms`、solver 分配与 GC 累计只覆盖正常返回并被 coordinator 合并的层，不包含取消中的部分工作，因此完整耗时使用请求/阶段墙钟，内存使用进程峰值工作集。Smart 多层的取消时点可能令请求总工作量小幅波动，语义验收优先比较胜负、战损、回合和动作路线。峰值工作集是瞬时进程峰值，不能跨阶段相加；`16 GB` NoGC 是运行时请求预算，不等于实际占用或硬上限；NoGC 活跃时 `GC.GetTotalMemory(false)` 不是严格 live-set 测量。
 
-## 下一版本（开发中；基于 0.26.0）
+## 0.27.0（开发中；基于 0.26.0）
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
@@ -16,6 +16,7 @@
 | `PR31-INITIAL-TOASTY-CONTROLS` | 通过（headless 烘焙手套开局搜索，DOP4） | 首次回合准备搜索可采用已展示候选，返回第 1 回合 `25` 个动作；采用、执行和后续重算仍由回合准备事务接管。runId `e6cb54b4de4f4110a996c2563c7f96ea`。 | 2026-09-02 |
 | `OVERLAY-RESIZE-PERSISTENCE-NEXT` | 通过（headless 真实重排） | 宽/高成对持久化、右/下/右下三向缩放、三斜线抓手、`16 ms` 拖动节流、内容最小尺寸、紧凑收起和展开恢复通过；独立药水浮层不改变主面板持久宽度。可见观感未检查。 | 2026-09-02 |
 | `BOSS-HP-STRATEGY-SETTINGS-NEXT` | 通过（headless 设置/UI/搜索策略，DOP4） | 第一、二幕与最终 Boss 两项策略独立 JSON 往返；通关优先分别保留 `45 HP/瓶`、`75 HP` 卖血阈值和最终 Boss 存活边界，最低战损独立恢复 `9 HP/瓶` 与普通 Boss 卖血阈值；两类提示文案和关闭状态互不串联。runId `e52f2ec763ac4361a9a09992ab8ae7d5`。 | 2026-09-02 |
+| `PR32-DYNAMIC-PREVIEW-EARLY-FINISH` | 结构验证（Release 编译） | 动态演化预览约每 `100 ms` 更新，当前回合预览与可采用推演路线分离；等价获胜路线在敌方状态之后、总评分之前比较结束回合。零警告；按用户要求未运行行为回归。 | 2026-09-02 |
 
 ## 0.26.0（已发布）
 
