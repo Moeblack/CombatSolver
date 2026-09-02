@@ -57,6 +57,7 @@ internal sealed partial class UnattendedTestRunner
             try
             {
                 SolverSettingsSnapshot settings = SolverSettings.Capture();
+                SearchInteractionState interaction = new();
                 SearchPolicySnapshot forcedPolicy = SolverController.CaptureSearchPolicy(
                     settings,
                     combat,
@@ -70,6 +71,7 @@ internal sealed partial class UnattendedTestRunner
                     },
                     ForceShortOnly = true,
                     MaxDegreeOfParallelism = 4,
+                    Interaction = interaction,
                 };
                 CombatRootSnapshot forcedRoot = CombatRootSnapshot.Capture(combat);
                 SolverDisplayNames forcedDisplayNames = SolverDisplayNames.Capture(combat);
@@ -83,10 +85,13 @@ internal sealed partial class UnattendedTestRunner
                     CancellationToken.None,
                     progress =>
                     {
-                        if (progress.CurrentBestResult != null)
+                        if (progress.CurrentBestResult != null
+                            && !forcedAdoptionRequested)
+                        {
                             forcedAdoptionRequested = true;
-                    },
-                    () => forcedAdoptionRequested));
+                            interaction.RequestApplyCurrentTurn();
+                        }
+                    }));
                 if (!forcedAdoptionRequested
                     || !forcedResult.BestNode.Actions.Any(action =>
                         action.Kind == PlanActionKind.UsePotion
@@ -114,6 +119,23 @@ internal sealed partial class UnattendedTestRunner
         if (!SolverController.IsSearching)
             throw new InvalidOperationException("控制器没有建立搜索会话。");
         int progressTurn = player.PlayerCombatState!.TurnNumber;
+        SolverRoutePreview progressPreview = new(
+            CandidateVersion: 1,
+            StartTurnNumber: progressTurn,
+            ProjectedBattlePotionCount: 0,
+            ProjectedBattleHpLost: 9,
+            OnlyDeathRoutesFound: false,
+            HasRisk: false,
+            Turns:
+            [
+                new SolverFrontierTurn(
+                    progressTurn,
+                    Actions: [],
+                    HpLost: 9,
+                    EnemyHpLost: 1,
+                    EnergyLeft: 0,
+                    CombatEnded: false),
+            ]);
         SolverOverlay.ShowProgress(
             new SolverProgress(
                 progressTurn,
@@ -153,22 +175,30 @@ internal sealed partial class UnattendedTestRunner
                     PotionStrategicCost: 0,
                     ProjectedBattlePotionCount: 0,
                     EnemyHp: 1,
-                    Score: 0d)),
+                    Score: 0d),
+                RoutePreview: progressPreview),
             deployWhenReady: false,
-            reviewedWorldlinesBeforeSearch: 5);
+            reviewedWorldlinesBeforeSearch: 5,
+            bestSnapshot: SolverOverlaySnapshot.CaptureRoutePreview(progressPreview));
         if (SolverOverlay.SearchProgressRatioForTesting < progressRatio
             || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
                 "正在搜索无药路线",
                 StringComparison.Ordinal) != true
             || SolverOverlay.SearchSummaryTextForTesting?.Contains(
-                "当前可采用：用 0 瓶药，预计战损 9",
+                "求解器当前考虑",
+                StringComparison.Ordinal) != true
+            || SolverOverlay.HpOutcomeTextForTesting?.Contains(
+                "9 HP",
                 StringComparison.Ordinal) != true)
         {
             throw new InvalidOperationException("药水补查开始后搜索进度条倒退。");
         }
         if (SolverController.IsSearching
-            && SolverOverlay.ExecuteButtonTextForTesting != "停止计算")
-            throw new InvalidOperationException("搜索期间执行按钮没有切换为停止计算。");
+            && (SolverOverlay.StopSearchButtonTextForTesting != "停止计算"
+                || SolverOverlay.StopSearchButtonDisabledForTesting))
+        {
+            throw new InvalidOperationException("搜索期间独立停止计算按钮不可用。");
+        }
         if (!SolverOverlay.MessageWrappingEnabledForTesting)
             throw new InvalidOperationException("求解器消息区域没有启用自动换行。");
         if (!SolverOverlay.UploadProgressConfiguredForTesting)
@@ -180,10 +210,13 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("界面主题或覆盖层透明度没有按持久化设置加载。");
         }
-        if (!SolverOverlay.ResizeUiConfiguredForTesting
-            || !SolverOverlay.ExerciseOverlayResizePersistenceForTesting())
+        bool resizeUiConfigured = SolverOverlay.ResizeUiConfiguredForTesting;
+        bool resizePersistencePassed = await SolverOverlay.ExerciseOverlayResizePersistenceForTestingAsync();
+        if (!resizeUiConfigured || !resizePersistencePassed)
         {
-            throw new InvalidOperationException("覆盖层拖拽缩放、尺寸持久化或展开恢复没有正确建立。");
+            throw new InvalidOperationException(
+                $"覆盖层拖拽缩放、尺寸持久化或展开恢复没有正确建立：" +
+                $"configured={resizeUiConfigured}, persistence={resizePersistencePassed}。");
         }
         if (!SolverOverlay.SettingsTabsConfiguredForTesting
             || !SolverOverlay.ExerciseSettingsTabSwitchingForTesting())
@@ -649,6 +682,7 @@ internal sealed partial class UnattendedTestRunner
     private static async Task AssertBoundedSmartPotionAuditAsync(CombatState combat)
     {
         SolverSettingsSnapshot settings = SolverSettings.Capture();
+        SearchInteractionState interaction = new();
         SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
             settings,
             combat,
@@ -662,6 +696,7 @@ internal sealed partial class UnattendedTestRunner
             },
             ForceShortOnly = true,
             MaxDegreeOfParallelism = 1,
+            Interaction = interaction,
         };
         CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
@@ -873,9 +908,8 @@ internal sealed partial class UnattendedTestRunner
                 }
                 displayedPotionCount = result.ProjectedBattlePotionCount;
                 displayedHpLost = result.ProjectedBattleHpLost;
-                adoptionRequested = true;
-            },
-            () => adoptionRequested));
+                adoptionRequested = interaction.RequestApplyCurrentTurn();
+            }));
         stopwatch.Stop();
         if (stopwatch.ElapsedMilliseconds > 4_000)
         {

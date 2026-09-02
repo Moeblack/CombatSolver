@@ -11,14 +11,17 @@ internal static class CombatSearchCoordinator
         BattleDamageSnapshot battleDamage,
         SearchPolicySnapshot policy,
         CancellationToken cancellationToken,
-        Action<SolverProgress>? progressCallback,
-        Func<bool>? adoptCurrentResultRequested = null)
+        Action<SolverProgress>? progressCallback)
     {
         SearchRequestWorkTotals requestWorkTotals = new();
         policy = policy with { RequestWorkTotals = requestWorkTotals };
-        SolverResult? currentAdoptableResult = null;
+        SearchInteractionState? interaction = policy.Interaction;
+        SolverResult? currentCompleteAdoptableResult = null;
         SolverInterimResult? currentDisplayedResult = null;
         SolverProgress? lastProgress = null;
+        int routePreviewVersion = 0;
+        SolverRoutePreview? currentRoutePreview = null;
+        SolverRouteAdoptionSeed? currentRouteAdoptionSeed = null;
 
         bool TryPromoteDisplayedResult(SolverInterimResult candidate)
         {
@@ -47,16 +50,28 @@ internal static class CombatSearchCoordinator
             bool promoted = TryPromoteDisplayedResult(summary);
             if (!promoted && summary != currentDisplayedResult)
                 return;
-            currentAdoptableResult = result;
+            currentCompleteAdoptableResult = result;
+            SolverRoutePreview preview = SolverRoutePreview.FromResult(
+                result,
+                ++routePreviewVersion);
+            SolverRouteAdoptionSeed seed = new(
+                preview.CandidateVersion,
+                result.BestNode.Actions,
+                () => result);
+            currentRoutePreview = preview;
+            currentRouteAdoptionSeed = seed;
             policy.Diagnostics.Info(
                 $"[CombatSolver/Test] SEARCH_INTERIM_RESULT potions={result.ProjectedBattlePotionCount} " +
                 $"projected_battle_hp_lost={result.ProjectedBattleHpLost}");
             if (lastProgress != null && progressCallback != null)
             {
-                progressCallback(lastProgress with
+                lastProgress = lastProgress with
                 {
                     CurrentBestResult = currentDisplayedResult,
-                });
+                    RoutePreview = currentRoutePreview,
+                    RouteAdoptionSeed = currentRouteAdoptionSeed,
+                };
+                progressCallback(lastProgress);
             }
         }
 
@@ -67,9 +82,17 @@ internal static class CombatSearchCoordinator
                 lastProgress = progress;
                 if (progress.CurrentBestResult is { } candidate)
                     TryPromoteDisplayedResult(candidate);
+                if (progress.RoutePreview is { } preview)
+                {
+                    currentRoutePreview = preview;
+                    currentRouteAdoptionSeed = progress.RouteAdoptionSeed;
+                    routePreviewVersion = Math.Max(routePreviewVersion, preview.CandidateVersion);
+                }
                 progressCallback(progress with
                 {
                     CurrentBestResult = currentDisplayedResult,
+                    RoutePreview = currentRoutePreview,
+                    RouteAdoptionSeed = currentRouteAdoptionSeed,
                 });
             };
         try
@@ -81,26 +104,54 @@ internal static class CombatSearchCoordinator
                 policy,
                 cancellationToken,
                 enrichedProgressCallback,
-                adoptCurrentResultRequested == null ? null : PublishAdoptableResult,
-                adoptCurrentResultRequested);
-            SolverResult selected = adoptCurrentResultRequested?.Invoke() == true
-                && currentAdoptableResult != null
-                    ? currentAdoptableResult
-                    : result;
+                interaction == null ? null : PublishAdoptableResult);
+            SolverResult selected = ResolveTakeoverResult(result, interaction) ?? result;
+            if (interaction?.CurrentTakeoverRequest?.Kind == SearchTakeoverKind.ApplyCurrentTurn
+                && selected.ResultScope == SolverResultScope.SearchCompletion
+                && currentCompleteAdoptableResult != null)
+            {
+                selected = currentCompleteAdoptableResult;
+            }
             PopulateRequestWorkTotals(selected, requestWorkTotals);
             return selected;
         }
         catch (OperationCanceledException)
-            when (adoptCurrentResultRequested?.Invoke() == true
-                  && currentAdoptableResult != null)
+            when (interaction?.CurrentTakeoverRequest?.Kind == SearchTakeoverKind.ApplyCurrentTurn
+                  && currentCompleteAdoptableResult != null)
         {
             policy.Diagnostics.Info(
                 $"[CombatSolver/Test] SEARCH_INTERIM_ADOPTED " +
-                $"potions={currentAdoptableResult.ProjectedBattlePotionCount} " +
-                $"projected_battle_hp_lost={currentAdoptableResult.ProjectedBattleHpLost}");
-            PopulateRequestWorkTotals(currentAdoptableResult, requestWorkTotals);
-            return currentAdoptableResult;
+                $"potions={currentCompleteAdoptableResult.ProjectedBattlePotionCount} " +
+                $"projected_battle_hp_lost={currentCompleteAdoptableResult.ProjectedBattleHpLost}");
+            PopulateRequestWorkTotals(currentCompleteAdoptableResult, requestWorkTotals);
+            return currentCompleteAdoptableResult;
         }
+    }
+
+    private static bool IsAdoptionResult(SolverResult result)
+        => result.ResultScope is SolverResultScope.CurrentTurnAdoption
+            or SolverResultScope.RouteAdoption
+            || SolverInterimResultOrdering.IsCompleteVictory(
+                result.BestNode.ActionCount,
+                result.Snapshot.AllEnemiesDead,
+                result.Snapshot.PlayerDead,
+                result.Snapshot.ProjectedPlayerHp);
+
+    private static SolverResult? ResolveTakeoverResult(
+        SolverResult result,
+        SearchInteractionState? interaction)
+    {
+        SearchTakeoverRequest? request = interaction?.CurrentTakeoverRequest;
+        if (request == null)
+            return null;
+        if (result.ResultScope is SolverResultScope.CurrentTurnAdoption
+            or SolverResultScope.RouteAdoption)
+        {
+            return result;
+        }
+        if (request.Kind == SearchTakeoverKind.AdoptRoute)
+            return request.RouteAdoptionSeed?.Materialize();
+        return IsAdoptionResult(result) ? result : null;
     }
 
     private static SolverResult SolveCore(
@@ -110,8 +161,7 @@ internal static class CombatSearchCoordinator
         SearchPolicySnapshot policy,
         CancellationToken cancellationToken,
         Action<SolverProgress>? progressCallback,
-        Action<SolverResult>? interimResultCallback,
-        Func<bool>? adoptCurrentResultRequested)
+        Action<SolverResult>? interimResultCallback)
     {
         SolverSearchProfile shortProfile = policy.ShortProfile;
         if (policy.ShortBudgetOverrideMilliseconds is { } shortBudget)
@@ -155,12 +205,11 @@ internal static class CombatSearchCoordinator
                 cancellationToken,
                 progressCallback,
                 shortProfile,
-                potionPolicyOverride: initialPotionPolicyOverride,
-                adoptCurrentResultRequested: adoptCurrentResultRequested).Solve();
+                potionPolicyOverride: initialPotionPolicyOverride).Solve();
             PopulateSingleSessionTotals(shortResult, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered: false);
             interimResultCallback?.Invoke(shortResult);
-            if (adoptCurrentResultRequested?.Invoke() == true)
-                return shortResult;
+            if (ResolveTakeoverResult(shortResult, policy.Interaction) is { } shortTakeoverResult)
+                return shortTakeoverResult;
             if (!policy.PotionStrategy.HasForcedDirectives)
             {
                 shortResult = RunSupplementalAudits(
@@ -174,8 +223,7 @@ internal static class CombatSearchCoordinator
                     shortCheckpointMilliseconds: null,
                     requestClock,
                     shortResult,
-                    interimResultCallback,
-                    adoptCurrentResultRequested);
+                    interimResultCallback);
             }
             if (policy.MeasurePhasePerformance)
                 policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(shortResult));
@@ -204,8 +252,7 @@ internal static class CombatSearchCoordinator
             progressCallback,
             deepProfile,
             shortCheckpointMilliseconds: shortProfile.SoftTimeBudgetMilliseconds,
-            potionPolicyOverride: initialPotionPolicyOverride,
-            adoptCurrentResultRequested: adoptCurrentResultRequested).Solve();
+            potionPolicyOverride: initialPotionPolicyOverride).Solve();
         if (policy.MeasurePhasePerformance)
             policy.Diagnostics.Info(SolverDiagnostics.DescribeSearchPhasePerformance(result));
         bool deepTriggered = result.Elapsed.TotalMilliseconds > shortProfile.SoftTimeBudgetMilliseconds;
@@ -215,8 +262,8 @@ internal static class CombatSearchCoordinator
         result.SingleSessionSearch = true;
         PopulateSingleSessionTotals(result, shortProfile.SoftTimeBudgetMilliseconds, deepTriggered);
         interimResultCallback?.Invoke(result);
-        if (adoptCurrentResultRequested?.Invoke() == true)
-            return result;
+        if (ResolveTakeoverResult(result, policy.Interaction) is { } takeoverResult)
+            return takeoverResult;
         if (!policy.PotionStrategy.HasForcedDirectives)
         {
             result = RunSupplementalAudits(
@@ -230,8 +277,7 @@ internal static class CombatSearchCoordinator
                 shortProfile.SoftTimeBudgetMilliseconds,
                 requestClock,
                 result,
-                interimResultCallback,
-                adoptCurrentResultRequested);
+                interimResultCallback);
         }
         policy.Diagnostics.Info(
             $"[CombatSolver/Test] SEARCH_SESSION mode=single_anytime " +
@@ -251,8 +297,7 @@ internal static class CombatSearchCoordinator
         int? shortCheckpointMilliseconds,
         Stopwatch requestClock,
         SolverResult primary,
-        Action<SolverResult>? interimResultCallback,
-        Func<bool>? adoptCurrentResultRequested)
+        Action<SolverResult>? interimResultCallback)
     {
         long remainingMilliseconds = profile.SoftTimeBudgetMilliseconds - requestClock.ElapsedMilliseconds;
         if (remainingMilliseconds <= 0)
@@ -279,6 +324,8 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 selected);
+            if (ResolveTakeoverResult(selected, policy.Interaction) is { } requiredTakeoverResult)
+                return requiredTakeoverResult;
             selected = AuditSmartPotionUse(
                 root,
                 displayNames,
@@ -289,8 +336,7 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 selected,
-                interimResultCallback,
-                adoptCurrentResultRequested);
+                interimResultCallback);
             if (policy.PotionPolicy != SolverPotionPolicy.Smart)
             {
                 selected = AuditOpeningPowerUse(
@@ -430,6 +476,8 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 fixedPrefixActions: [openingPower]).Solve();
+            if (posterior.ResultScope == SolverResultScope.RouteAdoption)
+                return posterior;
             bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
                 && posterior.Elapsed.TotalMilliseconds > checkpoint;
             posterior.SearchPhase = posteriorDeepTriggered
@@ -490,6 +538,8 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 fixedPrefixActions: [openingPower, offensiveFollowUp]).Solve();
+            if (linkedPosterior.ResultScope == SolverResultScope.RouteAdoption)
+                return linkedPosterior;
             bool linkedDeepTriggered = shortCheckpointMilliseconds is { } linkedCheckpoint
                 && linkedPosterior.Elapsed.TotalMilliseconds > linkedCheckpoint;
             linkedPosterior.SearchPhase = linkedDeepTriggered
@@ -554,6 +604,8 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 fixedPrefixActions: [openingResource, defensiveFollowUp]).Solve();
+            if (resourceDefensePosterior.ResultScope == SolverResultScope.RouteAdoption)
+                return resourceDefensePosterior;
             bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
                 && resourceDefensePosterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
             resourceDefensePosterior.SearchPhase = posteriorDeepTriggered
@@ -597,6 +649,8 @@ internal static class CombatSearchCoordinator
                 $"POTION_RESOURCE_POSTERIOR potion={openingPotion.PotionId}");
             if (resourcePosterior == null)
                 continue;
+            if (resourcePosterior.ResultScope == SolverResultScope.RouteAdoption)
+                return resourcePosterior;
             bool resourceDeepTriggered = shortCheckpointMilliseconds is { } resourceCheckpoint
                 && resourcePosterior.Elapsed.TotalMilliseconds > resourceCheckpoint;
             resourcePosterior.SearchPhase = resourceDeepTriggered
@@ -662,6 +716,8 @@ internal static class CombatSearchCoordinator
                 $"POTION_POWER_POSTERIOR potion={openingPotion.PotionId} power={postPotionPower.CardId}");
             if (jointPosterior == null)
                 continue;
+            if (jointPosterior.ResultScope == SolverResultScope.RouteAdoption)
+                return jointPosterior;
             bool jointDeepTriggered = shortCheckpointMilliseconds is { } jointCheckpoint
                 && jointPosterior.Elapsed.TotalMilliseconds > jointCheckpoint;
             jointPosterior.SearchPhase = jointDeepTriggered
@@ -741,6 +797,8 @@ internal static class CombatSearchCoordinator
                 $"power={postPotionPower.CardId} follow_up={defensiveFollowUp.CardId}");
             if (defensivePosterior == null)
                 continue;
+            if (defensivePosterior.ResultScope == SolverResultScope.RouteAdoption)
+                return defensivePosterior;
             bool defensiveDeepTriggered = shortCheckpointMilliseconds is { } defensiveCheckpoint
                 && defensivePosterior.Elapsed.TotalMilliseconds > defensiveCheckpoint;
             defensivePosterior.SearchPhase = defensiveDeepTriggered
@@ -818,6 +876,8 @@ internal static class CombatSearchCoordinator
             profile,
             shortCheckpointMilliseconds,
             SolverPotionPolicy.Disabled).Solve();
+        if (potionFree.ResultScope == SolverResultScope.RouteAdoption)
+            return potionFree;
         bool auditDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
             && potionFree.Elapsed.TotalMilliseconds > checkpoint;
         potionFree.SearchPhase = auditDeepTriggered ? SolverSearchPhase.Deep : SolverSearchPhase.Short;
@@ -862,6 +922,8 @@ internal static class CombatSearchCoordinator
                     SolverPotionPolicy.RequireAtLeastOne,
                     maximumPotionUses: primary.PotionCount,
                     fixedPrefixActions: [openingPotion]).Solve();
+                if (posterior.ResultScope == SolverResultScope.RouteAdoption)
+                    return posterior;
                 bool posteriorDeepTriggered = shortCheckpointMilliseconds is { } posteriorCheckpoint
                     && posterior.Elapsed.TotalMilliseconds > posteriorCheckpoint;
                 posterior.SearchPhase = posteriorDeepTriggered
@@ -927,6 +989,8 @@ internal static class CombatSearchCoordinator
                         SolverPotionPolicy.RequireAtLeastOne,
                         maximumPotionUses: primary.PotionCount,
                         fixedPrefixActions: [openingPotion, secondPotion]).Solve();
+                    if (pairPosterior.ResultScope == SolverResultScope.RouteAdoption)
+                        return pairPosterior;
                     bool pairDeepTriggered = shortCheckpointMilliseconds is { } pairCheckpoint
                         && pairPosterior.Elapsed.TotalMilliseconds > pairCheckpoint;
                     pairPosterior.SearchPhase = pairDeepTriggered
@@ -996,6 +1060,8 @@ internal static class CombatSearchCoordinator
                         SolverPotionPolicy.RequireAtLeastOne,
                         maximumPotionUses: primary.PotionCount,
                         fixedPrefixActions: [openingPotion, secondPotion, defensiveFollowUp]).Solve();
+                    if (defensivePosterior.ResultScope == SolverResultScope.RouteAdoption)
+                        return defensivePosterior;
                     bool defensiveDeepTriggered = shortCheckpointMilliseconds is { } defensiveCheckpoint
                         && defensivePosterior.Elapsed.TotalMilliseconds > defensiveCheckpoint;
                     defensivePosterior.SearchPhase = defensiveDeepTriggered
@@ -1060,6 +1126,8 @@ internal static class CombatSearchCoordinator
             SolverPotionPolicy.RequireAtLeastOne,
             baseline,
             maximumPotionUses: 1).Solve();
+        if (audited.ResultScope == SolverResultScope.RouteAdoption)
+            return audited;
         bool auditedDeepTriggered = shortCheckpointMilliseconds is { } auditedCheckpoint
             && audited.Elapsed.TotalMilliseconds > auditedCheckpoint;
         audited.SearchPhase = auditedDeepTriggered ? SolverSearchPhase.Deep : SolverSearchPhase.Short;
@@ -1088,8 +1156,7 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile profile,
         int? shortCheckpointMilliseconds,
         SolverResult primary,
-        Action<SolverResult>? interimResultCallback,
-        Func<bool>? adoptCurrentResultRequested)
+        Action<SolverResult>? interimResultCallback)
     {
         if (policy.PotionPolicy != SolverPotionPolicy.Smart)
             return primary;
@@ -1105,8 +1172,7 @@ internal static class CombatSearchCoordinator
                 profile,
                 shortCheckpointMilliseconds,
                 primary,
-                interimResultCallback,
-                adoptCurrentResultRequested);
+                interimResultCallback);
         }
         catch (PotionPolicyUnsatisfiedException)
             when (policy.PotionPolicy == SolverPotionPolicy.Smart
@@ -1128,8 +1194,7 @@ internal static class CombatSearchCoordinator
         SolverSearchProfile profile,
         int? shortCheckpointMilliseconds,
         SolverResult potionFree,
-        Action<SolverResult>? interimResultCallback,
-        Func<bool>? adoptCurrentResultRequested)
+        Action<SolverResult>? interimResultCallback)
     {
         if (potionFree.ExplicitPotionCount != 0)
             throw new InvalidOperationException("Smart 梯度搜索必须从无主动用药结果开始。");
@@ -1173,8 +1238,7 @@ internal static class CombatSearchCoordinator
                     SolverPotionPolicy.RequireAtLeastOne,
                     baseline,
                     maximumPotionUses: potionCount,
-                    minimumPotionUses: potionCount,
-                    adoptCurrentResultRequested: adoptCurrentResultRequested).Solve();
+                    minimumPotionUses: potionCount).Solve();
             }
             catch (PotionPolicyUnsatisfiedException)
             {
@@ -1182,6 +1246,8 @@ internal static class CombatSearchCoordinator
                     $"[CombatSolver/Test] SMART_POTION_GRADIENT layer={potionCount} route_missing=true");
                 continue;
             }
+            if (candidate.ResultScope == SolverResultScope.RouteAdoption)
+                return candidate;
 
             bool candidateDeepTriggered = shortCheckpointMilliseconds is { } checkpoint
                 && candidate.Elapsed.TotalMilliseconds > checkpoint;
@@ -1246,6 +1312,7 @@ internal static class CombatSearchCoordinator
             ProjectedBattlePotionCount: result.ProjectedBattlePotionCount,
             EnemyHp: result.Snapshot.EnemyHp,
             Score: result.BestNode.Score);
+
 
     private static bool IsBetterCompletedResult(
         CombatRootSnapshot root,

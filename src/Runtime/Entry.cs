@@ -89,6 +89,8 @@ public static class Entry
             SolverOverlay.ShowDisabled(NGame.Instance);
             return;
         }
+        if (!SolverController.PrepareAutomaticSearchForTurn(NGame.Instance, state))
+            return;
         if (PlayerTurnSetupCoordinator.IsManaging(state))
         {
             Logger.Info("[CombatSolver/Test] TURN_STARTED_DEFERRED_TO_SETUP reason=native_choice_pending");
@@ -133,6 +135,8 @@ public static class Entry
             || SolverController.SolverDisabled
             || SolverController.IsMultiplayerSession
             || !UnattendedTestRunner.AutomaticTurnSearchEnabled
+            || !SolverController.AutomaticCalculationEnabled
+            || SolverController.AutomaticSearchPaused
             || !CombatManager.Instance.IsInProgress
             || !ReferenceEquals(CombatManager.Instance.DebugOnlyGetState(), state)
             || state.CurrentSide != CombatSide.Player

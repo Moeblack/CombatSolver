@@ -34,8 +34,7 @@ internal sealed partial class CombatBeamSolver(
     PotionFreePolicyBaseline? potionFreePolicyBaseline = null,
     int? maximumPotionUses = null,
     IReadOnlyList<PlanAction>? fixedPrefixActions = null,
-    int? minimumPotionUses = null,
-    Func<bool>? adoptCurrentResultRequested = null)
+    int? minimumPotionUses = null)
 {
     private readonly SolverSearchProfile _profile = searchProfile ?? SolverSearchProfile.Short;
     private readonly SearchRunContext _run = new(
@@ -52,7 +51,7 @@ internal sealed partial class CombatBeamSolver(
     private readonly bool _detailedDiagnostics = policy.DetailedDiagnostics;
     private readonly int? _maximumPotionUses = maximumPotionUses;
     private readonly int _minimumPotionUses = minimumPotionUses ?? 0;
-    private readonly Func<bool>? _adoptCurrentResultRequested = adoptCurrentResultRequested;
+    private readonly SearchInteractionState? _interaction = policy.Interaction;
     private readonly IReadOnlyList<PlanAction> _fixedPrefixActions = fixedPrefixActions ?? [];
     private readonly string? _progressPhaseOverride = DescribePotionProgressPhase(
         displayNames,

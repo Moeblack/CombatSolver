@@ -5,6 +5,14 @@ using MegaCrit.Sts2.Core.Nodes;
 
 namespace CombatSolver;
 
+internal enum SolverOverlayPresentation
+{
+    Ready,
+    Deploying,
+    ExecutedHistory,
+    Searching,
+}
+
 internal static class SolverOverlay
 {
     private enum ResizeEdge
@@ -15,6 +23,7 @@ internal static class SolverOverlay
     }
 
     private const string LayerName = "CombatSolverOverlay";
+    private const long ResizeLayoutIntervalMilliseconds = 16;
     private static Color Background => SolverUiTokens.Palette.Background;
     private static Color Surface => SolverUiTokens.Palette.Surface;
     private static Color Border => SolverUiTokens.Palette.Border;
@@ -42,6 +51,7 @@ internal static class SolverOverlay
     private static Label? _reviewText;
     private static ProgressBar? _searchProgressBar;
     private static HBoxContainer? _routeHeadingRow;
+    private static Label? _routeHeadingLabel;
     private static readonly SolverRouteRow[] RouteRows = new SolverRouteRow[SolverWeights.UiTurnRows];
     private static PanelContainer? _detailsPanel;
     private static Label? _deathOutcomeLabel;
@@ -50,13 +60,14 @@ internal static class SolverOverlay
     private static RichTextLabel? _detailsText;
     private static SolverDetailsButton? _detailsButton;
     private static Button? _recalculateButton;
+    private static Button? _stopSearchButton;
+    private static Button? _adoptRouteButton;
     private static Button? _executeButton;
     private static Button? _fullAutoButton;
     private static Button? _collapseButton;
     private static Button? _settingsButton;
     private static Button? _potionStrategyButton;
     private static Button? _performanceHintButton;
-    private static Control? _headerPotionSpacer;
     private static SolverPotionStrategyPanel? _potionStrategyPanel;
     private static Control? _rightResizeHandle;
     private static Control? _bottomResizeHandle;
@@ -76,15 +87,23 @@ internal static class SolverOverlay
     private static bool _layoutQueued;
     private static bool? _renderedFullAutoStyle;
     private static SolverButtonStyle? _renderedExecuteButtonStyle;
+    private static SolverButtonStyle? _renderedAdoptRouteButtonStyle;
     private static SolverTheftPolicy? _renderedTheftPolicy;
     private static SolverOverlaySnapshot? _lastSnapshot;
+    private static SolverOverlaySnapshot? _searchBestSnapshot;
     private static string? _lastMessageText;
     private static int _lastSearchingTurn;
     private static bool _lastSearchDeployWhenReady;
     private static long _lastReviewedWorldlinesBeforeSearch;
     private static double _lastSearchProgressRatio;
+    private static SolverOverlayPresentation _presentation = SolverOverlayPresentation.Searching;
+    private static int _lastDeploymentTurn;
+    private static int _lastDeploymentActionCount;
+    private static bool _lastDeploymentEndedTurn;
+    private static bool _waitingForNextTurnPlan;
     private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
+    private static long _lastResizeLayoutAt;
     private static Vector2 _dragOffset;
     private static ResizeEdge _activeResizeEdge = ResizeEdge.BottomRight;
     private static Vector2 _resizeStartMousePosition;
@@ -112,6 +131,14 @@ internal static class SolverOverlay
                 SolverUiTokens.BugReportUploadInstruction,
                 StringComparison.Ordinal);
     internal static string? ExecuteButtonTextForTesting => _executeButton?.Text;
+    internal static bool ExecuteButtonDisabledForTesting => _executeButton?.Disabled ?? true;
+    internal static string? StopSearchButtonTextForTesting => _stopSearchButton?.Text;
+    internal static bool StopSearchButtonDisabledForTesting => _stopSearchButton?.Disabled ?? true;
+    internal static string? AdoptRouteButtonTextForTesting => _adoptRouteButton?.Text;
+    internal static bool AdoptRouteButtonDisabledForTesting => _adoptRouteButton?.Disabled ?? true;
+    internal static SolverOverlayPresentation PresentationForTesting => _presentation;
+    internal static string? RouteHeadingForTesting => _routeHeadingLabel?.Text;
+    internal static string? HpOutcomeTextForTesting => _hpOutcomeLabel?.Text;
     internal static bool MessageWrappingEnabledForTesting
         => _summaryText is { FitContent: true, AutowrapMode: TextServer.AutowrapMode.WordSmart };
     internal static bool UploadProgressConfiguredForTesting
@@ -186,7 +213,7 @@ internal static class SolverOverlay
             TogglePotionStrategy();
         bool opened = _potionStrategyVisible
             && _potionStrategyPanel.Visible
-            && _headerPotionSpacer?.Visible == true;
+            && ReferenceEquals(_potionStrategyPanel.GetParent(), _layer);
         if (!original)
             TogglePotionStrategy();
         return opened && _potionStrategyVisible == original;
@@ -207,7 +234,7 @@ internal static class SolverOverlay
     internal static bool ExerciseVisualSettingsForTesting()
         => _settingsPanel?.ExerciseVisualSettingsForTesting() == true;
 
-    internal static bool ExerciseOverlayResizePersistenceForTesting()
+    internal static async Task<bool> ExerciseOverlayResizePersistenceForTestingAsync()
     {
         if (_panel == null || _viewport == null)
             return false;
@@ -219,13 +246,15 @@ internal static class SolverOverlay
         bool originalPotionStrategyVisible = _potionStrategyVisible;
         try
         {
+            await WaitForResponsiveLayoutForTestingAsync();
             Vector2 viewportSize = _viewport.GetVisibleRect().Size;
             Vector2 testPosition = new(
                 SolverUiTokens.Size.PanelMargin,
                 SolverUiTokens.Size.PanelMargin);
+            Vector2 contentMinimum = _panel.GetCombinedMinimumSize();
             Vector2 testSize = new(
-                SolverSettings.MinimumOverlayWidth + 80f,
-                SolverSettings.MinimumOverlayHeight + 60f);
+                Math.Max(SolverSettings.MinimumOverlayWidth, contentMinimum.X) + 80f,
+                Math.Max(SolverSettings.MinimumOverlayHeight, contentMinimum.Y) + 60f);
             if (viewportSize.X < testPosition.X + testSize.X + SolverUiTokens.Size.ResizeEdgeThickness
                 || viewportSize.Y < testPosition.Y + testSize.Y + SolverUiTokens.Size.ResizeEdgeThickness)
             {
@@ -247,35 +276,78 @@ internal static class SolverOverlay
             _settingsVisible = false;
             _potionStrategyVisible = false;
             SetCollapsed(false);
+            await WaitForResponsiveLayoutForTestingAsync();
             bool expanded = IsNear(_panel.Size, testSize) && _cornerResizeHandle?.Visible == true;
 
             SetCollapsed(true);
-            bool collapsed = Math.Abs(_panel.Size.X - testSize.X) < 0.5f
-                && Math.Abs(_panel.Size.Y - SolverUiTokens.Size.CollapsedHeight) < 0.5f
+            await WaitForResponsiveLayoutForTestingAsync();
+            Vector2 collapsedMinimum = _panel.GetCombinedMinimumSize();
+            bool collapsed = Math.Abs(
+                    _panel.Size.X
+                    - Math.Clamp(
+                        SolverUiTokens.Size.CollapsedWidth,
+                        Math.Min(collapsedMinimum.X, viewportSize.X),
+                        viewportSize.X)) < 0.5f
+                && Math.Abs(
+                    _panel.Size.Y
+                    - Math.Clamp(
+                        SolverUiTokens.Size.CollapsedHeight,
+                        Math.Min(collapsedMinimum.Y, viewportSize.Y),
+                        viewportSize.Y)) < 0.5f
                 && _cornerResizeHandle?.Visible == false;
 
             SetCollapsed(false);
+            await WaitForResponsiveLayoutForTestingAsync();
             bool restored = IsNear(_panel.Size, testSize);
             Vector2 calculationLimit = testSize + new Vector2(200f, 200f);
             bool directionsCorrect = IsNear(
-                    ResizePanelSize(ResizeEdge.Right, testSize, new Vector2(40f, 30f), calculationLimit),
+                    ResizePanelSize(
+                        ResizeEdge.Right,
+                        testSize,
+                        new Vector2(40f, 30f),
+                        contentMinimum,
+                        calculationLimit),
                     testSize + new Vector2(40f, 0f))
                 && IsNear(
-                    ResizePanelSize(ResizeEdge.Bottom, testSize, new Vector2(40f, 30f), calculationLimit),
+                    ResizePanelSize(
+                        ResizeEdge.Bottom,
+                        testSize,
+                        new Vector2(40f, 30f),
+                        contentMinimum,
+                        calculationLimit),
                     testSize + new Vector2(0f, 30f))
                 && IsNear(
-                    ResizePanelSize(ResizeEdge.BottomRight, testSize, new Vector2(40f, 30f), calculationLimit),
+                    ResizePanelSize(
+                        ResizeEdge.BottomRight,
+                        testSize,
+                        new Vector2(40f, 30f),
+                        contentMinimum,
+                        calculationLimit),
                     testSize + new Vector2(40f, 30f));
             _potionStrategyVisible = true;
             ApplyContentVisibility();
             ApplyResponsiveLayout();
-            float expectedSidebarWidth = testSize.X
-                + SolverPotionStrategyPanel.PreferredWidth
-                + SolverUiTokens.Spacing.Md;
-            bool sidebarKeptPrimaryWidth = Math.Abs(_panel.Size.X - expectedSidebarWidth) < 0.5f
+            await WaitForResponsiveLayoutForTestingAsync();
+            bool floatingPotionKeptPrimaryWidth = IsNear(_panel.Size, testSize)
+                && _potionStrategyPanel?.Visible == true
+                && ReferenceEquals(_potionStrategyPanel.GetParent(), _layer)
                 && _customPanelSize == testSize
                 && SolverSettings.OverlaySize == testSize;
-            return expanded && collapsed && restored && directionsCorrect && sidebarKeptPrimaryWidth;
+            bool passed = expanded && collapsed && restored && directionsCorrect
+                && floatingPotionKeptPrimaryWidth;
+            if (!passed)
+            {
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] UI_RESIZE_ASSERT expanded={expanded} collapsed={collapsed} " +
+                    $"restored={restored} directions={directionsCorrect} " +
+                    $"floating_potion={floatingPotionKeptPrimaryWidth} " +
+                    $"panel_size={_panel.Size.X:F1}x{_panel.Size.Y:F1} " +
+                    $"panel_min={_panel.GetCombinedMinimumSize().X:F1}x{_panel.GetCombinedMinimumSize().Y:F1} " +
+                    $"body_min={_body?.GetCombinedMinimumSize().X:F1}x{_body?.GetCombinedMinimumSize().Y:F1} " +
+                    $"route_min={_routeScroll?.GetCombinedMinimumSize().X:F1}x{_routeScroll?.GetCombinedMinimumSize().Y:F1} " +
+                    $"custom_size={_customPanelSize?.X:F1}x{_customPanelSize?.Y:F1}");
+            }
+            return passed;
         }
         finally
         {
@@ -287,7 +359,17 @@ internal static class SolverOverlay
             SetCollapsed(originalCollapsed);
             ApplyContentVisibility();
             ApplyResponsiveLayout();
+            await WaitForResponsiveLayoutForTestingAsync();
         }
+    }
+
+    private static async Task WaitForResponsiveLayoutForTestingAsync()
+    {
+        if (_panel == null || !GodotObject.IsInstanceValid(_panel))
+            return;
+        SceneTree tree = _panel.GetTree();
+        await _panel.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
+        await _panel.ToSignal(tree, SceneTree.SignalName.ProcessFrame);
     }
 
     private static bool IsNear(Vector2 left, Vector2 right)
@@ -325,15 +407,39 @@ internal static class SolverOverlay
 
     public static void ShowSearchStopped(Node host)
     {
-        _lastSnapshot = null;
         _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("计算已停止", Danger);
         SetPerformanceHintVisible(false);
         SetReviewText(null);
+        if (_searchBestSnapshot == null && _lastSnapshot == null)
+        {
+            SetMessageContent(
+                $"[color={SolverUiTokens.Palette.DangerHex}]本回合计算已停止。可手动开始计算；进入下一回合后是否自动计算由设置决定。[/color]");
+        }
+        else if (_summaryText != null)
+        {
+            _summaryText.Visible = true;
+            _summaryText.Text =
+                $"[color={SolverUiTokens.Palette.WarningHex}]计算已停止；下方保留停止时已经得到的当前候选路线。[/color]";
+        }
+        ShowLayer();
+        RefreshControls();
+    }
+
+    public static void ShowManualCalculationReady(Node host, bool hasPreviousCalculation)
+    {
+        _lastSnapshot = null;
+        _searchBestSnapshot = null;
+        _lastMessageText = null;
+        EnsureCreated(host);
+        _deployQueued = false;
+        SetStatus("等待手动计算", TextMuted);
+        SetPerformanceHintVisible(false);
+        SetReviewText(null);
         SetMessageContent(
-            $"[color={SolverUiTokens.Palette.DangerHex}]本场自动计算已暂停。点击“重新计算”后恢复当前及后续回合搜索。[/color]");
+            $"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动计算已关闭。点击“{(hasPreviousCalculation ? "重新计算" : "开始计算")}”生成当前回合路线。[/color]");
         ShowLayer();
         RefreshControls();
     }
@@ -341,24 +447,30 @@ internal static class SolverOverlay
     public static void ShowProgress(
         SolverProgress progress,
         bool deployWhenReady,
-        long reviewedWorldlinesBeforeSearch)
+        long reviewedWorldlinesBeforeSearch,
+        SolverOverlaySnapshot? bestSnapshot = null)
     {
+        _presentation = SolverOverlayPresentation.Searching;
+        _waitingForNextTurnPlan = false;
         if (_layer == null || !GodotObject.IsInstanceValid(_layer) || !_layer.Visible)
             return;
         _deployQueued = deployWhenReady;
-        _lastSearchingTurn = progress.CurrentTurnNumber;
         _lastSearchDeployWhenReady = deployWhenReady;
         _lastReviewedWorldlinesBeforeSearch = reviewedWorldlinesBeforeSearch;
+        if (bestSnapshot != null)
+        {
+            _searchBestSnapshot = bestSnapshot;
+            PopulateRoute(bestSnapshot, resetScroll: false);
+        }
+        string routeContext = _searchBestSnapshot is { Turns.Count: > 0 } routeSnapshot
+            ? $"已规划至第 {routeSnapshot.Turns[^1].Turn} 回合"
+            : "等待候选路线";
         SetStatus(
             "后台计算中",
             Accent,
-            deployWhenReady
-                ? $"第 {progress.CurrentTurnNumber} 回合    已排队执行"
-                : $"第 {progress.CurrentTurnNumber} 回合");
-        if (_summaryText != null)
-        {
-            _summaryText.Visible = false;
-        }
+            deployWhenReady ? $"{routeContext}    已排队执行" : routeContext);
+        if (_routeHeadingLabel != null)
+            _routeHeadingLabel.Text = "求解器当前考虑（尚未验证）";
         if (_progressText != null)
         {
             _progressText.Visible = true;
@@ -367,17 +479,16 @@ internal static class SolverOverlay
         string potionSearchPhase = progress.Phase.StartsWith("正在搜索", StringComparison.Ordinal)
             ? progress.Phase
             : string.Empty;
-        string currentBest = progress.CurrentBestResult is { } result
-            ? $"当前可采用：用 {result.ProjectedBattlePotionCount} 瓶药，" +
-              $"预计战损 {result.ProjectedBattleHpLost} · "
-            : string.Empty;
+        string reviewedWorldlinesText =
+            $"已查阅 {reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线";
         SetReviewText(potionSearchPhase);
         if (_summaryText != null)
         {
             _summaryText.Visible = true;
-            _summaryText.Text =
-                $"{currentBest}已查阅 " +
-                $"{reviewedWorldlinesBeforeSearch + progress.ReviewedWorldlines:N0} 条世界线";
+            _summaryText.Text = _searchBestSnapshot is { } snapshot
+                ? SolverUiTokens.AdaptRichTextToActiveTheme(snapshot.SummaryText) +
+                  $"\n{reviewedWorldlinesText}"
+                : reviewedWorldlinesText;
         }
         if (_searchProgressBar != null)
         {
@@ -399,7 +510,11 @@ internal static class SolverOverlay
         bool deployWhenReady,
         long reviewedWorldlinesBeforeSearch)
     {
+        _presentation = SolverOverlayPresentation.Searching;
+        _waitingForNextTurnPlan = false;
+        SolverController.InvalidateRenderedRouteAdoptionSeed();
         _lastSnapshot = null;
+        _searchBestSnapshot = null;
         _lastMessageText = null;
         _lastSearchingTurn = turn;
         _lastSearchDeployWhenReady = deployWhenReady;
@@ -411,10 +526,12 @@ internal static class SolverOverlay
             "后台计算中",
             Accent,
             deployWhenReady ? $"第 {turn} 回合    已排队执行" : $"第 {turn} 回合");
+        if (_routeHeadingLabel != null)
+            _routeHeadingLabel.Text = "求解器当前考虑（尚未验证）";
         if (_summaryText != null)
         {
             _summaryText.Visible = true;
-            _summaryText.Text = $"[color={SolverUiTokens.Palette.TextSecondaryHex}]正在准备搜索…[/color]";
+            _summaryText.Text = $"[color={SolverUiTokens.Palette.TextSecondaryHex}]正在计算当前回合，等待可存活候选…[/color]";
         }
         if (_progressText != null)
             _progressText.Visible = false;
@@ -435,11 +552,11 @@ internal static class SolverOverlay
             _deathOutcomeLabel.Visible = false;
         for (int index = 0; index < SolverWeights.UiTurnRows; index++)
         {
-            SetRouteRowVisible(index, index < 3);
-            if (index >= 3)
+            SetRouteRowVisible(index, index == 0);
+            if (index != 0)
                 continue;
-            RouteRows[index].TurnLabel.Text = $"第 {turn + index} 回合";
-            RouteRows[index].ShowStatus("等待搜索结果…");
+            RouteRows[index].TurnLabel.Text = $"第 {turn} 回合";
+            RouteRows[index].ShowStatus("等待当前回合候选…");
             RouteRows[index].SetOutcome(string.Empty, TextMuted);
         }
         if (_routeScroll != null)
@@ -458,7 +575,10 @@ internal static class SolverOverlay
 
     public static void ShowResult(Node host, SolverOverlaySnapshot snapshot)
     {
+        _presentation = SolverOverlayPresentation.Ready;
+        _waitingForNextTurnPlan = false;
         _lastSnapshot = snapshot;
+        _searchBestSnapshot = null;
         _lastMessageText = null;
         EnsureCreated(host);
         _deployQueued = false;
@@ -468,10 +588,10 @@ internal static class SolverOverlay
             SolverOverlayTone.Success => Success,
             _ => Accent,
         };
-        SetStatus(
-            snapshot.StatusText,
-            statusColor,
-            $"第 {snapshot.StartTurnNumber} 回合");
+        string routeContext = snapshot.Turns.Count > 0
+            ? $"已规划至第 {snapshot.Turns[^1].Turn} 回合"
+            : $"第 {snapshot.StartTurnNumber} 回合";
+        SetStatus(snapshot.StatusText, statusColor, routeContext);
         if (_summaryPanel != null)
             _summaryPanel.Visible = true;
         if (_summaryText != null)
@@ -482,10 +602,28 @@ internal static class SolverOverlay
         if (_progressText != null)
             _progressText.Visible = false;
         SetReviewText(snapshot.ReviewSummaryText);
-        SetPerformanceHintVisible(snapshot.ProjectedBattleHpLost > 0);
+        bool hasRouteDetails = !string.IsNullOrEmpty(snapshot.DetailsText);
+        SetPerformanceHintVisible(hasRouteDetails && snapshot.ProjectedBattleHpLost > 0);
         if (_searchProgressBar != null)
             _searchProgressBar.Visible = false;
 
+        if (_routeHeadingLabel != null)
+            _routeHeadingLabel.Text = "推荐路线";
+        PopulateRoute(snapshot, resetScroll: true);
+        if (_detailsButton != null)
+            _detailsButton.Visible = hasRouteDetails;
+        if (_detailsText != null)
+            _detailsText.Text = SolverUiTokens.AdaptRichTextToActiveTheme(snapshot.DetailsText);
+        SetDetailsVisible(false);
+        ShowLayer();
+        RefreshControls();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_STATE state=ready turn={snapshot.StartTurnNumber} " +
+            $"risk={snapshot.HasRisk} only_death_routes={snapshot.OnlyDeathRoutesFound}");
+    }
+
+    private static void PopulateRoute(SolverOverlaySnapshot snapshot, bool resetScroll)
+    {
         SetRouteVisibility(true);
         if (_potionOutcomeLabel != null)
         {
@@ -512,33 +650,35 @@ internal static class SolverOverlay
             RouteRows[index].SetOutcome(
                 outcome,
                 turn.CombatEnded ? Success : turn.HpLoss > 0 ? Danger : TextMuted,
-                $"余 {turn.EnergyLeft} 费");
+                energyText: $"余 {turn.EnergyLeft} 费",
+                enemyDamageText: turn.EnemyHpDamageLost is { } damage
+                    ? $"对敌伤害 {damage}"
+                    : string.Empty);
         }
-        if (_routeScroll != null)
+        if (resetScroll && _routeScroll != null)
             _routeScroll.ScrollVertical = 0;
 
         if (_hpOutcomeLabel != null)
         {
             _hpOutcomeLabel.Text = snapshot.HpOutcomeText;
-            _hpOutcomeLabel.AddThemeColorOverride("font_color", snapshot.ProjectedBattleHpLost > 0 ? Danger : Success);
+            _hpOutcomeLabel.AddThemeColorOverride(
+                "font_color",
+                snapshot.ProjectedBattleHpLost > 0 ? Danger : Success);
         }
-        if (_detailsButton != null)
-            _detailsButton.Visible = true;
-        if (_detailsText != null)
-            _detailsText.Text = SolverUiTokens.AdaptRichTextToActiveTheme(snapshot.DetailsText);
-        SetDetailsVisible(false);
-        ShowLayer();
-        RefreshControls();
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] UI_STATE state=ready turn={snapshot.StartTurnNumber} " +
-            $"risk={snapshot.HasRisk} only_death_routes={snapshot.OnlyDeathRoutesFound}");
     }
 
     public static void ShowDeploying(Node host, int turn, int actionCount)
     {
+        _presentation = SolverOverlayPresentation.Deploying;
+        _waitingForNextTurnPlan = false;
+        _lastDeploymentTurn = turn;
+        _lastDeploymentActionCount = actionCount;
+        _lastDeploymentEndedTurn = false;
         EnsureCreated(host);
         _deployQueued = false;
         SetStatus("正在执行", Warning, $"第 {turn} 回合");
+        if (_routeHeadingLabel != null)
+            _routeHeadingLabel.Text = "正在执行的路线";
         if (_summaryPanel != null)
             _summaryPanel.Visible = true;
         if (_summaryText != null)
@@ -597,11 +737,18 @@ internal static class SolverOverlay
 
     public static void ShowDeploymentComplete(Node host, int turn, int actionCount, bool endedTurn)
     {
+        _presentation = SolverOverlayPresentation.ExecutedHistory;
+        _waitingForNextTurnPlan = false;
+        _lastDeploymentTurn = turn;
+        _lastDeploymentActionCount = actionCount;
+        _lastDeploymentEndedTurn = endedTurn;
         EnsureCreated(host);
         ShowDeploymentStep(actionCount, actionCount, null);
         RouteRows[0].SetEndTurnDeploymentState(active: false, completed: endedTurn);
         _deployQueued = false;
         SetStatus("执行完成", Accent, $"第 {turn} 回合");
+        if (_routeHeadingLabel != null)
+            _routeHeadingLabel.Text = "已执行路线（后续回合待校验）";
         if (_summaryPanel != null)
             _summaryPanel.Visible = true;
         if (_summaryText != null)
@@ -616,6 +763,30 @@ internal static class SolverOverlay
         ShowLayer();
         RefreshControls();
         Entry.Logger.Info($"[CombatSolver/Test] UI_STATE state=deployment_complete turn={turn} card_count={actionCount} end_turn={endedTurn}");
+    }
+
+    public static void ShowWaitingForNextTurnPlan(Node host)
+    {
+        _presentation = SolverOverlayPresentation.ExecutedHistory;
+        _waitingForNextTurnPlan = true;
+        if (_lastSnapshot == null)
+        {
+            Show(host, "[b]战斗路线求解器[/b]\n等待下一回合方案。");
+            return;
+        }
+
+        EnsureCreated(host);
+        SetStatus("等待下一回合方案", TextMuted, $"第 {_lastDeploymentTurn} 回合已执行");
+        if (_routeHeadingLabel != null)
+            _routeHeadingLabel.Text = "已执行路线（后续回合待校验）";
+        if (_summaryText != null)
+        {
+            _summaryText.Visible = true;
+            _summaryText.Text =
+                $"[color={SolverUiTokens.Palette.TextSecondaryHex}]当前路线已经执行；等待下一回合方案就绪。[/color]";
+        }
+        ShowLayer();
+        RefreshControls();
     }
 
     public static void ShowFullAutoStoppedAtCombatEnd(int turn)
@@ -678,33 +849,57 @@ internal static class SolverOverlay
 
     public static void RefreshControls()
     {
-        if (_recalculateButton == null || _executeButton == null || _fullAutoButton == null)
+        if (_recalculateButton == null || _stopSearchButton == null || _adoptRouteButton == null
+            || _executeButton == null || _fullAutoButton == null)
             return;
 
         RefreshFeedbackBanner();
 
         bool solverDisabled = SolverController.SolverDisabled;
-        _recalculateButton.Disabled = solverDisabled || SolverController.IsSearching || SolverController.IsDeploying;
+        bool searching = SolverController.IsSearching;
+        bool adoptingRoute = SolverController.IsAdoptingCurrentRoute;
+        bool canAdoptRoute = SolverController.CanAdoptCurrentRoute;
+        bool canApplyCurrentTurn = SolverController.CanApplyCurrentTurn;
+        bool canExecuteCurrentTurn = SolverController.CanExecuteCurrentTurn;
+        _recalculateButton.Text = !SolverController.AutomaticCalculationEnabled
+            && !SolverController.HasCalculatedThisCombat
+                ? "开始计算"
+                : "重新计算";
+        _recalculateButton.Disabled = solverDisabled || searching
+            || SolverController.IsDeploying || adoptingRoute;
+        _stopSearchButton.Disabled = solverDisabled || !searching || SolverController.IsStoppingSearch;
+        _adoptRouteButton.Disabled = solverDisabled || !canAdoptRoute || adoptingRoute;
+        _adoptRouteButton.Text = adoptingRoute ? "正在采用…" : "采用当前路线";
+        SolverButtonStyle adoptRouteStyle = canAdoptRoute && !adoptingRoute
+            ? SolverButtonStyle.Positive
+            : SolverButtonStyle.Secondary;
+        if (_renderedAdoptRouteButtonStyle != adoptRouteStyle)
+        {
+            SolverUiTokens.ApplyButtonStyle(_adoptRouteButton, adoptRouteStyle);
+            _renderedAdoptRouteButtonStyle = adoptRouteStyle;
+        }
         _executeButton.Disabled = solverDisabled
             || SolverController.IsDeploying
-            || SolverController.IsAdoptingCurrentSearchResult;
+            || SolverController.IsApplyingCurrentTurn
+            || adoptingRoute
+            || searching && !canApplyCurrentTurn
+            || !searching && !canExecuteCurrentTurn;
         if (SolverController.IsDeploying)
             _executeButton.Text = "执行中…";
-        else if (SolverController.IsAdoptingCurrentSearchResult)
-            _executeButton.Text = "正在采用…";
-        else if (SolverController.CanAdoptCurrentSearchResult)
-            _executeButton.Text = "采用当前路线";
-        else if (SolverController.IsSearching)
-            _executeButton.Text = "停止计算";
+        else if (SolverController.IsApplyingCurrentTurn)
+            _executeButton.Text = "正在应用…";
+        else if (searching)
+            _executeButton.Text = "应用当前回合";
         else if (_deployQueued)
             _executeButton.Text = "已排队执行";
+        else if (_presentation == SolverOverlayPresentation.ExecutedHistory
+                 && !canExecuteCurrentTurn)
+            _executeButton.Text = "等待下一回合";
         else
             _executeButton.Text = "执行本回合";
-        SolverButtonStyle executeStyle = SolverController.CanAdoptCurrentSearchResult
+        SolverButtonStyle executeStyle = canApplyCurrentTurn
             ? SolverButtonStyle.Positive
-            : SolverController.IsSearching
-                ? SolverButtonStyle.Danger
-                : SolverButtonStyle.Primary;
+            : SolverButtonStyle.Primary;
         if (_renderedExecuteButtonStyle != executeStyle)
         {
             SolverUiTokens.ApplyButtonStyle(_executeButton, executeStyle);
@@ -712,7 +907,7 @@ internal static class SolverOverlay
         }
 
         _fullAutoButton.Text = SolverController.FullAutoEnabled ? "全自动：开" : "全自动：关";
-        _fullAutoButton.Disabled = solverDisabled;
+        _fullAutoButton.Disabled = solverDisabled || adoptingRoute;
         if (_renderedFullAutoStyle != SolverController.FullAutoEnabled)
         {
             SolverUiTokens.ApplyButtonStyle(
@@ -751,22 +946,23 @@ internal static class SolverOverlay
             return;
         }
 
-        SolverTheftPolicy policy = SolverController.TheftPolicy ?? SolverTheftPolicy.PreserveResources;
+        SolverTheftPolicy activePolicy = SolverController.TheftPolicy
+            ?? SolverTheftPolicy.PreserveResources;
         _preserveResourcesButton.Disabled = solverDisabled || SolverController.IsDeploying;
         _letEscapeButton.Disabled = solverDisabled || SolverController.IsDeploying;
-        if (_renderedTheftPolicy != policy)
+        if (_renderedTheftPolicy != activePolicy)
         {
             SolverUiTokens.ApplyButtonStyle(
                 _preserveResourcesButton,
-                policy == SolverTheftPolicy.PreserveResources
+                activePolicy == SolverTheftPolicy.PreserveResources
                     ? SolverButtonStyle.Positive
                     : SolverButtonStyle.Secondary);
             SolverUiTokens.ApplyButtonStyle(
                 _letEscapeButton,
-                policy == SolverTheftPolicy.LetEscape
+                activePolicy == SolverTheftPolicy.LetEscape
                     ? SolverButtonStyle.Primary
                     : SolverButtonStyle.Secondary);
-            _renderedTheftPolicy = policy;
+            _renderedTheftPolicy = activePolicy;
         }
     }
 
@@ -781,7 +977,16 @@ internal static class SolverOverlay
         if (_panel == null || !GodotObject.IsInstanceValid(_panel))
             return;
         float opacity = Math.Clamp(SolverSettings.Current.OverlayOpacity, 0.25f, 1f);
-        _panel.Modulate = new Color(1f, 1f, 1f, opacity);
+        Color modulate = new(1f, 1f, 1f, opacity);
+        _panel.Modulate = modulate;
+        if (_rightResizeHandle != null)
+            _rightResizeHandle.Modulate = modulate;
+        if (_bottomResizeHandle != null)
+            _bottomResizeHandle.Modulate = modulate;
+        if (_cornerResizeHandle != null)
+            _cornerResizeHandle.Modulate = modulate;
+        if (_potionStrategyPanel != null)
+            _potionStrategyPanel.Modulate = modulate;
     }
 
     public static void ApplyConfiguredTheme()
@@ -805,6 +1010,8 @@ internal static class SolverOverlay
         bool wasPotionStrategyVisible = _potionStrategyVisible;
         bool wasCollapsed = _collapsed;
         bool wereDetailsVisible = _detailsVisible;
+        SolverOverlayPresentation presentation = _presentation;
+        bool wasWaitingForNextTurnPlan = _waitingForNextTurnPlan;
         CanvasLayer oldLayer = _layer;
         oldLayer.Visible = false;
         oldLayer.QueueFree();
@@ -821,11 +1028,26 @@ internal static class SolverOverlay
         _remainingLayoutPasses = 0;
         _renderedFullAutoStyle = null;
         _renderedExecuteButtonStyle = null;
+        _renderedAdoptRouteButtonStyle = null;
         _renderedTheftPolicy = null;
 
         if (_lastSnapshot is { } snapshot)
         {
             ShowResult(host, snapshot);
+            if (presentation == SolverOverlayPresentation.Deploying)
+                ShowDeploying(host, _lastDeploymentTurn, _lastDeploymentActionCount);
+            else if (presentation == SolverOverlayPresentation.ExecutedHistory)
+            {
+                ShowDeploymentComplete(
+                    host,
+                    _lastDeploymentTurn,
+                    _lastDeploymentActionCount,
+                    _lastDeploymentEndedTurn);
+                if (wasWaitingForNextTurnPlan)
+                    ShowWaitingForNextTurnPlan(host);
+            }
+            if (SolverController.AutomaticSearchPaused)
+                ShowSearchStopped(host);
         }
         else if (SolverController.SolverDisabled)
         {
@@ -842,6 +1064,10 @@ internal static class SolverOverlay
                 _lastSearchingTurn,
                 _lastSearchDeployWhenReady,
                 _lastReviewedWorldlinesBeforeSearch);
+        }
+        else if (!SolverController.AutomaticCalculationEnabled)
+        {
+            ShowManualCalculationReady(host, SolverController.HasCalculatedThisCombat);
         }
         else
         {
@@ -945,7 +1171,6 @@ internal static class SolverOverlay
 
         _potionStrategyPanel = new SolverPotionStrategyPanel();
         _potionStrategyPanel.DirectiveChanged += OnPotionDirectiveChanged;
-        contentColumns.AddChild(_potionStrategyPanel);
 
         _body = new VBoxContainer
         {
@@ -962,13 +1187,13 @@ internal static class SolverOverlay
             MouseFilter = Control.MouseFilterEnum.Ignore,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
         };
-        Label routeHeading = CreateTextLabel(
+        _routeHeadingLabel = CreateTextLabel(
             "推荐路线",
             SolverUiTokens.Type.Body,
             TextPrimary,
             FontType.Bold);
-        routeHeading.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
-        _routeHeadingRow.AddChild(routeHeading);
+        _routeHeadingLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _routeHeadingRow.AddChild(_routeHeadingLabel);
         _deathOutcomeLabel = CreateTextLabel(
             "未找到生还路线",
             SolverUiTokens.Type.Body,
@@ -1033,6 +1258,7 @@ internal static class SolverOverlay
         lowerStack.AddChild(footerArea);
 
         layer.AddChild(panel);
+        layer.AddChild(_potionStrategyPanel);
         _rightResizeHandle = CreateResizeHandle("RightResizeHandle", ResizeEdge.Right);
         _bottomResizeHandle = CreateResizeHandle("BottomResizeHandle", ResizeEdge.Bottom);
         _cornerResizeHandle = CreateResizeHandle("CornerResizeHandle", ResizeEdge.BottomRight);
@@ -1144,13 +1370,6 @@ internal static class SolverOverlay
         }
         header.AddChild(_collapseButton);
 
-        _headerPotionSpacer = new Control
-        {
-            Name = "PotionHeaderAnchorSpacer",
-            Visible = false,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        header.AddChild(_headerPotionSpacer);
         return header;
     }
 
@@ -1367,6 +1586,17 @@ internal static class SolverOverlay
         _recalculateButton.CustomMinimumSize = new Vector2(112, SolverUiTokens.Size.ButtonHeight);
         _recalculateButton.Pressed += OnRecalculatePressed;
         footer.AddChild(_recalculateButton);
+
+        _stopSearchButton = CreateButton("停止计算", false);
+        SolverUiTokens.ApplyButtonStyle(_stopSearchButton, SolverButtonStyle.Danger);
+        _stopSearchButton.CustomMinimumSize = new Vector2(112, SolverUiTokens.Size.ButtonHeight);
+        _stopSearchButton.Pressed += OnStopSearchPressed;
+        footer.AddChild(_stopSearchButton);
+
+        _adoptRouteButton = CreateButton("采用当前路线", false);
+        _adoptRouteButton.CustomMinimumSize = new Vector2(132, SolverUiTokens.Size.ButtonHeight);
+        _adoptRouteButton.Pressed += OnAdoptRoutePressed;
+        footer.AddChild(_adoptRouteButton);
 
         _executeButton = CreateButton("执行本回合", true);
         _renderedExecuteButtonStyle = SolverButtonStyle.Primary;
@@ -1666,24 +1896,18 @@ internal static class SolverOverlay
             _mainStack.Visible = !_settingsVisible || _collapsed;
         if (_body != null)
             _body.Visible = !_collapsed && !_settingsVisible;
+        if (_rightResizeHandle != null)
+            _rightResizeHandle.Visible = !_collapsed;
+        if (_bottomResizeHandle != null)
+            _bottomResizeHandle.Visible = !_collapsed;
+        if (_cornerResizeHandle != null)
+            _cornerResizeHandle.Visible = !_collapsed;
         if (_footerDivider != null)
             _footerDivider.Visible = !_collapsed && !_settingsVisible;
         if (_settingsPanel != null)
             _settingsPanel.Visible = !_collapsed && _settingsVisible;
         if (_potionStrategyPanel != null)
             _potionStrategyPanel.Visible = !_collapsed && !_settingsVisible && _potionStrategyVisible;
-        if (_headerPotionSpacer != null)
-        {
-            bool reservePotionSidebar = !_collapsed && !_settingsVisible && _potionStrategyVisible;
-            _headerPotionSpacer.Visible = reservePotionSidebar;
-            _headerPotionSpacer.CustomMinimumSize = reservePotionSidebar
-                ? new Vector2(
-                    SolverPotionStrategyPanel.PreferredWidth
-                    + SolverUiTokens.Spacing.Md
-                    - SolverUiTokens.Spacing.Sm,
-                    0)
-                : Vector2.Zero;
-        }
         if (_settingsButton != null)
         {
             _settingsButton.Text = _settingsVisible ? "返回" : "设置";
@@ -1716,28 +1940,38 @@ internal static class SolverOverlay
         float edge = SolverUiTokens.Size.ResizeEdgeThickness;
         float availableWidth = Math.Max(0f, viewportSize.X - edge * 2f);
         float availableHeight = Math.Max(0f, viewportSize.Y - edge * 2f);
-        float potionSidebarWidth = CurrentPotionSidebarWidth();
+        Vector2 contentMinimum = _panel.GetCombinedMinimumSize();
         float defaultPrimaryWidth = Math.Min(
             SolverUiTokens.Size.ExpandedMaxWidth,
             Math.Max(SolverUiTokens.Size.ExpandedMinWidth, viewportSize.X * 0.58f));
-        float primaryWidth = _customPanelSize?.X ?? defaultPrimaryWidth;
+        float minimumWidth = Math.Min(
+            Math.Max(SolverSettings.MinimumOverlayWidth, contentMinimum.X),
+            availableWidth);
         float width = _collapsed
-            ? _customPanelSize?.X ?? SolverUiTokens.Size.CollapsedWidth
-            : primaryWidth + potionSidebarWidth;
-        width = Math.Min(width, availableWidth);
+            ? Math.Clamp(
+                SolverUiTokens.Size.CollapsedWidth,
+                Math.Min(contentMinimum.X, availableWidth),
+                availableWidth)
+            : Math.Clamp(_customPanelSize?.X ?? defaultPrimaryWidth, minimumWidth, availableWidth);
 
         float height;
         if (_collapsed)
         {
-            height = Math.Min(SolverUiTokens.Size.CollapsedHeight, availableHeight);
+            height = Math.Clamp(
+                SolverUiTokens.Size.CollapsedHeight,
+                Math.Min(contentMinimum.Y, availableHeight),
+                availableHeight);
         }
         else if (_customPanelSize is { } customSize)
         {
-            height = Math.Min(customSize.Y, availableHeight);
+            float minimumHeight = Math.Min(
+                Math.Max(SolverSettings.MinimumOverlayHeight, contentMinimum.Y),
+                availableHeight);
+            height = Math.Clamp(customSize.Y, minimumHeight, availableHeight);
         }
         else
         {
-            float maximumHeight = _settingsVisible || _potionStrategyVisible
+            float maximumHeight = _settingsVisible
                 ? 540f
                 : SolverUiTokens.Size.ExpandedMaxHeight;
             height = Math.Min(
@@ -1765,12 +1999,8 @@ internal static class SolverOverlay
         _panel.OffsetRight = _panelPosition.X + width;
         _panel.OffsetBottom = _panelPosition.Y + height;
         ApplyResizeHandleBounds(width, height);
+        ApplyPotionStrategyBounds(viewportSize, width, height);
     }
-
-    private static float CurrentPotionSidebarWidth()
-        => !_collapsed && !_settingsVisible && _potionStrategyVisible
-            ? SolverPotionStrategyPanel.PreferredWidth + SolverUiTokens.Spacing.Md
-            : 0f;
 
     private static void ApplyResizeHandleBounds(float panelWidth, float panelHeight)
     {
@@ -1818,6 +2048,30 @@ internal static class SolverOverlay
         handle.OffsetBottom = y + height;
     }
 
+    private static void ApplyPotionStrategyBounds(Vector2 viewportSize, float panelWidth, float panelHeight)
+    {
+        if (_potionStrategyPanel == null || !GodotObject.IsInstanceValid(_potionStrategyPanel))
+            return;
+        const float edge = 8f;
+        float width = Math.Min(
+            SolverPotionStrategyPanel.PreferredWidth,
+            Math.Max(0f, viewportSize.X - edge * 2f));
+        float height = Math.Min(panelHeight, Math.Max(0f, viewportSize.Y - edge * 2f));
+        float maximumX = Math.Max(edge, viewportSize.X - width - edge);
+        float rightOfPanelX = _panelPosition.X + panelWidth + SolverUiTokens.Spacing.Md;
+        float x = rightOfPanelX <= maximumX
+            ? rightOfPanelX
+            : Math.Clamp(_panelPosition.X + panelWidth - width, edge, maximumX);
+        float y = Math.Clamp(
+            _panelPosition.Y,
+            edge,
+            Math.Max(edge, viewportSize.Y - height - edge));
+        _potionStrategyPanel.OffsetLeft = x;
+        _potionStrategyPanel.OffsetTop = y;
+        _potionStrategyPanel.OffsetRight = x + width;
+        _potionStrategyPanel.OffsetBottom = y + height;
+    }
+
     private static void OnHeaderGuiInput(InputEvent inputEvent)
     {
         if (_panel == null)
@@ -1858,14 +2112,14 @@ internal static class SolverOverlay
                 _activeResizeEdge = edge;
                 _resizeStartMousePosition = _viewport.GetMousePosition();
                 _resizeStartPrimarySize = new Vector2(
-                    Math.Max(
-                        SolverSettings.MinimumOverlayWidth,
-                        _panel.Size.X - CurrentPotionSidebarWidth()),
+                    Math.Max(SolverSettings.MinimumOverlayWidth, _panel.Size.X),
                     Math.Max(SolverSettings.MinimumOverlayHeight, _panel.Size.Y));
                 _customPanelSize = _resizeStartPrimarySize;
+                _lastResizeLayoutAt = System.Environment.TickCount64 - ResizeLayoutIntervalMilliseconds;
             }
             else if (_resizing)
             {
+                ResizeToMousePosition();
                 _resizing = false;
                 ApplyResponsiveLayout();
                 Vector2 customSize = _customPanelSize
@@ -1879,20 +2133,35 @@ internal static class SolverOverlay
         }
         if (!_resizing || inputEvent is not InputEventMouseMotion)
             return;
+        long now = System.Environment.TickCount64;
+        if (now - _lastResizeLayoutAt < ResizeLayoutIntervalMilliseconds)
+            return;
+        _lastResizeLayoutAt = now;
+        ResizeToMousePosition();
+    }
 
-        Vector2 delta = _viewport.GetMousePosition() - _resizeStartMousePosition;
+    private static void ResizeToMousePosition()
+    {
+        if (_panel == null || _viewport == null)
+            return;
         Vector2 viewportSize = _viewport.GetVisibleRect().Size;
         float edgeMargin = SolverUiTokens.Size.ResizeEdgeThickness;
         float maximumWidth = Math.Max(
             SolverSettings.MinimumOverlayWidth,
-            viewportSize.X - _panelPosition.X - edgeMargin - CurrentPotionSidebarWidth());
+            viewportSize.X - _panelPosition.X - edgeMargin);
         float maximumHeight = Math.Max(
             SolverSettings.MinimumOverlayHeight,
             viewportSize.Y - _panelPosition.Y - edgeMargin);
+        Vector2 contentMinimum = _panel.GetCombinedMinimumSize();
+        Vector2 minimumSize = new(
+            Math.Max(SolverSettings.MinimumOverlayWidth, contentMinimum.X),
+            Math.Max(SolverSettings.MinimumOverlayHeight, contentMinimum.Y));
+        Vector2 delta = _viewport.GetMousePosition() - _resizeStartMousePosition;
         _customPanelSize = ResizePanelSize(
             _activeResizeEdge,
             _resizeStartPrimarySize,
             delta,
+            minimumSize,
             new Vector2(maximumWidth, maximumHeight));
         ApplyResponsiveLayout();
     }
@@ -1901,6 +2170,7 @@ internal static class SolverOverlay
         ResizeEdge edge,
         Vector2 startSize,
         Vector2 delta,
+        Vector2 minimumSize,
         Vector2 maximumSize)
     {
         float width = edge is ResizeEdge.Right or ResizeEdge.BottomRight
@@ -1910,8 +2180,8 @@ internal static class SolverOverlay
             ? startSize.Y + delta.Y
             : startSize.Y;
         return new Vector2(
-            Math.Clamp(width, SolverSettings.MinimumOverlayWidth, maximumSize.X),
-            Math.Clamp(height, SolverSettings.MinimumOverlayHeight, maximumSize.Y));
+            Math.Clamp(width, minimumSize.X, Math.Max(minimumSize.X, maximumSize.X)),
+            Math.Clamp(height, minimumSize.Y, Math.Max(minimumSize.Y, maximumSize.Y)));
     }
 
     private static void ResetOverlayPosition()
@@ -1936,18 +2206,27 @@ internal static class SolverOverlay
         SolverController.RequestSearch(host, state, SearchReason.Manual);
     }
 
+    private static void OnStopSearchPressed()
+    {
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=stop_search");
+        if (NGame.Instance is { } host)
+            SolverController.StopSearchByUser(host);
+        RefreshControls();
+    }
+
+    private static void OnAdoptRoutePressed()
+    {
+        SolverController.AdoptCurrentRoute();
+        RefreshControls();
+    }
+
     private static void OnExecutePressed()
     {
         NGame? host = NGame.Instance;
         if (host != null && SolverController.IsSearching)
         {
-            if (SolverController.CanAdoptCurrentSearchResult)
-            {
-                SolverController.AdoptCurrentSearchResult();
-                return;
-            }
-            Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=stop_search");
-            SolverController.StopSearchByUser(host);
+            if (SolverController.CanApplyCurrentTurn)
+                SolverController.ApplyCurrentTurn();
             return;
         }
 

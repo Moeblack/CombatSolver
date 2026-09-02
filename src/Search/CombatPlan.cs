@@ -56,6 +56,13 @@ internal enum SearchBoundaryReason
     TimeLimit,
 }
 
+internal enum SolverResultScope
+{
+    SearchCompletion,
+    CurrentTurnAdoption,
+    RouteAdoption,
+}
+
 [Flags]
 internal enum SearchRouteTraits
 {
@@ -160,6 +167,7 @@ internal sealed record PlanAction(
 internal sealed record TurnOutcome(
     int Turn,
     int HpLost,
+    int EnemyHpLost,
     int SoldHp,
     int MaxBlock,
     int ActualBlock,
@@ -476,6 +484,7 @@ internal sealed record CachedContinuation(
 
 internal sealed class SolverResult
 {
+    public SolverResultScope ResultScope { get; internal set; } = SolverResultScope.SearchCompletion;
     public SolverSearchPhase SearchPhase { get; internal set; } = SolverSearchPhase.Short;
     public bool DeepSearchTriggered { get; internal set; }
     public bool DeepSearchImprovedResult { get; internal set; }
@@ -596,6 +605,7 @@ internal sealed class SolverResult
     public required int SoldHpThreshold { get; init; }
     public required IReadOnlyDictionary<int, int> SoldHpByTurn { get; init; }
     public required IReadOnlyDictionary<int, int> HpLostByTurn { get; init; }
+    public required IReadOnlyDictionary<int, int> EnemyHpLostByTurn { get; init; }
     public required IReadOnlyDictionary<int, int> MaxBlockByTurn { get; init; }
     public required IReadOnlyDictionary<int, int> ActualBlockByTurn { get; init; }
     public required IReadOnlyDictionary<int, int> EnergyLeftByTurn { get; init; }
@@ -715,6 +725,7 @@ internal sealed class SolverResult
             SoldHpThreshold = SoldHpThreshold,
             SoldHpByTurn = soldByTurn,
             HpLostByTurn = HpLostByTurn,
+            EnemyHpLostByTurn = EnemyHpLostByTurn,
             MaxBlockByTurn = MaxBlockByTurn,
             ActualBlockByTurn = ActualBlockByTurn,
             EnergyLeftByTurn = EnergyLeftByTurn,

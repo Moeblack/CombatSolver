@@ -444,15 +444,15 @@ internal sealed partial class UnattendedTestRunner
                 && state != null
                 && PlayerTurnSetupCoordinator.IsInitialChoiceSearchPendingForTesting(state))
             {
-                if (!SolverController.CanAdoptCurrentSearchResult)
+                if (!SolverController.CanAdoptCurrentRoute)
                 {
                     await NextFrameAsync();
                     continue;
                 }
                 int turn = player?.PlayerCombatState?.TurnNumber
                     ?? throw new InvalidOperationException("开局搜索控件测试找不到玩家回合。");
-                SolverController.AdoptCurrentSearchResult();
-                if (!SolverController.IsAdoptingCurrentSearchResult)
+                SolverController.AdoptCurrentRoute();
+                if (!SolverController.IsAdoptingCurrentRoute)
                     throw new InvalidOperationException("开局搜索的当前完整路线没有进入采纳状态。");
                 SolverController.RequestDeploy(_host, state);
                 if (!PlayerTurnSetupCoordinator.TakeoverRequestedForTesting)

@@ -146,7 +146,7 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         PanelContainer card = new()
         {
             Name = $"PotionStrategyCard{slot}",
-            CustomMinimumSize = new Vector2(CardMinimumWidth, 170),
+            CustomMinimumSize = new Vector2(CardMinimumWidth, 64),
             MouseFilter = MouseFilterEnum.Pass,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
@@ -155,20 +155,22 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
             SolverUiTokens.Palette.BorderSubtle,
             SolverUiTokens.Radius.Medium,
             SolverUiTokens.Spacing.Sm,
-            SolverUiTokens.Spacing.Sm));
-        VBoxContainer layout = new()
+            SolverUiTokens.Spacing.Xs));
+        HBoxContainer layout = new()
         {
             MouseFilter = MouseFilterEnum.Pass,
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            Alignment = BoxContainer.AlignmentMode.Begin,
         };
-        layout.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Xs);
+        layout.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
 
         TextureRect icon = new()
         {
             Name = "PotionIcon",
             Texture = potion.Image,
-            CustomMinimumSize = new Vector2(56, 56),
-            SizeFlagsHorizontal = SizeFlags.ShrinkCenter,
+            CustomMinimumSize = new Vector2(44, 44),
+            SizeFlagsHorizontal = SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
             ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
             StretchMode = TextureRect.StretchModeEnum.KeepAspectCentered,
             MouseFilter = MouseFilterEnum.Ignore,
@@ -176,40 +178,35 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
         layout.AddChild(icon);
 
         Label title = SolverUiTokens.CreateLabel(
-            $"#{slot + 1}  {potion.Title.GetFormattedText()}",
+            $"#{slot + 1} {potion.Title.GetFormattedText()}",
             SolverUiTokens.Type.Caption,
             SolverUiTokens.Palette.TextPrimary,
             FontType.Bold);
         title.Name = "PotionTitle";
         title.SizeFlagsHorizontal = SizeFlags.ExpandFill;
-        title.HorizontalAlignment = HorizontalAlignment.Center;
+        title.HorizontalAlignment = HorizontalAlignment.Left;
         title.AutowrapMode = TextServer.AutowrapMode.WordSmart;
-        title.CustomMinimumSize = new Vector2(0, 38);
+        title.CustomMinimumSize = new Vector2(0, 44);
+        title.TooltipText = potion.Title.GetFormattedText();
         layout.AddChild(title);
 
-        OptionButton input = CreateDirectiveInput();
-        input.Name = "PotionDirective";
+        Button input = CreateDirectiveToggle(directive);
+        input.Name = "PotionDirectiveToggle";
+        input.Disabled = controlsDisabled || !searchable;
         if (!searchable)
         {
-            input.AddItem("不可指定");
-            input.Disabled = true;
+            input.TooltipText = "该药水不可指定使用策略";
         }
         else
         {
-            input.AddItem("智能使用", (int)SolverPotionDirective.Smart);
-            input.AddItem("强制使用", (int)SolverPotionDirective.Force);
-            input.AddItem("禁用 / 保护", (int)SolverPotionDirective.Disabled);
-            input.Selected = input.GetItemIndex((int)directive);
-            input.Disabled = controlsDisabled;
             string potionId = potion.Id.Entry;
-            input.ItemSelected += index =>
+            input.Pressed += () =>
             {
-                SolverPotionDirective selected =
-                    (SolverPotionDirective)input.GetItemId((int)index);
-                DirectiveChanged?.Invoke(slot, potionId, selected);
+                directive = NextDirective(directive);
+                ApplyDirectiveToggle(input, directive);
+                DirectiveChanged?.Invoke(slot, potionId, directive);
             };
         }
-        input.SizeFlagsHorizontal = SizeFlags.ExpandFill;
         layout.AddChild(input);
         card.AddChild(layout);
         return card;
@@ -218,40 +215,71 @@ internal sealed partial class SolverPotionStrategyPanel : PanelContainer
     private void UpdateGridColumns()
         => _cards.Columns = 1;
 
-    private static OptionButton CreateDirectiveInput()
+    private static Button CreateDirectiveToggle(SolverPotionDirective directive)
     {
-        OptionButton input = new()
+        Button input = new()
         {
             FocusMode = FocusModeEnum.None,
-            CustomMinimumSize = new Vector2(148, 32),
+            CustomMinimumSize = new Vector2(40, 40),
             SizeFlagsHorizontal = SizeFlags.ShrinkEnd,
+            SizeFlagsVertical = SizeFlags.ShrinkCenter,
             MouseDefaultCursorShape = CursorShape.PointingHand,
         };
-        input.AddThemeFontSizeOverride("font_size", SolverUiTokens.Type.Body);
-        input.AddThemeColorOverride("font_color", SolverUiTokens.Palette.TextPrimary);
+        input.AddThemeFontSizeOverride("font_size", 18);
+        input.ApplyLocaleFontSubstitution(FontType.Bold, "font");
+        SolverUiTokens.ApplyTextOutline(input);
+        ApplyDirectiveToggle(input, directive);
+        return input;
+    }
+
+    private static SolverPotionDirective NextDirective(SolverPotionDirective directive)
+        => directive switch
+        {
+            SolverPotionDirective.Smart => SolverPotionDirective.Disabled,
+            SolverPotionDirective.Disabled => SolverPotionDirective.Force,
+            _ => SolverPotionDirective.Smart,
+        };
+
+    private static void ApplyDirectiveToggle(Button input, SolverPotionDirective directive)
+    {
+        (string text, string description, Color color) = directive switch
+        {
+            SolverPotionDirective.Disabled => ("x", "禁用 / 保护", SolverUiTokens.Palette.Danger),
+            SolverPotionDirective.Force => ("✓", "强制使用", SolverUiTokens.Palette.Success),
+            _ => ("-", "智能使用", SolverUiTokens.Palette.TextSecondary),
+        };
+        Color background = SolverUiTokens.IsLightTheme
+            ? SolverUiTokens.Palette.Surface
+            : SolverUiTokens.Palette.Background;
+        input.Text = text;
+        input.TooltipText = $"{description}（点击切换）";
+        input.AddThemeColorOverride("font_color", color);
+        input.AddThemeColorOverride("font_hover_color", color);
+        input.AddThemeColorOverride("font_pressed_color", color);
         input.AddThemeColorOverride("font_disabled_color", SolverUiTokens.Palette.TextMuted);
         input.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
-            SolverUiTokens.IsLightTheme
-                ? SolverUiTokens.Palette.Surface
-                : SolverUiTokens.Palette.Background,
-            SolverUiTokens.Palette.BorderSubtle,
+            background,
+            color,
             SolverUiTokens.Radius.Small,
-            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Xs,
             SolverUiTokens.Spacing.Xs));
         input.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
-            SolverUiTokens.Palette.SurfaceRaised,
-            SolverUiTokens.Palette.Accent,
+            SolverUiTokens.Palette.SurfaceHover,
+            color.Lightened(0.12f),
             SolverUiTokens.Radius.Small,
-            SolverUiTokens.Spacing.Sm,
+            SolverUiTokens.Spacing.Xs,
             SolverUiTokens.Spacing.Xs));
-        if (SolverUiTokens.IsLightTheme)
-        {
-            input.AddThemeIconOverride(
-                "arrow",
-                SolverUiTokens.CreateChevronTexture(SolverUiTokens.Palette.TextSecondary));
-        }
-        SolverUiTokens.ApplyTextOutline(input);
-        input.ApplyLocaleFontSubstitution(FontType.Bold, "font");
-        return input;
+        input.AddThemeStyleboxOverride("pressed", SolverUiTokens.CreateBox(
+            background.Darkened(0.12f),
+            color,
+            SolverUiTokens.Radius.Small,
+            SolverUiTokens.Spacing.Xs,
+            SolverUiTokens.Spacing.Xs));
+        input.AddThemeStyleboxOverride("disabled", SolverUiTokens.CreateBox(
+            SolverUiTokens.Palette.Background,
+            SolverUiTokens.Palette.BorderSubtle,
+            SolverUiTokens.Radius.Small,
+            SolverUiTokens.Spacing.Xs,
+            SolverUiTokens.Spacing.Xs));
     }
 }

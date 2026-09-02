@@ -88,9 +88,85 @@ internal sealed partial class CombatBeamSolver
         long lastProgressMs = -100;
         SolverInterimResult? currentBestResult = null;
         SearchNode? currentBestNode = null;
+        SolverInterimResult? currentTurnCandidateResult = null;
+        SearchNode? currentTurnCandidateNode = null;
+        SearchNode? currentTurnPreviewNode = null;
+        SolverRoutePreview? routePreview = null;
+        SolverRouteAdoptionSeed? routeAdoptionSeed = null;
+        SolverRouteAdoptionSeed? requestedRouteAdoptionSeed = null;
+        IReadOnlyList<SearchNode>? interruptedActive = null;
+        int routePreviewVersion = 0;
         bool adoptionReached = false;
+        bool currentTurnAdoptionReached = false;
+        int initialHp = root.InitialPlayerHp;
+        int searchedTurnLayers = 0;
+        bool timeBudgetReached = false;
 
-        void ConsiderCurrentResult(SearchNode node)
+        SolverInterimResult SummarizeCandidate(SearchNode node, bool won)
+        {
+
+            int ambergrisCount = node.Actions.Count(action =>
+                action.Kind == PlanActionKind.UsePotion
+                && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
+            return new SolverInterimResult(
+                Won: won,
+                OutstandingStolenResource: node.Snapshot.OutstandingStolenResource,
+                ProjectedBattleHpLost: battleDamage.HpLostSoFar
+                    + node.Snapshot.CumulativePlayerHpLost,
+                StrategicHpDeficit: node.Snapshot.CumulativePlayerHpLost
+                    + Math.Max(0, root.InitialPlayerMaxHp - node.Snapshot.PlayerMaxHp),
+                PotionStrategicCost: PotionUsePolicy.EffectiveStrategicHpCost(
+                    node.PotionStrategicCost,
+                    ambergrisCount,
+                    root.InitialPlayerMaxHp),
+                ProjectedBattlePotionCount: battleDamage.PotionsUsedSoFar + node.PotionCount,
+                EnemyHp: node.Snapshot.EnemyHp,
+                Score: node.Score);
+        }
+
+        // 候选节点保留完整动作父链；每个已完成回合的边界节点各自携带 Outcome。
+        IReadOnlyList<SolverFrontierTurn>? BuildFrontierTurns(SearchNode candidate)
+        {
+            if (candidate.ActionCount == 0)
+                return null;
+            Dictionary<int, (TurnOutcome Outcome, bool CombatEnded)> outcomesByTurn = [];
+            for (SearchNode? node = candidate; node != null; node = node.Parent)
+            {
+                if (node.Outcome is { } outcome)
+                    outcomesByTurn.TryAdd(outcome.Turn, (outcome, node.Snapshot.AllEnemiesDead));
+            }
+            if (outcomesByTurn.Count == 0)
+                return null;
+
+            List<SolverFrontierTurn> turns = new(outcomesByTurn.Count);
+            foreach (IGrouping<int, PlanAction> actions in candidate.Actions.GroupBy(action => action.Turn))
+            {
+                if (!outcomesByTurn.TryGetValue(actions.Key, out var materialized))
+                    continue;
+                turns.Add(new SolverFrontierTurn(
+                    actions.Key,
+                    actions.Select(WithDisplayNames).ToArray(),
+                    materialized.Outcome.HpLost,
+                    materialized.Outcome.EnemyHpLost,
+                    materialized.Outcome.EnergyLeft,
+                    materialized.CombatEnded));
+            }
+            turns.Sort((a, b) => a.Turn.CompareTo(b.Turn));
+            return turns.Count == 0 ? null : turns;
+        }
+
+
+        SearchNode? FindCurrentTurnBoundary(SearchNode node)
+        {
+            for (SearchNode? current = node; current?.Parent != null; current = current.Parent)
+            {
+                if (current.Outcome?.Turn == _startTurnNumber)
+                    return current;
+            }
+            return null;
+        }
+
+        void ConsiderCompleteVictory(SearchNode node)
         {
             if (ExplicitPotionUseCount(node) < _minimumPotionUses
                 || _enforcePotionDirectives
@@ -107,31 +183,379 @@ internal sealed partial class CombatBeamSolver
                 return;
             }
 
-            int ambergrisCount = node.Actions.Count(action =>
-                action.Kind == PlanActionKind.UsePotion
-                && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
-            SolverInterimResult candidate = new(
-                Won: true,
-                OutstandingStolenResource: node.Snapshot.OutstandingStolenResource,
-                ProjectedBattleHpLost: battleDamage.HpLostSoFar
-                    + node.Snapshot.CumulativePlayerHpLost,
-                StrategicHpDeficit: node.Snapshot.CumulativePlayerHpLost
-                    + Math.Max(0, root.InitialPlayerMaxHp - node.Snapshot.PlayerMaxHp),
-                PotionStrategicCost: PotionUsePolicy.EffectiveStrategicHpCost(
-                    node.PotionStrategicCost,
-                    ambergrisCount,
-                    root.InitialPlayerMaxHp),
-                ProjectedBattlePotionCount: battleDamage.PotionsUsedSoFar + node.PotionCount,
-                EnemyHp: node.Snapshot.EnemyHp,
-                Score: node.Score);
+            SolverInterimResult candidate = SummarizeCandidate(node, won: true);
             if (currentBestResult != null
                 && !SolverInterimResultOrdering.IsBetter(candidate, currentBestResult))
             {
                 return;
             }
-
             currentBestResult = candidate;
             currentBestNode = node;
+        }
+
+        void ConsiderCurrentTurnCandidate(SearchNode node)
+        {
+            SearchNode? boundary = FindCurrentTurnBoundary(node);
+            if (boundary == null
+                || ExplicitPotionUseCount(boundary) < _minimumPotionUses
+                || _enforcePotionDirectives
+                    && !_potionStrategy.EvaluateForcedUses(
+                            boundary.Actions,
+                            root.HasRenewablePotionShapedRock)
+                        .AllForcedUsesSatisfied
+                || !IsCurrentTurnCandidate(
+                    boundary.ActionCount,
+                    turnBoundaryReached: boundary.Action is { } boundaryAction
+                        && (boundaryAction.Kind == PlanActionKind.EndTurn
+                            || boundaryAction.EndsPlayerTurn
+                            || boundary.Snapshot.AllEnemiesDead),
+                    boundary.Snapshot.PlayerDead,
+                    boundary.Snapshot.ProjectedPlayerHp))
+            {
+                return;
+            }
+
+            SolverInterimResult candidate = SummarizeCandidate(
+                boundary,
+                boundary.Snapshot.AllEnemiesDead);
+            if (currentTurnCandidateResult != null
+                && !SolverInterimResultOrdering.IsBetter(candidate, currentTurnCandidateResult))
+            {
+                if (ReferenceEquals(boundary, currentTurnCandidateNode)
+                    && node.Outcome is { } nodeOutcome
+                    && nodeOutcome.Turn > (currentTurnPreviewNode?.Outcome?.Turn ?? int.MinValue))
+                {
+                    currentTurnPreviewNode = node;
+                }
+                return;
+            }
+            currentTurnCandidateResult = candidate;
+            currentTurnCandidateNode = boundary;
+            currentTurnPreviewNode = node;
+        }
+
+
+        SolverResult MaterializeSelectedRoute(
+            FinalPlanSelection ordering,
+            bool onlyDeathRoutesFound,
+            SolverResultScope resultScope,
+            int candidateSearchedTurnLayers,
+            bool candidateTimeBudgetReached,
+            IReadOnlyList<PlanAction>? routeAdoptionActions = null)
+        {
+            SearchMeasurement finalMeasurement = _run.Performance.Begin();
+            FinalPlanCandidate publishedCandidate = ordering.Candidate;
+            SearchNode materializedNode = publishedCandidate.Node.Snapshot.HasSimulator
+                ? publishedCandidate.Node
+                : RefreshReleasedFallback(publishedCandidate.Node);
+            RouteAnnotations materializedAnnotations = BuildRouteAnnotations(materializedNode);
+            FinalPlanCandidate selectedCandidate = publishedCandidate with
+            {
+                Node = materializedNode,
+                Snapshot = materializedNode.Snapshot,
+                Features = SearchFeatures.Capture(materializedNode),
+                FutureSold = materializedNode.FutureSoldHp,
+                BattleSold = battleDamage.SoldHpCommitted + materializedNode.FutureSoldHp,
+                PotionCount = materializedNode.PotionCount,
+            };
+            int potionBranchesRejected = ordering.PotionBranchesRejected;
+            int potionHpSaved = ordering.PotionHpSaved;
+            int potionHpRequired = ordering.PotionHpRequired;
+            int sellThreshold = SoldHpThreshold();
+            int annotatedFutureSold = materializedAnnotations.SoldHpByTurn.Values.Sum();
+            if (annotatedFutureSold != selectedCandidate.FutureSold)
+            {
+                throw new InvalidOperationException(
+                    $"卖血路径状态不一致：节点累计 {selectedCandidate.FutureSold}，逐回合累计 {annotatedFutureSold}。");
+            }
+            SearchNode best = selectedCandidate.Node with { Score = selectedCandidate.Score };
+
+            SimulationSnapshot finalSnapshot = selectedCandidate.Snapshot;
+            RouteAnnotations annotations = materializedAnnotations;
+            IReadOnlyList<CachedContinuation> continuations = BuildContinuations(best);
+            int searchedTurns = Math.Max(1, best.Actions
+                .Select(action => action.Turn)
+                .DefaultIfEmpty(_startTurnNumber)
+                .Max() - _startTurnNumber + 1);
+            SearchBoundaryReason boundary = finalSnapshot.BoundaryReason;
+            if (resultScope != SolverResultScope.RouteAdoption)
+            {
+                if (boundary == SearchBoundaryReason.None && candidateTimeBudgetReached)
+                    boundary = SearchBoundaryReason.TimeLimit;
+                else if (boundary == SearchBoundaryReason.None && _run.Expanded >= _profile.MaxExpandedNodes)
+                    boundary = SearchBoundaryReason.NodeLimit;
+                else if (boundary == SearchBoundaryReason.None
+                         && policy.VerifyIncrementalSearch
+                         && candidateSearchedTurnLayers >= SolverWeights.IncrementalVerificationMaxTurns)
+                    boundary = SearchBoundaryReason.TurnLimit;
+            }
+            int futureHpLost = finalSnapshot.CumulativePlayerHpLost;
+            int futureUnavoidableHpLost = annotations.HpLostByTurn.Sum(item =>
+                Math.Max(0, item.Value - annotations.SoldHpByTurn.GetValueOrDefault(item.Key)));
+            int battleUnavoidableHpLost = Math.Max(0, battleDamage.HpLostSoFar - battleDamage.SoldHpCommitted)
+                + futureUnavoidableHpLost;
+            ActionRelicTriggerRecorder relicTriggerRecorder = new();
+            SimulationSnapshot? annotationRoot = _includeTurnSetup
+                ? ReplayTurnSetup(best.GetTurnSetupChoices())
+                : null;
+            SimulationSnapshot annotationReplay = Replay(
+                best.Actions,
+                annotationRoot,
+                _startTurnNumber,
+                priorActionCount: 0,
+                triggerRecorder: relicTriggerRecorder);
+            annotationRoot?.ReleaseSimulator();
+            if (annotationReplay.StateKey != finalSnapshot.StateKey
+                || annotationReplay.PlayerHp != finalSnapshot.PlayerHp
+                || annotationReplay.EnemyHp != finalSnapshot.EnemyHp
+                || annotationReplay.BoundaryReason != finalSnapshot.BoundaryReason)
+            {
+                ContinuationStamp expectedStamp = ContinuationStamp.CapturePredicted(
+                    _player,
+                    (CombatPredictionSimulator)finalSnapshot.Simulator,
+                    finalSnapshot.Turn,
+                    _forecast,
+                    _startTurnNumber);
+                ContinuationStamp replayStamp = ContinuationStamp.CapturePredicted(
+                    _player,
+                    (CombatPredictionSimulator)annotationReplay.Simulator,
+                    annotationReplay.Turn,
+                    _forecast,
+                    _startTurnNumber);
+                string difference = expectedStamp.DescribeFirstDifference(replayStamp);
+                annotationReplay.ReleaseSimulator();
+                throw new InvalidOperationException(
+                    $"最终路线的遗物标注回放与选中状态不一致：{difference}；" +
+                    $"hp={finalSnapshot.PlayerHp}/{annotationReplay.PlayerHp} " +
+                    $"enemy_hp={finalSnapshot.EnemyHp}/{annotationReplay.EnemyHp} " +
+                    $"boundary={finalSnapshot.BoundaryReason}/{annotationReplay.BoundaryReason}。");
+            }
+            annotationReplay.ReleaseSimulator();
+            IReadOnlyList<PlanAction> annotatedActions = resultScope == SolverResultScope.RouteAdoption
+                && routeAdoptionActions != null
+                    ? routeAdoptionActions
+                    : best.Actions
+                        .Select((action, actionIndex) => WithDisplayNames(action) with
+                        {
+                            RelicEffects = relicTriggerRecorder.ForAction(actionIndex)
+                                .Select(trigger => new PlanRelicEffect(
+                                    trigger.RelicId,
+                                    displayNames.Relic(trigger.RelicId),
+                                    trigger.Summary))
+                                .ToArray(),
+                        })
+                        .ToArray();
+            _run.Performance.End(SearchMetricPhase.FinalSelection, finalMeasurement);
+            stopwatch.Stop();
+            long workerAllocatedBytes =
+                GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart
+                + _run.OffThreadAllocatedBytes;
+            int gen0Collections = GC.CollectionCount(0) - gen0AtStart;
+            int gen1Collections = GC.CollectionCount(1) - gen1AtStart;
+            int gen2Collections = GC.CollectionCount(2) - gen2AtStart;
+            TimeSpan gcPauseDuration = GC.GetTotalPauseDuration() - gcPauseAtStart;
+            // 必须在返回前把节点链和模拟器图压平成运行时真正需要的数据。
+            // Coordinator 会在深化期间保留短搜结果；这里若返回 SearchNode/SimulationSnapshot，
+            // 短搜的全部父链和每步模拟器都会成为长寿命 GC 根。
+            SelectedSearchPlan selectedPlan = new(
+                annotatedActions,
+                best.ActionCount,
+                best.Score);
+            SolverSnapshot selectedSnapshot = new(
+                finalSnapshot.HasRisk,
+                finalSnapshot.PlayerDead,
+                finalSnapshot.AllEnemiesDead,
+                finalSnapshot.PlayerHp,
+                finalSnapshot.PlayerMaxHp,
+                finalSnapshot.CumulativePlayerHpLost,
+                finalSnapshot.LongTermResourceValue,
+                finalSnapshot.AngerCopiesGenerated,
+                finalSnapshot.ProjectedPlayerHp,
+                finalSnapshot.PlayerBlock,
+                finalSnapshot.EnemyHp,
+                finalSnapshot.AliveEnemyCount,
+                finalSnapshot.Energy,
+                finalSnapshot.Stars,
+                finalSnapshot.HandCount,
+                finalSnapshot.OutstandingStolenResource,
+                finalSnapshot.Turn,
+                finalSnapshot.ShufflesCrossed,
+                finalSnapshot.BoundaryReason,
+                finalSnapshot.PredictionGaps.ToArray());
+            SolverResult result = new()
+            {
+                ResultScope = resultScope,
+                SearchPhase = _profile.Phase,
+                TotalSearchElapsed = stopwatch.Elapsed,
+                TotalWorkerAllocatedBytes = workerAllocatedBytes,
+                TotalGen0Collections = gen0Collections,
+                TotalGen1Collections = gen1Collections,
+                TotalGen2Collections = gen2Collections,
+                TotalGcPauseDuration = gcPauseDuration,
+                ForkMetric = _run.Performance.Snapshot(SearchMetricPhase.Fork),
+                ActionMetric = _run.Performance.Snapshot(SearchMetricPhase.Action),
+                CardExecutionMetric = _run.Performance.Snapshot(SearchMetricPhase.CardExecution),
+                CardPostProcessingMetric = _run.Performance.Snapshot(SearchMetricPhase.CardPostProcessing),
+                PotionExecutionMetric = _run.Performance.Snapshot(SearchMetricPhase.PotionExecution),
+                RoundAdvanceMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundAdvance),
+                RoundPlayerEndMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundPlayerEnd),
+                RoundEndSimulationMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEndSimulation),
+                RoundFlushMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundFlush),
+                RoundPlayerEndPowersMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundPlayerEndPowers),
+                RoundEnemyTurnMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyTurn),
+                RoundEnemyStartMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyStart),
+                RoundEnemyMovesMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyMoves),
+                RoundEnemyEndPowersMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyEndPowers),
+                RoundPlayerStartMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundPlayerStart),
+                RoundDrawMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundDraw),
+                SnapshotMetric = _run.Performance.Snapshot(SearchMetricPhase.Snapshot),
+                ThreatProjectionMetric = _run.Performance.Snapshot(SearchMetricPhase.ThreatProjection),
+                FingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.Fingerprint),
+                ProjectedShuffleMetric = _run.Performance.Snapshot(SearchMetricPhase.ProjectedShuffle),
+                PileFingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.PileFingerprint),
+                PileFingerprintMissMetric = _run.Performance.Snapshot(SearchMetricPhase.PileFingerprintMiss),
+                CardFingerprintMissMetric = _run.Performance.Snapshot(SearchMetricPhase.CardFingerprintMiss),
+                CombatFingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.CombatFingerprint),
+                PruneMetric = _run.Performance.Snapshot(SearchMetricPhase.Prune),
+                FinalSelectionMetric = _run.Performance.Snapshot(SearchMetricPhase.FinalSelection),
+                StartTurnNumber = _startTurnNumber,
+                TurnSetupChoices = best.GetTurnSetupChoices().Select(WithDisplayNames).ToArray(),
+                TurnSetupPlayState = best.GetTurnSetupPlayState(),
+                BestNode = selectedPlan,
+                Snapshot = selectedSnapshot,
+                Forecast = _forecast,
+                ExpandedNodes = _run.Expanded,
+                TotalExpandedNodes = _run.Expanded,
+                DominatedActionsPruned = _run.DominatedActionsPruned,
+                TopQueueActionsDropped = _run.TopQueueActionsDropped,
+                ActionAdmissionRepresentativesProtected = _run.ActionAdmissionRepresentativesProtected,
+                DuplicateCardBranchesPruned = _run.DuplicateCardBranchesPruned,
+                ChoiceBranchesEvaluated = _run.ChoiceBranchesEvaluated,
+                TotalChoiceBranchesEvaluated = _run.ChoiceBranchesEvaluated,
+                ShuffleBranchesPruned = _run.ShuffleBranchesPruned,
+                SoldHpBranchesPruned = _run.SoldHpBranchesPruned,
+                HpInvestmentBranchesProtected = _run.HpInvestmentBranchesProtected,
+                ReplayCount = _run.ReplayCount,
+                ForkCount = _run.ForkCount,
+                TransitionCount = _run.TransitionCount,
+                TotalTransitionCount = _run.TransitionCount,
+                ReusedNodeSnapshots = _run.ReusedNodeSnapshots,
+                TranspositionBranchesPruned = _run.TranspositionBranchesPruned,
+                RepeatableNoProgressBranchesPruned = _run.RepeatableNoProgressBranchesPruned,
+                StandPatProbes = _run.StandPatProbes,
+                ParallelExpansionWaves = _run.ParallelExpansionWaves,
+                ParallelExpansionWorkItems = _run.ParallelExpansionWorkItems,
+                MaxParallelExpansionConcurrency = _run.MaxParallelExpansionConcurrency,
+                ParallelActionReplayWaves = _run.ParallelActionReplayWaves,
+                ParallelActionReplayWorkItems = _run.ParallelActionReplayWorkItems,
+                MaxParallelActionReplayConcurrency = _run.MaxParallelActionReplayConcurrency,
+                DeferredRoundChoiceActions = _run.DeferredRoundChoiceActions,
+                DeferredRoundChoiceLayerWidthTotal = _run.DeferredRoundChoiceLayerWidthTotal,
+                MaxDeferredRoundChoiceLayerWidth = _run.MaxDeferredRoundChoiceLayerWidth,
+                DeferredRoundChoiceFiniteQuotaFallbacks =
+                    _run.DeferredRoundChoiceFiniteQuotaFallbacks,
+                DeferredRoundChoiceFinitePrimaryLayers =
+                    _run.DeferredRoundChoiceFinitePrimaryLayers,
+                DeferredRoundChoiceFinitePendingFallbacks =
+                    _run.DeferredRoundChoiceFinitePendingFallbacks,
+                ParallelRoundChoiceReplayWaves = _run.ParallelRoundChoiceReplayWaves,
+                ParallelRoundChoiceReplayWorkItems = _run.ParallelRoundChoiceReplayWorkItems,
+                MaxParallelRoundChoiceReplayConcurrency =
+                    _run.MaxParallelRoundChoiceReplayConcurrency,
+                NodeLimitSnapshotsReleased = _run.NodeLimitSnapshotsReleased,
+                TransitionCacheHits = 0,
+                WorkerAllocatedBytes = workerAllocatedBytes,
+                Gen0Collections = gen0Collections,
+                Gen1Collections = gen1Collections,
+                Gen2Collections = gen2Collections,
+                GcPauseDuration = gcPauseDuration,
+                MaxObservedGcPause = _run.WorkPacer.MaxObservedGcPause,
+                WorkerYieldCount = _run.WorkPacer.YieldCount,
+                FrameRecoveryWaitCount = _run.WorkPacer.FrameRecoveryWaitCount,
+                FrameRecoveryWaitDuration = _run.WorkPacer.FrameRecoveryWaitDuration,
+                SearchedTurns = searchedTurns,
+                BoundaryReason = boundary,
+                UnavoidableHpLost = battleUnavoidableHpLost,
+                SoldHp = selectedCandidate.BattleSold,
+                FutureSoldHp = selectedCandidate.FutureSold,
+                BattleHpLostSoFar = battleDamage.HpLostSoFar,
+                ProjectedBattleHpLost = battleDamage.HpLostSoFar + futureHpLost,
+                BattlePotionsUsedSoFar = battleDamage.PotionsUsedSoFar,
+                PotionCount = selectedCandidate.PotionCount,
+                ExplicitPotionCount = annotatedActions.Count(action =>
+                    action.Kind == PlanActionKind.UsePotion),
+                PotionHpSaved = potionHpSaved,
+                PotionHpRequired = potionHpRequired,
+                PotionBranchesRejected = potionBranchesRejected,
+                TheftPolicy = _theftPolicy,
+                OutstandingStolenResource = finalSnapshot.OutstandingStolenResource,
+                SoldHpThreshold = sellThreshold,
+                SoldHpByTurn = annotations.SoldHpByTurn,
+                HpLostByTurn = annotations.HpLostByTurn,
+                EnemyHpLostByTurn = annotations.EnemyHpLostByTurn,
+                MaxBlockByTurn = annotations.MaxBlockByTurn,
+                ActualBlockByTurn = annotations.ActualBlockByTurn,
+                EnergyLeftByTurn = annotations.EnergyLeftByTurn,
+                PotionCountByTurn = annotations.PotionCountByTurn,
+                PotionStrategicCostByTurn = annotations.PotionStrategicCostByTurn,
+                KillsAfterAction = annotations.KillsAfterAction,
+                CombatEndedTurn = annotations.CombatEndedTurn,
+                DeathTurn = annotations.DeathTurn,
+                OnlyDeathRoutesFound = onlyDeathRoutesFound,
+                IsActEndingBoss = _isActEndingBoss,
+                BossHpRelief = _bossHpRelief,
+                Elapsed = stopwatch.Elapsed,
+                Continuations = resultScope == SolverResultScope.CurrentTurnAdoption ? [] : continuations,
+            };
+            finalSnapshot.ReleaseSimulator();
+            return result;
+        }
+
+        void PublishRoutePreview()
+        {
+            if (progressCallback == null)
+                return;
+            SearchNode? candidate = currentBestNode
+                ?? currentTurnPreviewNode
+                ?? currentTurnCandidateNode;
+            if (candidate == null || BuildFrontierTurns(candidate) is not { Count: > 0 } turns)
+                return;
+
+            int candidateVersion = ++routePreviewVersion;
+            bool onlyDeathRoutesFound = candidate.Snapshot.PlayerDead
+                || candidate.Snapshot.ProjectedPlayerHp <= 0;
+            routePreview = new SolverRoutePreview(
+                candidateVersion,
+                _startTurnNumber,
+                battleDamage.PotionsUsedSoFar + candidate.PotionCount,
+                battleDamage.HpLostSoFar + candidate.Snapshot.CumulativePlayerHpLost,
+                onlyDeathRoutesFound,
+                candidate.Snapshot.HasRisk,
+                turns);
+            int candidateSearchedTurnLayers = searchedTurnLayers;
+            PlanAction[] adoptionActions = turns
+                .SelectMany(turn => turn.Actions)
+                .ToArray();
+            routeAdoptionSeed = new SolverRouteAdoptionSeed(
+                candidateVersion,
+                adoptionActions,
+                () =>
+                {
+                    SearchNode materialized = candidate.Snapshot.HasSimulator
+                        ? candidate
+                        : RefreshReleasedFallback(candidate);
+                    FinalPlanSelection selection = FinalOrdering.Select(
+                        [(materialized, materialized.Snapshot)],
+                        initialHp,
+                        emitDiagnostics: false);
+                    return MaterializeSelectedRoute(
+                        selection,
+                        onlyDeathRoutesFound,
+                        SolverResultScope.RouteAdoption,
+                        candidateSearchedTurnLayers,
+                        candidateTimeBudgetReached: false,
+                        routeAdoptionActions: adoptionActions);
+                });
         }
 
         void PublishProgress(
@@ -162,7 +586,9 @@ internal sealed partial class CombatBeamSolver
                 elapsedMs,
                 _progressPhaseOverride
                 ?? $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}",
-                currentBestResult));
+                currentBestResult,
+                routePreview,
+                routeAdoptionSeed));
         }
 
         PublishProgress(_startTurnNumber, 0, 0, 1, 0, "初始化", force: true);
@@ -248,9 +674,6 @@ internal sealed partial class CombatBeamSolver
         double potionFreeBoundaryFallbackScore = double.NegativeInfinity;
         SearchNode? potionBoundaryFallback = null;
         double potionBoundaryFallbackScore = double.NegativeInfinity;
-        int initialHp = root.InitialPlayerHp;
-        int searchedTurnLayers = 0;
-        bool timeBudgetReached = false;
         // A cheap first parent is not a safe predictor for the rest of a later play depth.
         // Retain the largest observed parent for the whole search so a new depth cannot
         // immediately rematerialize a wide wave that exceeds the No-GC allocation budget.
@@ -292,12 +715,21 @@ internal sealed partial class CombatBeamSolver
                  playDepth++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (_adoptCurrentResultRequested?.Invoke() == true && currentBestNode != null)
+                SearchTakeoverRequest? takeover = _interaction?.CurrentTakeoverRequest;
+                if (takeover?.Kind == SearchTakeoverKind.AdoptRoute
+                    && takeover.RouteAdoptionSeed != null)
+                {
+                    requestedRouteAdoptionSeed = takeover.RouteAdoptionSeed;
+                    interruptedActive = active;
+                    timeBudgetReached = true;
+                    break;
+                }
+                SearchNode? adoptableNode = currentBestNode ?? currentTurnCandidateNode;
+                if (takeover?.Kind == SearchTakeoverKind.ApplyCurrentTurn && adoptableNode != null)
                 {
                     adoptionReached = true;
+                    currentTurnAdoptionReached = currentBestNode == null;
                     timeBudgetReached = true;
-                    ended.AddRange(active);
-                    active = [];
                     break;
                 }
                 if (!policy.VerifyIncrementalSearch
@@ -699,6 +1131,8 @@ internal sealed partial class CombatBeamSolver
                 PublishProgress(_startTurnNumber + searchedTurnLayers, searchedTurnLayers, playDepth,
                     active.Count, ended.Count, "剪枝候选", force: true);
             }
+            if (adoptionReached || requestedRouteAdoptionSeed != null)
+                break;
 
             if (_run.Expanded >= _profile.MaxExpandedNodes)
             {
@@ -727,7 +1161,11 @@ internal sealed partial class CombatBeamSolver
             List<SearchNode> retainedAfterRound = [.. completed, .. frontier];
             ReleaseDroppedSnapshots(ended, retainedAfterRound);
             foreach (SearchNode candidate in retainedAfterRound)
-                ConsiderCurrentResult(candidate);
+            {
+                ConsiderCompleteVictory(candidate);
+                ConsiderCurrentTurnCandidate(candidate);
+            }
+            PublishRoutePreview();
             searchedTurnLayers++;
             if (_detailedDiagnostics)
             {
@@ -752,6 +1190,22 @@ internal sealed partial class CombatBeamSolver
             }
             PublishProgress(_startTurnNumber + searchedTurnLayers, searchedTurnLayers, 0,
                 frontier.Count, completed.Count, "回合层完成", force: true);
+            SearchTakeoverRequest? layerTakeover = _interaction?.CurrentTakeoverRequest;
+            if (layerTakeover?.Kind == SearchTakeoverKind.AdoptRoute
+                && layerTakeover.RouteAdoptionSeed != null)
+            {
+                requestedRouteAdoptionSeed = layerTakeover.RouteAdoptionSeed;
+                timeBudgetReached = true;
+                break;
+            }
+            if (layerTakeover?.Kind == SearchTakeoverKind.ApplyCurrentTurn
+                && (currentBestNode != null || currentTurnCandidateNode != null))
+            {
+                adoptionReached = true;
+                currentTurnAdoptionReached = currentBestNode == null;
+                timeBudgetReached = true;
+                break;
+            }
             if (completed.Any(node =>
                     node.Snapshot.AllEnemiesDead
                     && ExplicitPotionUseCount(node) == 0
@@ -766,17 +1220,38 @@ internal sealed partial class CombatBeamSolver
             }
         }
 
-        List<SearchNode> finalPool;
-        if (adoptionReached && currentBestNode != null)
+        if (requestedRouteAdoptionSeed != null)
         {
-            SearchNode adopted = RefreshReleasedFallback(currentBestNode);
+            foreach (SearchNode candidate in completed)
+                candidate.Snapshot.ReleaseSimulator();
+            foreach (SearchNode candidate in frontier)
+                candidate.Snapshot.ReleaseSimulator();
+            if (interruptedActive != null)
+            {
+                foreach (SearchNode candidate in interruptedActive)
+                    candidate.Snapshot.ReleaseSimulator();
+            }
+            policy.Diagnostics.Info(
+                $"[CombatSolver/Test] SEARCH_ROUTE_ADOPTION_CHECKPOINT " +
+                $"candidate_version={requestedRouteAdoptionSeed.CandidateVersion} " +
+                $"expanded={_run.Expanded}");
+            return requestedRouteAdoptionSeed.Materialize();
+        }
+
+        List<SearchNode> finalPool;
+        SearchNode? adoptedNode = currentBestNode ?? currentTurnCandidateNode;
+        if (adoptionReached && adoptedNode != null)
+        {
+            SearchNode adopted = RefreshReleasedFallback(adoptedNode);
             List<SearchNode> remaining = [.. completed, .. frontier];
             ReleaseDroppedSnapshots(remaining, [adopted]);
             finalPool = [adopted];
+            SolverInterimResult adoptedSummary = currentBestResult ?? currentTurnCandidateResult!;
             policy.Diagnostics.Info(
                 $"[CombatSolver/Test] SEARCH_CHECKPOINT_ADOPTED " +
-                $"potions={currentBestResult!.ProjectedBattlePotionCount} " +
-                $"projected_battle_hp_lost={currentBestResult.ProjectedBattleHpLost} " +
+                $"scope={(currentTurnAdoptionReached ? "current_turn" : "complete_victory")} " +
+                $"potions={adoptedSummary.ProjectedBattlePotionCount} " +
+                $"projected_battle_hp_lost={adoptedSummary.ProjectedBattleHpLost} " +
                 $"expanded={_run.Expanded}");
         }
         else
@@ -785,12 +1260,14 @@ internal sealed partial class CombatBeamSolver
                 ? [RefreshReleasedFallback(fallback)]
                 : [.. completed, .. frontier];
         }
-        if (!finalPool.Any(node => ExplicitPotionUseCount(node) == 0)
+        if (!adoptionReached
+            && !finalPool.Any(node => ExplicitPotionUseCount(node) == 0)
             && potionFreeBoundaryFallback != null)
         {
             finalPool.Add(RefreshReleasedFallback(potionFreeBoundaryFallback));
         }
-        if (!finalPool.Any(node => ExplicitPotionUseCount(node) > 0)
+        if (!adoptionReached
+            && !finalPool.Any(node => ExplicitPotionUseCount(node) > 0)
             && potionBoundaryFallback != null)
         {
             finalPool.Add(RefreshReleasedFallback(potionBoundaryFallback));
@@ -800,263 +1277,27 @@ internal sealed partial class CombatBeamSolver
         ValidateHistoricalSimulatorsReleased(finalCandidates);
         PublishProgress(_startTurnNumber + searchedTurnLayers, searchedTurnLayers, 0,
             finalCandidates.Count, completed.Count, "复核最终候选", force: true);
-        SearchMeasurement finalMeasurement = _run.Performance.Begin();
         List<(SearchNode Node, SimulationSnapshot Snapshot)> evaluated = finalCandidates
             .Select(node => (Node: node, Snapshot: node.Snapshot))
             .ToList();
         bool onlyDeathRoutesFound = evaluated.All(candidate =>
             candidate.Snapshot.PlayerDead || candidate.Snapshot.ProjectedPlayerHp <= 0);
         _run.ReusedNodeSnapshots += evaluated.Count;
-        int sellThreshold = SoldHpThreshold();
         FinalPlanSelection ordering = FinalOrdering.Select(
             evaluated,
             initialHp,
             emitDiagnostics: true);
-        FinalPlanCandidate selectedCandidate = ordering.Candidate;
-        int potionBranchesRejected = ordering.PotionBranchesRejected;
-        int potionHpSaved = ordering.PotionHpSaved;
-        int potionHpRequired = ordering.PotionHpRequired;
-        // Final ordering consumes scalar node features only. Walk the route once after selection
-        // instead of rebuilding the same annotation maps for every discarded finalist.
-        RouteAnnotations annotations = BuildRouteAnnotations(selectedCandidate.Node);
-        int annotatedFutureSold = annotations.SoldHpByTurn.Values.Sum();
-        if (annotatedFutureSold != selectedCandidate.FutureSold)
-        {
-            throw new InvalidOperationException(
-                $"卖血路径状态不一致：节点累计 {selectedCandidate.FutureSold}，逐回合累计 {annotatedFutureSold}。");
-        }
-        SearchNode best = selectedCandidate.Node with { Score = selectedCandidate.Score };
-
-        SimulationSnapshot finalSnapshot = selectedCandidate.Snapshot;
-        IReadOnlyList<CachedContinuation> continuations = BuildContinuations(best);
-        int searchedTurns = Math.Max(1, best.Actions
-            .Select(action => action.Turn)
-            .DefaultIfEmpty(_startTurnNumber)
-            .Max() - _startTurnNumber + 1);
-        SearchBoundaryReason boundary = finalSnapshot.BoundaryReason;
-        if (boundary == SearchBoundaryReason.None && timeBudgetReached)
-            boundary = SearchBoundaryReason.TimeLimit;
-        else if (boundary == SearchBoundaryReason.None && _run.Expanded >= _profile.MaxExpandedNodes)
-            boundary = SearchBoundaryReason.NodeLimit;
-        else if (boundary == SearchBoundaryReason.None
-                 && policy.VerifyIncrementalSearch
-                 && searchedTurnLayers >= SolverWeights.IncrementalVerificationMaxTurns)
-            boundary = SearchBoundaryReason.TurnLimit;
-        int futureHpLost = finalSnapshot.CumulativePlayerHpLost;
-        int futureUnavoidableHpLost = annotations.HpLostByTurn.Sum(item =>
-            Math.Max(0, item.Value - annotations.SoldHpByTurn.GetValueOrDefault(item.Key)));
-        int battleUnavoidableHpLost = Math.Max(0, battleDamage.HpLostSoFar - battleDamage.SoldHpCommitted)
-            + futureUnavoidableHpLost;
-        ActionRelicTriggerRecorder relicTriggerRecorder = new();
-        SimulationSnapshot? annotationRoot = _includeTurnSetup
-            ? ReplayTurnSetup(best.GetTurnSetupChoices())
-            : null;
-        SimulationSnapshot annotationReplay = Replay(
-            best.Actions,
-            annotationRoot,
-            _startTurnNumber,
-            priorActionCount: 0,
-            triggerRecorder: relicTriggerRecorder);
-        annotationRoot?.ReleaseSimulator();
-        if (annotationReplay.StateKey != finalSnapshot.StateKey
-            || annotationReplay.PlayerHp != finalSnapshot.PlayerHp
-            || annotationReplay.EnemyHp != finalSnapshot.EnemyHp
-            || annotationReplay.BoundaryReason != finalSnapshot.BoundaryReason)
-        {
-            ContinuationStamp expectedStamp = ContinuationStamp.CapturePredicted(
-                _player,
-                (CombatPredictionSimulator)finalSnapshot.Simulator,
-                finalSnapshot.Turn,
-                _forecast,
-                _startTurnNumber);
-            ContinuationStamp replayStamp = ContinuationStamp.CapturePredicted(
-                _player,
-                (CombatPredictionSimulator)annotationReplay.Simulator,
-                annotationReplay.Turn,
-                _forecast,
-                _startTurnNumber);
-            string difference = expectedStamp.DescribeFirstDifference(replayStamp);
-            annotationReplay.ReleaseSimulator();
-            throw new InvalidOperationException(
-                $"最终路线的遗物标注回放与选中状态不一致：{difference}；" +
-                $"hp={finalSnapshot.PlayerHp}/{annotationReplay.PlayerHp} " +
-                $"enemy_hp={finalSnapshot.EnemyHp}/{annotationReplay.EnemyHp} " +
-                $"boundary={finalSnapshot.BoundaryReason}/{annotationReplay.BoundaryReason}。");
-        }
-        annotationReplay.ReleaseSimulator();
-        PlanAction[] annotatedActions = best.Actions
-            .Select((action, actionIndex) => WithDisplayNames(action) with
-            {
-                RelicEffects = relicTriggerRecorder.ForAction(actionIndex)
-                    .Select(trigger => new PlanRelicEffect(
-                        trigger.RelicId,
-                        displayNames.Relic(trigger.RelicId),
-                        trigger.Summary))
-                    .ToArray(),
-            })
-            .ToArray();
-        _run.Performance.End(SearchMetricPhase.FinalSelection, finalMeasurement);
-        stopwatch.Stop();
-        long workerAllocatedBytes =
-            GC.GetAllocatedBytesForCurrentThread() - allocatedBytesAtStart
-            + _run.OffThreadAllocatedBytes;
-        int gen0Collections = GC.CollectionCount(0) - gen0AtStart;
-        int gen1Collections = GC.CollectionCount(1) - gen1AtStart;
-        int gen2Collections = GC.CollectionCount(2) - gen2AtStart;
-        TimeSpan gcPauseDuration = GC.GetTotalPauseDuration() - gcPauseAtStart;
-        // 必须在返回前把节点链和模拟器图压平成运行时真正需要的数据。
-        // Coordinator 会在深化期间保留短搜结果；这里若返回 SearchNode/SimulationSnapshot，
-        // 短搜的全部父链和每步模拟器都会成为长寿命 GC 根。
-        SelectedSearchPlan selectedPlan = new(
-            annotatedActions,
-            best.ActionCount,
-            best.Score);
-        SolverSnapshot selectedSnapshot = new(
-            finalSnapshot.HasRisk,
-            finalSnapshot.PlayerDead,
-            finalSnapshot.AllEnemiesDead,
-            finalSnapshot.PlayerHp,
-            finalSnapshot.PlayerMaxHp,
-            finalSnapshot.CumulativePlayerHpLost,
-            finalSnapshot.LongTermResourceValue,
-            finalSnapshot.AngerCopiesGenerated,
-            finalSnapshot.ProjectedPlayerHp,
-            finalSnapshot.PlayerBlock,
-            finalSnapshot.EnemyHp,
-            finalSnapshot.AliveEnemyCount,
-            finalSnapshot.Energy,
-            finalSnapshot.Stars,
-            finalSnapshot.HandCount,
-            finalSnapshot.OutstandingStolenResource,
-            finalSnapshot.Turn,
-            finalSnapshot.ShufflesCrossed,
-            finalSnapshot.BoundaryReason,
-            finalSnapshot.PredictionGaps.ToArray());
+        SolverResult result = MaterializeSelectedRoute(
+            ordering,
+            onlyDeathRoutesFound,
+            currentTurnAdoptionReached
+                ? SolverResultScope.CurrentTurnAdoption
+                : SolverResultScope.SearchCompletion,
+            searchedTurnLayers,
+            timeBudgetReached);
         foreach (SearchNode candidate in finalCandidates)
             candidate.Snapshot.ReleaseSimulator();
-        return new SolverResult
-        {
-            SearchPhase = _profile.Phase,
-            TotalSearchElapsed = stopwatch.Elapsed,
-            TotalWorkerAllocatedBytes = workerAllocatedBytes,
-            TotalGen0Collections = gen0Collections,
-            TotalGen1Collections = gen1Collections,
-            TotalGen2Collections = gen2Collections,
-            TotalGcPauseDuration = gcPauseDuration,
-            ForkMetric = _run.Performance.Snapshot(SearchMetricPhase.Fork),
-            ActionMetric = _run.Performance.Snapshot(SearchMetricPhase.Action),
-            CardExecutionMetric = _run.Performance.Snapshot(SearchMetricPhase.CardExecution),
-            CardPostProcessingMetric = _run.Performance.Snapshot(SearchMetricPhase.CardPostProcessing),
-            PotionExecutionMetric = _run.Performance.Snapshot(SearchMetricPhase.PotionExecution),
-            RoundAdvanceMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundAdvance),
-            RoundPlayerEndMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundPlayerEnd),
-            RoundEndSimulationMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEndSimulation),
-            RoundFlushMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundFlush),
-            RoundPlayerEndPowersMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundPlayerEndPowers),
-            RoundEnemyTurnMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyTurn),
-            RoundEnemyStartMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyStart),
-            RoundEnemyMovesMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyMoves),
-            RoundEnemyEndPowersMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundEnemyEndPowers),
-            RoundPlayerStartMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundPlayerStart),
-            RoundDrawMetric = _run.Performance.Snapshot(SearchMetricPhase.RoundDraw),
-            SnapshotMetric = _run.Performance.Snapshot(SearchMetricPhase.Snapshot),
-            ThreatProjectionMetric = _run.Performance.Snapshot(SearchMetricPhase.ThreatProjection),
-            FingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.Fingerprint),
-            ProjectedShuffleMetric = _run.Performance.Snapshot(SearchMetricPhase.ProjectedShuffle),
-            PileFingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.PileFingerprint),
-            PileFingerprintMissMetric = _run.Performance.Snapshot(SearchMetricPhase.PileFingerprintMiss),
-            CardFingerprintMissMetric = _run.Performance.Snapshot(SearchMetricPhase.CardFingerprintMiss),
-            CombatFingerprintMetric = _run.Performance.Snapshot(SearchMetricPhase.CombatFingerprint),
-            PruneMetric = _run.Performance.Snapshot(SearchMetricPhase.Prune),
-            FinalSelectionMetric = _run.Performance.Snapshot(SearchMetricPhase.FinalSelection),
-            StartTurnNumber = _startTurnNumber,
-            TurnSetupChoices = best.GetTurnSetupChoices().Select(WithDisplayNames).ToArray(),
-            TurnSetupPlayState = best.GetTurnSetupPlayState(),
-            BestNode = selectedPlan,
-            Snapshot = selectedSnapshot,
-            Forecast = _forecast,
-            ExpandedNodes = _run.Expanded,
-            TotalExpandedNodes = _run.Expanded,
-            DominatedActionsPruned = _run.DominatedActionsPruned,
-            TopQueueActionsDropped = _run.TopQueueActionsDropped,
-            ActionAdmissionRepresentativesProtected = _run.ActionAdmissionRepresentativesProtected,
-            DuplicateCardBranchesPruned = _run.DuplicateCardBranchesPruned,
-            ChoiceBranchesEvaluated = _run.ChoiceBranchesEvaluated,
-            TotalChoiceBranchesEvaluated = _run.ChoiceBranchesEvaluated,
-            ShuffleBranchesPruned = _run.ShuffleBranchesPruned,
-            SoldHpBranchesPruned = _run.SoldHpBranchesPruned,
-            HpInvestmentBranchesProtected = _run.HpInvestmentBranchesProtected,
-            ReplayCount = _run.ReplayCount,
-            ForkCount = _run.ForkCount,
-            TransitionCount = _run.TransitionCount,
-            TotalTransitionCount = _run.TransitionCount,
-            ReusedNodeSnapshots = _run.ReusedNodeSnapshots,
-            TranspositionBranchesPruned = _run.TranspositionBranchesPruned,
-            RepeatableNoProgressBranchesPruned = _run.RepeatableNoProgressBranchesPruned,
-            StandPatProbes = _run.StandPatProbes,
-            ParallelExpansionWaves = _run.ParallelExpansionWaves,
-            ParallelExpansionWorkItems = _run.ParallelExpansionWorkItems,
-            MaxParallelExpansionConcurrency = _run.MaxParallelExpansionConcurrency,
-            ParallelActionReplayWaves = _run.ParallelActionReplayWaves,
-            ParallelActionReplayWorkItems = _run.ParallelActionReplayWorkItems,
-            MaxParallelActionReplayConcurrency = _run.MaxParallelActionReplayConcurrency,
-            DeferredRoundChoiceActions = _run.DeferredRoundChoiceActions,
-            DeferredRoundChoiceLayerWidthTotal = _run.DeferredRoundChoiceLayerWidthTotal,
-            MaxDeferredRoundChoiceLayerWidth = _run.MaxDeferredRoundChoiceLayerWidth,
-            DeferredRoundChoiceFiniteQuotaFallbacks =
-                _run.DeferredRoundChoiceFiniteQuotaFallbacks,
-            DeferredRoundChoiceFinitePrimaryLayers =
-                _run.DeferredRoundChoiceFinitePrimaryLayers,
-            DeferredRoundChoiceFinitePendingFallbacks =
-                _run.DeferredRoundChoiceFinitePendingFallbacks,
-            ParallelRoundChoiceReplayWaves = _run.ParallelRoundChoiceReplayWaves,
-            ParallelRoundChoiceReplayWorkItems = _run.ParallelRoundChoiceReplayWorkItems,
-            MaxParallelRoundChoiceReplayConcurrency =
-                _run.MaxParallelRoundChoiceReplayConcurrency,
-            NodeLimitSnapshotsReleased = _run.NodeLimitSnapshotsReleased,
-            TransitionCacheHits = 0,
-            WorkerAllocatedBytes = workerAllocatedBytes,
-            Gen0Collections = gen0Collections,
-            Gen1Collections = gen1Collections,
-            Gen2Collections = gen2Collections,
-            GcPauseDuration = gcPauseDuration,
-            MaxObservedGcPause = _run.WorkPacer.MaxObservedGcPause,
-            WorkerYieldCount = _run.WorkPacer.YieldCount,
-            FrameRecoveryWaitCount = _run.WorkPacer.FrameRecoveryWaitCount,
-            FrameRecoveryWaitDuration = _run.WorkPacer.FrameRecoveryWaitDuration,
-            SearchedTurns = searchedTurns,
-            BoundaryReason = boundary,
-            UnavoidableHpLost = battleUnavoidableHpLost,
-            SoldHp = selectedCandidate.BattleSold,
-            FutureSoldHp = selectedCandidate.FutureSold,
-            BattleHpLostSoFar = battleDamage.HpLostSoFar,
-            ProjectedBattleHpLost = battleDamage.HpLostSoFar + futureHpLost,
-            BattlePotionsUsedSoFar = battleDamage.PotionsUsedSoFar,
-            PotionCount = selectedCandidate.PotionCount,
-            ExplicitPotionCount = annotatedActions.Count(action =>
-                action.Kind == PlanActionKind.UsePotion),
-            PotionHpSaved = potionHpSaved,
-            PotionHpRequired = potionHpRequired,
-            PotionBranchesRejected = potionBranchesRejected,
-            TheftPolicy = _theftPolicy,
-            OutstandingStolenResource = finalSnapshot.OutstandingStolenResource,
-            SoldHpThreshold = sellThreshold,
-            SoldHpByTurn = annotations.SoldHpByTurn,
-            HpLostByTurn = annotations.HpLostByTurn,
-            MaxBlockByTurn = annotations.MaxBlockByTurn,
-            ActualBlockByTurn = annotations.ActualBlockByTurn,
-            EnergyLeftByTurn = annotations.EnergyLeftByTurn,
-            PotionCountByTurn = annotations.PotionCountByTurn,
-            PotionStrategicCostByTurn = annotations.PotionStrategicCostByTurn,
-            KillsAfterAction = annotations.KillsAfterAction,
-            CombatEndedTurn = annotations.CombatEndedTurn,
-            DeathTurn = annotations.DeathTurn,
-            OnlyDeathRoutesFound = onlyDeathRoutesFound,
-            IsActEndingBoss = _isActEndingBoss,
-            BossHpRelief = _bossHpRelief,
-            Elapsed = stopwatch.Elapsed,
-            Continuations = continuations,
-        };
+        return result;
     }
 
     private SearchNode? ApplyFixedPrefix(SearchNode seed)
@@ -1149,4 +1390,13 @@ internal sealed partial class CombatBeamSolver
                 .ToArray(),
         };
 
+    internal static bool IsCurrentTurnCandidate(
+        int actionCount,
+        bool turnBoundaryReached,
+        bool playerDead,
+        int projectedPlayerHp)
+        => actionCount > 0
+            && turnBoundaryReached
+            && !playerDead
+            && projectedPlayerHp > 0;
 }

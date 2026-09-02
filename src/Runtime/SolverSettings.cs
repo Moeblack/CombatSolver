@@ -53,6 +53,7 @@ internal sealed record SolverPerformanceValues(
 internal sealed record SolverSettingsData
 {
     public bool SolverDisabled { get; init; }
+    public bool AutomaticCalculationEnabled { get; init; } = true;
     public bool StopFullAutoOnCombatEnd { get; init; }
     public bool StopFullAutoOnDeathTurn { get; init; } = true;
     public bool StopFullAutoOnWorseRecalculation { get; init; } = true;
@@ -211,6 +212,7 @@ internal static class SolverSettings
         }
         Entry.Logger.Info(
             $"[CombatSolver/Test] SETTINGS_LOADED persisted={persisted} " +
+            $"automatic_calculation={migrated.AutomaticCalculationEnabled.ToString().ToLowerInvariant()} " +
             $"performance_migration={loaded.PerformanceMigrationVersion}->{migrated.PerformanceMigrationVersion} " +
             $"solver_disabled={migrated.SolverDisabled} " +
             $"stop_on_combat_end={migrated.StopFullAutoOnCombatEnd} " +

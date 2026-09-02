@@ -34,6 +34,7 @@ internal sealed record SolverOverlayTurnSnapshot(
     IReadOnlyList<string> TurnStartChoices,
     IReadOnlyList<SolverOverlayActionSnapshot> Actions,
     SolverOverlayActionSnapshot? EndTurnAction,
+    int? EnemyHpDamageLost,
     int HpLoss,
     int EnergyLeft,
     bool CombatEnded);
@@ -72,6 +73,54 @@ internal sealed record SolverOverlaySnapshot(
         bool unexpectedReplan,
         long reviewedWorldlinesTotal = 0)
         => Capture(result, turn, unexpectedReplan, pendingTurnSetup: true, reviewedWorldlinesTotal);
+
+
+    public static SolverOverlaySnapshot CaptureRoutePreview(
+        SolverRoutePreview preview)
+    {
+        if (preview.Turns.Count == 0)
+            throw new InvalidOperationException("动态候选路线没有可展示回合。");
+        SolverOverlayTurnSnapshot[] turns = preview.Turns
+            .Select(BuildOverlayTurn)
+            .ToArray();
+        int furthestTurn = turns[^1].Turn;
+        string hpOutcomeText = preview.ProjectedBattleHpLost > 0
+            ? $"当前候选累计预计掉血 {preview.ProjectedBattleHpLost} HP（尚未验证）"
+            : "当前候选累计预计掉血 0 HP（尚未验证）";
+        return new SolverOverlaySnapshot(
+            preview.StartTurnNumber,
+            $"求解器当前考虑 · 已演化至第 {furthestTurn} 回合",
+            SolverOverlayTone.Accent,
+            $"[color={SolverUiTokens.Palette.WarningHex}]求解器当前考虑，尚未验证  │  " +
+            $"路线可能继续变化或回跳[/color]",
+            string.Empty,
+            preview.ProjectedBattlePotionCount,
+            preview.ProjectedBattleHpLost,
+            hpOutcomeText,
+            preview.OnlyDeathRoutesFound,
+            turns,
+            DetailsText: string.Empty,
+            HasRisk: preview.HasRisk);
+    }
+
+    private static SolverOverlayTurnSnapshot BuildOverlayTurn(SolverFrontierTurn frontier)
+    {
+        SolverOverlayActionSnapshot[] frontierActions = frontier.Actions
+            .Where(action => action.IsExecutable)
+            .Select(action => CaptureAction(action, []))
+            .ToArray();
+        PlanAction? frontierEndTurn = frontier.Actions
+            .LastOrDefault(action => action.Kind == PlanActionKind.EndTurn);
+        return new SolverOverlayTurnSnapshot(
+            frontier.Turn,
+            TurnStartChoices: [],
+            frontierActions,
+            frontierEndTurn == null ? null : CaptureAction(frontierEndTurn, []),
+            EnemyHpDamageLost: frontier.EnemyHpLost,
+            frontier.HpLost,
+            frontier.EnergyLeft,
+            frontier.CombatEnded);
+    }
 
     private static SolverOverlaySnapshot Capture(
         SolverResult result,
@@ -161,11 +210,15 @@ internal sealed record SolverOverlaySnapshot(
             .ToArray();
         PlanAction? endTurn = result.BestNode.Actions
             .LastOrDefault(action => action.Turn == turn && action.Kind == PlanActionKind.EndTurn);
+        int? enemyHpLost = result.EnemyHpLostByTurn.TryGetValue(turn, out int materializedEnemyHpLost)
+            ? materializedEnemyHpLost
+            : null;
         return new SolverOverlayTurnSnapshot(
             turn,
             turnStartChoices,
             actions,
             endTurn == null ? null : CaptureAction(endTurn, []),
+            enemyHpLost,
             result.HpLostByTurn.GetValueOrDefault(turn),
             result.EnergyLeftByTurn.GetValueOrDefault(turn),
             result.CombatEndedTurn == turn);

@@ -99,6 +99,10 @@ internal sealed partial class CombatBeamSolver
                     Outcome = new TurnOutcome(
                         outcome.Turn,
                         outcome.HpLost,
+                        Math.Max(
+                            0,
+                            outcome.TurnStart.Snapshot.EnemyHp
+                            - outcome.Node.Snapshot.EnemyHp),
                         soldThisTurn,
                         maxBlock,
                         outcome.ActualBlock,
@@ -179,6 +183,7 @@ internal sealed partial class CombatBeamSolver
         path.Reverse();
 
         Dictionary<int, int> losses = [];
+        Dictionary<int, int> enemyHpLosses = [];
         Dictionary<int, int> sold = [];
         Dictionary<int, int> maxBlock = [];
         Dictionary<int, int> actualBlock = [];
@@ -217,6 +222,7 @@ internal sealed partial class CombatBeamSolver
             if (node.Outcome is { } outcome)
             {
                 losses[outcome.Turn] = outcome.HpLost;
+                enemyHpLosses[outcome.Turn] = outcome.EnemyHpLost;
                 actualBlock[outcome.Turn] = outcome.ActualBlock;
                 maxBlock[outcome.Turn] = outcome.MaxBlock;
                 sold[outcome.Turn] = outcome.SoldHp;
@@ -233,6 +239,7 @@ internal sealed partial class CombatBeamSolver
         }
         return new RouteAnnotations(
             losses,
+            enemyHpLosses,
             sold,
             maxBlock,
             actualBlock,

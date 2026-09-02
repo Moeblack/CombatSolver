@@ -124,6 +124,7 @@ internal static class PlayerTurnSetupCoordinator
         InitialSearchContext? initialSearch,
         IReadOnlyList<PlanCardChoice>? replayChoices)
     {
+
         public CombatState Combat { get; } = combat;
         public int LifecycleGeneration { get; } = SolverController.CombatLifecycleGeneration;
         public Player Player { get; } = player;
@@ -132,10 +133,9 @@ internal static class PlayerTurnSetupCoordinator
         public InitialSearchContext? InitialSearch { get; } = initialSearch;
         public IReadOnlyList<PlanCardChoice>? ReplayChoices { get; } = replayChoices;
         public SolverResult? Result { get; set; }
-        public SolverProgress? Progress;
-        public SearchProgressDisplayState ProgressDisplay { get; } = new();
+        public SearchInteractionState Interaction { get; } =
+            initialSearch?.SearchPolicy.Interaction ?? new SearchInteractionState();
         public int SearchState;
-        public int AdoptCurrentResultRequestState;
         public TaskCompletionSource ManualRecalculationRequested { get; set; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
         public int ManualSearchState;
@@ -150,10 +150,6 @@ internal static class PlayerTurnSetupCoordinator
             => Result?.TurnSetupChoices ?? ReplayChoices;
         public TaskCompletionSource PlanReady { get; } = new(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        public bool AdoptCurrentResultRequested
-            => Volatile.Read(ref AdoptCurrentResultRequestState) != 0;
-        public void RequestAdoptCurrentResult()
-            => Interlocked.Exchange(ref AdoptCurrentResultRequestState, 1);
     }
 
     private static readonly Type CombatTurnStateType = typeof(CombatManager).Assembly.GetType(
@@ -198,6 +194,29 @@ internal static class PlayerTurnSetupCoordinator
            && (ReferenceEquals(_active, active)
                || (_active == null && Volatile.Read(ref active.DisposeState) != 0));
 
+    private static void RefreshSearchProgress(ActivePlan active)
+    {
+        if (!IsCurrentActivePlan(active) || !SolverOverlay.IsVisible
+            || !active.Interaction.TryCreateDisplayProgress(
+                System.Environment.TickCount64,
+                out SolverProgress progress))
+        {
+            return;
+        }
+        SolverOverlaySnapshot? preview = progress.RoutePreview == null
+            ? null
+            : SolverOverlaySnapshot.CaptureRoutePreview(progress.RoutePreview);
+        active.Interaction.RenderedRouteAdoptionSeed = preview == null
+            ? null
+            : progress.RouteAdoptionSeed;
+        SolverOverlay.ShowProgress(
+            progress,
+            active.DeployAfterSetup,
+            SolverController.ReviewedWorldlinesTotal,
+            preview);
+        SolverOverlay.RefreshControls();
+    }
+
     public static bool TryInterceptSetup(
         CombatManager manager,
         object turnState,
@@ -210,6 +229,7 @@ internal static class PlayerTurnSetupCoordinator
             || !_activeOperation.IsCompleted
             || !Entry.Enabled
             || SolverController.SolverDisabled
+            || !SolverController.AutomaticCalculationEnabled
             || SolverController.IsMultiplayerSession
             || SolverController.AutomaticSearchPaused
             || !ReferenceEquals(LocalContext.GetMe(manager.DebugOnlyGetState()), player)
@@ -279,6 +299,8 @@ internal static class PlayerTurnSetupCoordinator
         return true;
     }
 
+    public static bool IsStoppingSearch => _active?.Interaction.StopRequested == true;
+
     public static bool IsManaging(CombatState combat)
         => _active is { } active
            && IsCurrentActivePlan(active)
@@ -289,21 +311,66 @@ internal static class PlayerTurnSetupCoordinator
            || _active is { InitialSearch: not null, Result: null, SearchState: 1 }
            || _active is { ManualSearchState: 1 };
 
-    public static bool CanAdoptCurrentSearchResult
-        => _active is { AdoptCurrentResultRequested: false } active
+    public static bool CanApplyCurrentTurn
+        => _active is { } active
+           && active.Interaction.CurrentTakeoverRequest == null
+           && active.Interaction.CanAcceptTakeover
            && (active.SearchState == 1 || active.ManualSearchState == 1)
-           && Volatile.Read(ref active.Progress)?.CurrentBestResult != null;
+           && Volatile.Read(ref active.Interaction.Progress)?.RoutePreview != null;
 
-    public static bool IsAdoptingCurrentSearchResult
-        => _active?.AdoptCurrentResultRequested == true;
+    public static bool IsApplyingCurrentTurn
+        => _active?.Interaction.IsApplyingCurrentTurn == true;
 
-    public static void AdoptCurrentSearchResult()
+    public static bool CanAdoptCurrentRoute
+        => _active is { } active
+           && (active.Interaction.StoppedResult != null
+               || active.Interaction.CurrentTakeoverRequest == null
+                   && active.Interaction.RenderedRouteAdoptionSeed != null
+                   && active.Interaction.CanAcceptTakeover
+                   && (active.SearchState == 1 || active.ManualSearchState == 1));
+
+    public static bool IsAdoptingCurrentRoute
+        => _active?.Interaction.IsAdoptingRoute == true;
+
+    public static void InvalidateRenderedRouteAdoptionSeed()
     {
-        if (!CanAdoptCurrentSearchResult || _active is not { } active)
+        if (_active != null)
+            _active.Interaction.RenderedRouteAdoptionSeed = null;
+    }
+
+    public static void ApplyCurrentTurn()
+    {
+        if (!CanApplyCurrentTurn || _active is not { } active)
             return;
-        active.RequestAdoptCurrentResult();
+        active.DeployAfterSetup = true;
+        active.TakeoverRequested = true;
+        if (!active.Interaction.RequestApplyCurrentTurn())
+            return;
         SolverOverlay.RefreshControls();
-        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=turn_setup_adopt_current_search_result");
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=turn_setup_apply_current_turn");
+    }
+
+    public static void AdoptCurrentRoute()
+    {
+        if (_active is not { } active)
+            return;
+        SolverResult? stoppedResult = active.Interaction.TakeStoppedResult(
+            LiveCombatStamp.Capture(active.Combat));
+        if (stoppedResult != null)
+        {
+            if (NGame.Instance is { } host)
+                SolverController.ShowTurnSetupResultPreview(host, stoppedResult);
+            SolverOverlay.RefreshControls();
+            Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=turn_setup_adopt_stopped_route");
+            return;
+        }
+        SolverRouteAdoptionSeed? seed = active.Interaction.RenderedRouteAdoptionSeed;
+        if (seed == null || !active.Interaction.RequestAdoptRoute(seed))
+            return;
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_ACTION action=turn_setup_adopt_current_route " +
+            $"candidate_version={seed.CandidateVersion}");
     }
 
     internal static int ManualRecalculationCompletedCountForTesting
@@ -471,6 +538,16 @@ internal static class PlayerTurnSetupCoordinator
         _active?.Choices.ReleaseVisibleSurface();
     }
 
+    public static bool TryStopSearchAtCurrentRoute()
+    {
+        if (_active is not { InitialSearch: not null, Result: null, SearchState: 1 } active
+            || active.Interaction.RenderedRouteAdoptionSeed is not { } seed)
+        {
+            return false;
+        }
+        return active.Interaction.RequestAdoptRoute(seed, stopAfterResult: true);
+    }
+
     public static bool StopSearchByUser()
     {
         if (ReferenceEquals(_deferredSetupCancellation, _cancellation)
@@ -631,11 +708,13 @@ internal static class PlayerTurnSetupCoordinator
             SolverSettingsSnapshot settings = SolverSettings.Capture();
             SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
             BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
+            SearchInteractionState interaction = new();
             SearchPolicySnapshot searchPolicy = SolverController.CaptureSearchPolicy(
                 settings,
                 combat,
                 includeTurnSetup: true,
-                theftPolicy: SolverController.ResolveTheftPolicy(combat));
+                theftPolicy: SolverController.ResolveTheftPolicy(combat),
+                interaction: interaction);
             long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
             CombatRootSnapshot rootSnapshot;
             try
@@ -968,12 +1047,11 @@ internal static class PlayerTurnSetupCoordinator
                 settings,
                 active.Combat,
                 includeTurnSetup: true,
-                theftPolicy: SolverController.ResolveTheftPolicy(active.Combat)),
+                theftPolicy: SolverController.ResolveTheftPolicy(active.Combat),
+                interaction: active.Interaction),
             original.RootSnapshot);
         int turn = active.Player.PlayerCombatState!.TurnNumber;
-        active.Progress = null;
-        active.ProgressDisplay.Restart(System.Environment.TickCount64);
-        Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
+        active.Interaction.ResetForSearch();
         Interlocked.Exchange(ref active.ManualSearchState, 1);
         SolverOverlay.ShowSearching(
             host,
@@ -997,14 +1075,14 @@ internal static class PlayerTurnSetupCoordinator
                         refreshed.Settings.NoGcRegionBudgetBytes,
                         refreshed.SearchPolicy.MemoryPressureSignal,
                         active.Token);
-                    return CombatSearchCoordinator.Solve(
+                    SolverResult result = CombatSearchCoordinator.Solve(
                         refreshed.RootSnapshot,
                         refreshed.DisplayNames,
                         refreshed.BattleDamage,
                         refreshed.SearchPolicy,
                         active.Token,
-                        progress => Volatile.Write(ref active.Progress, progress),
-                        () => active.AdoptCurrentResultRequested);
+                        active.Interaction.PublishProgress);
+                    return active.Interaction.FinalizeWorkerResult(result);
                 }
                 finally
                 {
@@ -1013,23 +1091,11 @@ internal static class PlayerTurnSetupCoordinator
             }, active.Token);
             while (!solveTask.IsCompleted)
             {
-                SolverProgress? progress = Volatile.Read(ref active.Progress);
-                if (IsCurrentActivePlan(active)
-                    && active.ProgressDisplay.TryCreate(
-                        progress,
-                        System.Environment.TickCount64,
-                        out SolverProgress displayProgress))
-                {
-                    SolverOverlay.ShowProgress(
-                        displayProgress,
-                        deployWhenReady: false,
-                        SolverController.ReviewedWorldlinesTotal);
-                }
+                RefreshSearchProgress(active);
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 active.Token.ThrowIfCancellationRequested();
             }
             SolverResult result = await solveTask;
-            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             if (!IsCurrentActivePlan(active))
                 return;
             if (result.TurnSetupChoices.Count == 0)
@@ -1060,7 +1126,6 @@ internal static class PlayerTurnSetupCoordinator
         }
         finally
         {
-            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             Interlocked.Exchange(ref active.ManualSearchState, 0);
             if (!active.ReplayDrivingStarted)
                 active.Choices.ReleaseVisibleSurface();
@@ -1086,9 +1151,9 @@ internal static class PlayerTurnSetupCoordinator
             await active.PlanReady.Task.WaitAsync(active.Token);
             return false;
         }
+        active.Interaction.ResetForSearch();
         int turn = active.Player.PlayerCombatState!.TurnNumber;
         active.Choices.RecordSearchStarted();
-        active.ProgressDisplay.Restart(System.Environment.TickCount64);
         SolverOverlay.ShowSearching(
             host,
             turn,
@@ -1112,14 +1177,14 @@ internal static class PlayerTurnSetupCoordinator
                         initialSearch.Settings.NoGcRegionBudgetBytes,
                         initialSearch.SearchPolicy.MemoryPressureSignal,
                         active.Token);
-                    return CombatSearchCoordinator.Solve(
+                    SolverResult result = CombatSearchCoordinator.Solve(
                         initialSearch.RootSnapshot,
                         initialSearch.DisplayNames,
                         initialSearch.BattleDamage,
                         initialSearch.SearchPolicy,
                         active.Token,
-                        progress => Volatile.Write(ref active.Progress, progress),
-                        () => active.AdoptCurrentResultRequested);
+                        active.Interaction.PublishProgress);
+                    return active.Interaction.FinalizeWorkerResult(result);
                 }
                 finally
                 {
@@ -1128,27 +1193,14 @@ internal static class PlayerTurnSetupCoordinator
             }, active.Token);
             while (!solveTask.IsCompleted)
             {
-                SolverProgress? progress = Volatile.Read(ref active.Progress);
-                if (IsCurrentActivePlan(active)
-                    && active.ProgressDisplay.TryCreate(
-                        progress,
-                        System.Environment.TickCount64,
-                        out SolverProgress displayProgress))
-                {
-                    SolverOverlay.ShowProgress(
-                        displayProgress,
-                        deployWhenReady: false,
-                        SolverController.ReviewedWorldlinesTotal);
-                }
+                RefreshSearchProgress(active);
                 await host.ToSignal(host.GetTree(), SceneTree.SignalName.ProcessFrame);
                 active.Token.ThrowIfCancellationRequested();
             }
             result = await solveTask;
-            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
         }
         catch (OperationCanceledException)
         {
-            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             bool ownsCurrentLifecycle = ReferenceEquals(_active, active)
                 && SolverController.IsCurrentCombatLifecycle(
                     active.Combat,
@@ -1171,7 +1223,6 @@ internal static class PlayerTurnSetupCoordinator
         }
         catch (Exception ex)
         {
-            Interlocked.Exchange(ref active.AdoptCurrentResultRequestState, 0);
             if (!IsCurrentActivePlan(active))
             {
                 active.PlanReady.TrySetResult();
@@ -1187,7 +1238,8 @@ internal static class PlayerTurnSetupCoordinator
             active.PlanReady.TrySetResult();
             return false;
         }
-        if (SolverController.SolverDisabled || SolverController.AutomaticSearchPaused)
+        if (SolverController.SolverDisabled
+            || SolverController.AutomaticSearchPaused && !active.Interaction.StopRequested)
         {
             if (active.SearchState != 2 && ReferenceEquals(_active, active))
                 SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
@@ -1204,7 +1256,12 @@ internal static class PlayerTurnSetupCoordinator
         active.Result = result;
         active.Choices.RecordPlanReady();
         SolverController.ShowTurnSetupResultPreview(host, result);
-        if (active.TakeoverRequested)
+        if (active.Interaction.StopRequested)
+        {
+            active.Interaction.PreserveStoppedResult(result, LiveCombatStamp.Capture(active.Combat));
+            SolverOverlay.ShowSearchStopped(host);
+        }
+        else if (active.TakeoverRequested)
             StartReplayDriver(active, host);
         else
             active.Choices.ReleaseVisibleSurface();
