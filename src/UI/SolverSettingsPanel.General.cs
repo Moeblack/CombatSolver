@@ -6,6 +6,7 @@ namespace CombatSolver;
 internal sealed partial class SolverSettingsPanel
 {
     private CheckButton _solverEnabled = null!;
+    private CheckButton _automaticCalculation = null!;
     private CheckButton _stopOnCombatEnd = null!;
     private CheckButton _stopOnDeathTurn = null!;
     private CheckButton _stopOnWorseRecalculation = null!;
@@ -97,6 +98,13 @@ internal sealed partial class SolverSettingsPanel
         _solverEnabled = CreateToggle();
         _solverEnabled.Toggled += OnSolverEnabledToggled;
         AddBasicRow(solverGrid, "启用求解器", _solverEnabled);
+        _automaticCalculation = CreateToggle();
+        _automaticCalculation.Toggled += OnAutomaticCalculationToggled;
+        AddBasicRow(
+            solverGrid,
+            "自动计算",
+            _automaticCalculation,
+            "开启后会在进入战斗局面和每个玩家回合自动开始后台计算；关闭后由主面板手动开始计算。");
         _searchCompletionNotificationPolicy = CreateSearchCompletionNotificationPolicyInput();
         AddBasicRow(
             solverGrid,
@@ -145,6 +153,7 @@ internal sealed partial class SolverSettingsPanel
     private void ReloadGeneralPage(SolverSettingsData data)
     {
         _solverEnabled.ButtonPressed = !data.SolverDisabled;
+        _automaticCalculation.ButtonPressed = data.AutomaticCalculationEnabled;
         _stopOnCombatEnd.ButtonPressed = data.StopFullAutoOnCombatEnd;
         _stopOnDeathTurn.ButtonPressed = data.StopFullAutoOnDeathTurn;
         _stopOnWorseRecalculation.ButtonPressed = data.StopFullAutoOnWorseRecalculation;
@@ -264,6 +273,16 @@ internal sealed partial class SolverSettingsPanel
             return;
         SolverController.SetSolverDisabled(!enabled);
         SetStatus(enabled ? "求解器已启用" : "求解器已暂停", SolverUiTokens.Palette.Success);
+    }
+
+    private void OnAutomaticCalculationToggled(bool enabled)
+    {
+        if (_loading)
+            return;
+        SolverController.SetAutomaticCalculationEnabled(enabled);
+        SetStatus(
+            enabled ? "自动计算已开启" : "自动计算已关闭",
+            SolverUiTokens.Palette.Success);
     }
 
     private void OnStopOnCombatEndToggled(bool enabled)

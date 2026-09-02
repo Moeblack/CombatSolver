@@ -72,14 +72,49 @@ internal static class SolverController
            || _deferredSearchCts != null
            || PlayerTurnSetupCoordinator.IsSearching;
     public static bool IsDeploying => _deployment != null;
+    public static bool IsStoppingSearch
+        => _search?.Interaction.StopRequested == true || PlayerTurnSetupCoordinator.IsStoppingSearch;
     public static bool SolverDisabled => _solverDisabled;
-    public static bool CanAdoptCurrentSearchResult
-        => _search is { AdoptCurrentResultRequested: false } search
-               && Volatile.Read(ref search.Progress)?.CurrentBestResult != null
-           || PlayerTurnSetupCoordinator.CanAdoptCurrentSearchResult;
-    public static bool IsAdoptingCurrentSearchResult
-        => _search?.AdoptCurrentResultRequested == true
-           || PlayerTurnSetupCoordinator.IsAdoptingCurrentSearchResult;
+    public static bool CanApplyCurrentTurn
+        => _search is { } search
+               && search.Interaction.CurrentTakeoverRequest == null
+               && search.Interaction.CanAcceptTakeover
+               && Volatile.Read(ref search.Interaction.Progress)?.RoutePreview != null
+           || PlayerTurnSetupCoordinator.CanApplyCurrentTurn;
+    public static bool IsApplyingCurrentTurn
+        => _search?.Interaction.IsApplyingCurrentTurn == true
+           || PlayerTurnSetupCoordinator.IsApplyingCurrentTurn;
+    public static bool CanAdoptCurrentRoute
+        => _search is { } search
+               && search.Interaction.CurrentTakeoverRequest == null
+               && search.Interaction.RenderedRouteAdoptionSeed != null
+               && search.Interaction.CanAcceptTakeover
+           || HasCurrentStoppedRoute()
+           || PlayerTurnSetupCoordinator.CanAdoptCurrentRoute;
+    public static bool IsAdoptingCurrentRoute
+        => _search?.Interaction.IsAdoptingRoute == true
+           || PlayerTurnSetupCoordinator.IsAdoptingCurrentRoute;
+
+
+    internal static void InvalidateRenderedRouteAdoptionSeed()
+    {
+        if (_search != null)
+            _search.Interaction.RenderedRouteAdoptionSeed = null;
+        PlayerTurnSetupCoordinator.InvalidateRenderedRouteAdoptionSeed();
+    }
+
+    public static bool CanExecuteCurrentTurn
+    {
+        get
+        {
+            CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+            if (state == null || !CombatManager.Instance.IsInProgress)
+                return false;
+            return _combat.LatestResult != null
+                    && _combat.LatestStamp == LiveCombatStamp.Capture(state)
+                || PlayerTurnSetupCoordinator.CanTakeOverTurnSetup(state);
+        }
+    }
 
     /// <summary>
     /// True whenever the current run is a networked multiplayer session (host or client).
@@ -91,6 +126,8 @@ internal static class SolverController
 
     public static bool FullAutoEnabled => _combat.FullAutoEnabled;
     public static bool AutomaticSearchPaused => _combat.AutomaticSearchPaused;
+    public static bool AutomaticCalculationEnabled => SolverSettings.Current.AutomaticCalculationEnabled;
+    public static bool HasCalculatedThisCombat => _combat.SearchesStarted > 0 || _combat.LatestResult != null;
     public static bool StopFullAutoOnCombatEnd => _stopFullAutoOnCombatEnd;
     public static bool StopFullAutoOnDeathTurn => _stopFullAutoOnDeathTurn;
     public static bool StopFullAutoOnWorseRecalculation => _stopFullAutoOnWorseRecalculation;
@@ -157,6 +194,43 @@ internal static class SolverController
         if (!UnattendedTestRunner.IsActive)
             throw new InvalidOperationException("搜索会话取消入口只能在无人测试中使用。");
         CancelSearch();
+    }
+
+
+    private static bool HasCurrentStoppedRoute()
+    {
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        return state != null
+            && CombatManager.Instance.IsInProgress
+            && _combat.StoppedSearch is { StoppedResult: not null, StoppedStamp: { } stamp }
+            && stamp == LiveCombatStamp.Capture(state);
+    }
+
+    private static bool TryAdoptStoppedRoute()
+    {
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        NGame? host = NGame.Instance;
+        if (state == null || host == null || _combat.StoppedSearch is not { } stopped)
+            return false;
+        LiveCombatStamp stamp = LiveCombatStamp.Capture(state);
+        SolverResult? result = stopped.TakeStoppedResult(stamp);
+        _combat.StoppedSearch = null;
+        if (result == null)
+            return false;
+
+        _combat.LatestResult = result;
+        _combat.LatestStamp = stamp;
+        _combat.ContinuationSource = result;
+        BattleDamageTracker.RegisterPlan(state, result);
+        SolverOverlaySnapshot snapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+            result,
+            UnexpectedReplanCount > 0,
+            _combat.ReviewedWorldlinesTotal);
+        SolverOverlay.ShowResult(host, MarkRouteAdopted(snapshot));
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] STOPPED_ROUTE_ADOPTED turn={result.StartTurnNumber} actions={result.BestNode.Actions.Count}");
+        return true;
     }
 
     internal static Task StartCombatDeferredOperation(
@@ -317,7 +391,8 @@ internal static class SolverController
         SolverSettingsSnapshot settings,
         CombatState state,
         bool includeTurnSetup,
-        SolverTheftPolicy? theftPolicy)
+        SolverTheftPolicy? theftPolicy,
+        SearchInteractionState? interaction = null)
     {
         FramePressureSignal.ResetPressure(
             recoveryEnabled: !string.Equals(
@@ -351,7 +426,10 @@ internal static class SolverController
                 message => Entry.Logger.Info(message),
                 message => Entry.Logger.Debug(message)),
             FramePressureSignal,
-            new SearchMemoryPressureSignal());
+            new SearchMemoryPressureSignal())
+        {
+            Interaction = interaction,
+        };
     }
 
     public static void BeginCombat(ICombatState? state)
@@ -413,7 +491,9 @@ internal static class SolverController
         _combat.State = state;
         _combat.LatestResult = result;
         _combat.LatestStamp = stamp;
-        _combat.ContinuationSource = result;
+        _combat.ContinuationSource = result.ResultScope == SolverResultScope.CurrentTurnAdoption
+            ? null
+            : result;
         _combat.SearchesStarted++;
         _combat.ReplanCounts[ReplanCause.InitialSearch] = _combat.ReplanCounts.GetValueOrDefault(ReplanCause.InitialSearch) + 1;
         if (UnattendedTestRunner.IsActive)
@@ -424,19 +504,27 @@ internal static class SolverController
         BattleDamageTracker.RegisterPlan(state, result);
         CombatBugReportExporter.RecordCheckpoint(
             state,
-            "turn_setup_result",
+            result.ResultScope switch
+            {
+                SolverResultScope.CurrentTurnAdoption => "turn_setup_current_turn_adopted",
+                SolverResultScope.RouteAdoption => "turn_setup_route_adopted",
+                _ => "turn_setup_result",
+            },
             result,
             DescribeReplanAudit());
-        SolverOverlay.ShowResult(
-            host,
-            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-                result,
-                UnexpectedReplanCount > 0,
-                _combat.ReviewedWorldlinesTotal));
+        SolverOverlaySnapshot snapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+            result,
+            UnexpectedReplanCount > 0,
+            _combat.ReviewedWorldlinesTotal);
+        if (result.ResultScope == SolverResultScope.RouteAdoption)
+            snapshot = MarkRouteAdopted(snapshot);
+        SolverOverlay.ShowResult(host, snapshot);
         Entry.Logger.Info(
-            $"[CombatSolver/Test] TURN_SETUP_RESULT_ACCEPTED turn={player.PlayerCombatState.TurnNumber}");
+            $"[CombatSolver/Test] TURN_SETUP_RESULT_ACCEPTED turn={player.PlayerCombatState.TurnNumber} " +
+            $"scope={result.ResultScope}");
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
-        if (_combat.FullAutoEnabled)
+        if (_combat.FullAutoEnabled
+            && result.ResultScope != SolverResultScope.CurrentTurnAdoption)
         {
             Task fullAutoTask = StartCombatDeferredOperation(
                 token => StartFullAutoAfterTurnSetupAsync(host, state, result, token));
@@ -451,16 +539,17 @@ internal static class SolverController
     {
         AssertMainThread();
         RecordReviewedWorldlines(result);
-        SolverOverlay.ShowResult(
-            host,
-            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-                result,
-                UnexpectedReplanCount > 0,
-                _combat.ReviewedWorldlinesTotal));
+        SolverOverlaySnapshot snapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+            result,
+            UnexpectedReplanCount > 0,
+            _combat.ReviewedWorldlinesTotal);
+        if (result.ResultScope == SolverResultScope.RouteAdoption)
+            snapshot = MarkRouteAdopted(snapshot);
+        SolverOverlay.ShowResult(host, snapshot);
         SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
         Entry.Logger.Info(
             $"[CombatSolver/Test] TURN_SETUP_RESULT_PREVIEW turn={result.StartTurnNumber} " +
-            "native_choice_pending=true");
+            $"scope={result.ResultScope} native_choice_pending=true");
         Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
     }
 
@@ -661,6 +750,7 @@ internal static class SolverController
     public static void RequestSearch(NGame host, CombatState state, SearchReason reason, bool deployWhenReady = false)
     {
         AssertMainThread();
+        _combat.StoppedSearch = null;
         SolverDispatcher.Ensure(host);
         int? searchTurn = LocalContext.GetMe(state)?.PlayerCombatState?.TurnNumber;
         if (_combat.DeployAfterTurnSetupTurn == searchTurn)
@@ -882,7 +972,8 @@ internal static class SolverController
                 settings,
                 state,
                 includeTurnSetup: false,
-                theftPolicy: theftPolicy);
+                theftPolicy: theftPolicy,
+                interaction: search.Interaction);
             search.MaxDegreeOfParallelism = searchPolicy.MaxDegreeOfParallelism;
             setupStage = "combat_root_snapshot";
             long rootCaptureAllocatedAtStart = GC.GetTotalAllocatedBytes(precise: false);
@@ -954,14 +1045,14 @@ internal static class SolverController
                         settings.NoGcRegionBudgetBytes,
                         searchPolicy.MemoryPressureSignal,
                         token);
-                    return CombatSearchCoordinator.Solve(
+                    SolverResult result = CombatSearchCoordinator.Solve(
                         rootSnapshot,
                         displayNames,
                         battleDamage,
                         searchPolicy,
                         token,
-                        progress => PublishSearchProgress(search, progress),
-                        () => search.AdoptCurrentResultRequested);
+                        progress => PublishSearchProgress(search, progress));
+                    return search.Interaction.FinalizeWorkerResult(result);
                 }
                 finally
                 {
@@ -1181,6 +1272,68 @@ internal static class SolverController
             RequestSearch(host, state, SearchReason.FullAuto);
     }
 
+    public static bool PrepareAutomaticSearchForTurn(NGame host, CombatState state)
+    {
+        AssertMainThread();
+        int turn = LocalContext.GetMe(state)?.PlayerCombatState?.TurnNumber ?? -1;
+        if (_combat.AutomaticSearchPaused
+            && _combat.AutomaticSearchPausedTurn is { } stoppedTurn
+            && stoppedTurn != turn)
+        {
+            _combat.AutomaticSearchPaused = false;
+            _combat.AutomaticSearchPausedTurn = null;
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] AUTOMATIC_SEARCH_STOP_CLEARED stopped_turn={stoppedTurn} current_turn={turn}");
+        }
+        if (!AutomaticCalculationEnabled)
+        {
+            SolverOverlay.ShowManualCalculationReady(host, HasCalculatedThisCombat);
+            return false;
+        }
+        if (_combat.AutomaticSearchPaused)
+        {
+            SolverOverlay.ShowSearchStopped(host);
+            return false;
+        }
+        return true;
+    }
+
+    public static void SetAutomaticCalculationEnabled(bool enabled, bool persist = true)
+    {
+        AssertMainThread();
+        if (persist)
+        {
+            SolverSettings.Update(SolverSettings.Current with
+            {
+                AutomaticCalculationEnabled = enabled,
+            });
+        }
+        if (!enabled)
+            _combat.FullAutoEnabled = false;
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] AUTOMATIC_CALCULATION enabled={enabled.ToString().ToLowerInvariant()}");
+        SolverOverlay.RefreshControls();
+
+        NGame? host = NGame.Instance;
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        if (host == null || state == null || !CombatManager.Instance.IsInProgress)
+            return;
+        if (!enabled)
+        {
+            if (!IsSearching)
+                SolverOverlay.ShowManualCalculationReady(host, HasCalculatedThisCombat);
+            return;
+        }
+        if (!_combat.AutomaticSearchPaused
+            && !IsSearching
+            && !IsDeploying
+            && UnattendedTestRunner.AutomaticTurnSearchEnabled
+            && CanSolve(state, out _))
+        {
+            RequestSearch(host, state, SearchReason.AutoTurnStart);
+        }
+    }
+
     public static void SetSolverDisabled(bool disabled, bool persist = true)
     {
         AssertMainThread();
@@ -1217,6 +1370,7 @@ internal static class SolverController
         if (game != null
             && state != null
             && UnattendedTestRunner.AutomaticTurnSearchEnabled
+            && AutomaticCalculationEnabled
             && CanSolve(state, out _))
         {
             RequestSearch(game, state, SearchReason.AutoTurnStart);
@@ -1233,34 +1387,73 @@ internal static class SolverController
         int? generation = _search?.Generation;
         _combat.FullAutoEnabled = false;
         _combat.AutomaticSearchPaused = true;
+        _combat.AutomaticSearchPausedTurn = LocalContext.GetMe(
+            CombatManager.Instance.DebugOnlyGetState())?.PlayerCombatState?.TurnNumber;
         CancelDeferredSearch();
-        CancelSearch();
-        bool stoppedTurnSetupSearch = PlayerTurnSetupCoordinator.StopSearchByUser();
-        if (controllerSearchCanceled || stoppedTurnSetupSearch)
+        bool stoppingControllerAtCandidate = _search is { } search
+            && search.Interaction.RenderedRouteAdoptionSeed is { } seed
+            && search.Interaction.RequestAdoptRoute(seed, stopAfterResult: true);
+        bool stoppingSetupAtCandidate = _search == null
+            && PlayerTurnSetupCoordinator.TryStopSearchAtCurrentRoute();
+        bool stoppingAtCandidate = stoppingControllerAtCandidate || stoppingSetupAtCandidate;
+        if (!stoppingAtCandidate)
+            CancelSearch();
+        bool stoppedTurnSetupSearch = stoppingSetupAtCandidate
+            || !stoppingAtCandidate && PlayerTurnSetupCoordinator.StopSearchByUser();
+        if (!stoppingAtCandidate && (controllerSearchCanceled || stoppedTurnSetupSearch))
             SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
         _combat.PendingCompleteProjectionBaseline = null;
         _combat.PendingManualProjectionBaseline = null;
         SolverOverlay.ShowSearchStopped(host);
         Entry.Logger.Info(
             $"[CombatSolver/Test] SEARCH_STOPPED_BY_USER generation={generation?.ToString() ?? "-"} " +
-            $"turn_setup={stoppedTurnSetupSearch.ToString().ToLowerInvariant()} automatic_search_paused=true");
+            $"turn_setup={stoppedTurnSetupSearch.ToString().ToLowerInvariant()} " +
+            $"candidate_preserved={stoppingAtCandidate.ToString().ToLowerInvariant()} automatic_search_paused=true");
     }
 
-    public static void AdoptCurrentSearchResult()
+    public static void ApplyCurrentTurn()
     {
         AssertMainThread();
+        _combat.AutomaticSearchPaused = false;
+        _combat.AutomaticSearchPausedTurn = null;
+        _combat.FullAutoEnabled = false;
         if (_search is not { } search)
         {
-            PlayerTurnSetupCoordinator.AdoptCurrentSearchResult();
+            PlayerTurnSetupCoordinator.ApplyCurrentTurn();
             return;
         }
-        if (search.AdoptCurrentResultRequested
-            || Volatile.Read(ref search.Progress)?.CurrentBestResult == null)
+        if (search.Interaction.CurrentTakeoverRequest != null
+            || Volatile.Read(ref search.Interaction.Progress)?.RoutePreview == null)
+        {
             return;
+        }
 
-        search.RequestAdoptCurrentResult();
+        search.DeployWhenReady = true;
+        if (!search.Interaction.RequestApplyCurrentTurn())
+            return;
         SolverOverlay.RefreshControls();
-        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=adopt_current_search_result");
+        Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=apply_current_turn");
+    }
+
+    public static void AdoptCurrentRoute()
+    {
+        AssertMainThread();
+        _combat.AutomaticSearchPaused = false;
+        _combat.AutomaticSearchPausedTurn = null;
+        if (_search is not { } search)
+        {
+            if (TryAdoptStoppedRoute())
+                return;
+            PlayerTurnSetupCoordinator.AdoptCurrentRoute();
+            return;
+        }
+        SolverRouteAdoptionSeed? seed = search.Interaction.RenderedRouteAdoptionSeed;
+        if (seed == null || !search.Interaction.RequestAdoptRoute(seed))
+            return;
+        SolverOverlay.RefreshControls();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_ACTION action=adopt_current_route " +
+            $"candidate_version={seed.CandidateVersion}");
     }
 
     public static void SetStopFullAutoOnCombatEnd(bool enabled, bool persist = true)
@@ -1318,6 +1511,11 @@ internal static class SolverController
         Entry.Logger.Info(
             $"[CombatSolver/Test] THEFT_POLICY_CHANGED previous={previous?.ToString() ?? "-"} current={policy}");
         SolverOverlay.RefreshControls();
+        if (_combat.AutomaticSearchPaused || !AutomaticCalculationEnabled)
+        {
+            Entry.Logger.Info("[CombatSolver/Test] THEFT_POLICY_RECALCULATION_SKIPPED reason=automatic_calculation_inactive");
+            return;
+        }
         RequestSearch(host, state, SearchReason.Manual);
     }
 
@@ -1387,6 +1585,11 @@ internal static class SolverController
         Entry.Logger.Info(
             $"[CombatSolver/Test] POTION_DIRECTIVE_CHANGED slot={slot} potion={potionId} directive={directive}");
         SolverOverlay.RefreshControls();
+        if (_combat.AutomaticSearchPaused || !AutomaticCalculationEnabled)
+        {
+            Entry.Logger.Info("[CombatSolver/Test] POTION_DIRECTIVE_RECALCULATION_SKIPPED reason=automatic_calculation_inactive");
+            return;
+        }
         RequestSearch(host, state, SearchReason.Manual);
     }
 
@@ -1607,6 +1810,27 @@ internal static class SolverController
             $"managed_live_bytes={GC.GetTotalMemory(forceFullCollection: false)}");
     }
 
+    internal static void SimulateDeploymentCompletionForTesting(NGame host, CombatState state)
+    {
+        AssertMainThread();
+        if (!UnattendedTestRunner.IsActive
+            || !ReferenceEquals(_combat.State, state)
+            || _combat.LatestResult is not { } result
+            || _combat.LatestStamp != LiveCombatStamp.Capture(state))
+        {
+            throw new InvalidOperationException("无人测试无法模拟消费当前就绪路线。");
+        }
+        int actionCount = result.BestNode.Actions.Count(action =>
+            action.Turn == result.StartTurnNumber && action.IsExecutable);
+        _combat.LatestResult = null;
+        _combat.LatestStamp = null;
+        SolverOverlay.ShowDeploymentComplete(
+            host,
+            result.StartTurnNumber,
+            actionCount,
+            endedTurn: true);
+    }
+
     internal static void ReleaseUnattendedResultReferencesForTesting()
     {
         AssertMainThread();
@@ -1647,16 +1871,25 @@ internal static class SolverController
     public static void RefreshSearchProgress()
     {
         AssertMainThread();
-        if (_search is not { } search)
+        if (_search is not { } search || !SolverOverlay.IsVisible
+            || !search.Interaction.TryCreateDisplayProgress(
+                System.Environment.TickCount64,
+                out SolverProgress progress))
+        {
             return;
-        SolverProgress? progress = Volatile.Read(ref search.Progress);
-        long now = System.Environment.TickCount64;
-        if (!search.ProgressDisplay.TryCreate(progress, now, out SolverProgress displayProgress))
-            return;
+        }
+        SolverOverlaySnapshot? preview = progress.RoutePreview == null
+            ? null
+            : SolverOverlaySnapshot.CaptureRoutePreview(progress.RoutePreview);
+        search.Interaction.RenderedRouteAdoptionSeed = preview == null
+            ? null
+            : progress.RouteAdoptionSeed;
         SolverOverlay.ShowProgress(
-            displayProgress,
+            progress,
             search.DeployWhenReady,
-            _combat.ReviewedWorldlinesTotal);
+            _combat.ReviewedWorldlinesTotal,
+            preview);
+        SolverOverlay.RefreshControls();
     }
 
     public static void ObserveMainThreadFrameGap(TimeSpan gap)
@@ -1678,7 +1911,7 @@ internal static class SolverController
         search.ObserveFrame(milliseconds);
         if (milliseconds >= 100d)
         {
-            SolverProgress? progress = Volatile.Read(ref search.Progress);
+            SolverProgress? progress = Volatile.Read(ref search.Interaction.Progress);
             Entry.Logger.Info(
                 $"[CombatSolver/Test] MAIN_THREAD_LONG_FRAME gap_ms={milliseconds:F1} " +
                 $"frame={search.FrameCount} expanded={progress?.ExpandedNodes ?? -1} " +
@@ -1686,11 +1919,10 @@ internal static class SolverController
                 $"gc_pause_delta_ms={(GC.GetTotalPauseDuration() - search.ProcessGcPauseAtStart).TotalMilliseconds:F1}");
         }
     }
-
     private static void PublishSearchProgress(SolverSearchSession search, SolverProgress progress)
     {
         if (ReferenceEquals(_search, search))
-            Volatile.Write(ref search.Progress, progress);
+            search.Interaction.PublishProgress(progress);
     }
 
     private static string DescribeReplanAudit()
@@ -1763,7 +1995,7 @@ internal static class SolverController
         if (!ReferenceEquals(_search, search))
             return;
         _search = null;
-        Volatile.Write(ref search.Progress, null);
+        Volatile.Write(ref search.Interaction.Progress, null);
         int generation = search.Generation;
         Entry.Logger.Info($"[CombatSolver/Test] SEARCH_CALLBACK generation={generation} thread={System.Environment.CurrentManagedThreadId} main_thread={NGame.IsMainThread()}");
         Entry.Logger.Info(
@@ -1824,6 +2056,84 @@ internal static class SolverController
         }
 
         SolverResult result = task.Result;
+        bool stopped = search.Interaction.StopRequested;
+        bool currentTurnAdopted = result.ResultScope == SolverResultScope.CurrentTurnAdoption;
+        bool routeAdopted = result.ResultScope == SolverResultScope.RouteAdoption;
+        if (stopped || currentTurnAdopted)
+        {
+            _combat.PendingCompleteProjectionBaseline = null;
+            _combat.PendingManualProjectionBaseline = null;
+        }
+        else
+        {
+            ApplyProjectionBaselines(result);
+        }
+        ApplySearchFrameMetrics(result, search);
+        RecordReviewedWorldlines(result);
+
+        if (stopped)
+        {
+            result.ResultScope = SolverResultScope.RouteAdoption;
+            search.Interaction.PreserveStoppedResult(result, searchedStamp);
+            _combat.StoppedSearch = search.Interaction;
+            SolverOverlay.ShowResult(
+                host,
+                SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                    result,
+                    UnexpectedReplanCount > 0,
+                    _combat.ReviewedWorldlinesTotal));
+            SolverOverlay.ShowSearchStopped(host);
+            SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Canceled);
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] SEARCH_STOPPED_RESULT_PRESERVED generation={generation} " +
+                $"actions={result.BestNode.Actions.Count}");
+            return;
+        }
+
+        _combat.LatestResult = result;
+        _combat.LatestStamp = searchedStamp;
+        _combat.ContinuationSource = currentTurnAdopted ? null : result;
+        if (UnattendedTestRunner.IsActive)
+            LastCompletedResultForTesting = result;
+        BattleDamageTracker.RegisterPlan(searchedState, result);
+        CombatBugReportExporter.RecordCheckpoint(
+            searchedState,
+            currentTurnAdopted
+                ? "search_current_turn_adopted"
+                : routeAdopted
+                    ? "search_route_adopted"
+                    : "search_completed",
+            result,
+            DescribeReplanAudit());
+        SolverOverlaySnapshot completedSnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+            result,
+            UnexpectedReplanCount > 0,
+            _combat.ReviewedWorldlinesTotal);
+        SolverOverlay.ShowResult(
+            host,
+            routeAdopted ? MarkRouteAdopted(completedSnapshot) : completedSnapshot);
+        SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
+        if (currentTurnAdopted)
+        {
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] SEARCH_CURRENT_TURN_ADOPTED generation={generation} " +
+                $"turn={result.StartTurnNumber} actions={result.BestNode.Actions.Count}");
+        }
+        else if (routeAdopted)
+        {
+            Entry.Logger.Info(
+                $"[CombatSolver/Test] SEARCH_ROUTE_ADOPTED generation={generation} " +
+                $"actions={result.BestNode.Actions.Count} continuations={result.Continuations.Count}");
+        }
+        Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
+        if (currentTurnAdopted || search.DeployWhenReady)
+            StartDeployment(host, searchedState, result);
+        else if (_combat.FullAutoEnabled)
+            StartFullAutoDeployment(host, searchedState, result);
+    }
+
+    private static void ApplyProjectionBaselines(SolverResult result)
+    {
         CompleteProjectionBaseline? recalculationBaseline = _combat.PendingCompleteProjectionBaseline;
         ManualProjectionBaseline? manualBaseline = _combat.PendingManualProjectionBaseline;
         _combat.PendingCompleteProjectionBaseline = null;
@@ -1852,6 +2162,10 @@ internal static class SolverController
                 result.StartTurnNumber,
                 result.ProjectedBattleHpLost);
         }
+    }
+
+    private static void ApplySearchFrameMetrics(SolverResult result, SolverSearchSession search)
+    {
         result.MainThreadFrameCount = search.FrameCount;
         result.MainThreadFramesOver33Milliseconds = search.FramesOver33Milliseconds;
         result.MaxMainThreadFrameGapMilliseconds = search.MaxFrameGapMilliseconds;
@@ -1859,35 +2173,14 @@ internal static class SolverController
         result.P99MainThreadFrameGapMilliseconds = search.FramePercentile(0.99d);
         result.MainThreadFramesOver50Milliseconds = search.FramesOver50Milliseconds;
         result.MainThreadFramesOver100Milliseconds = search.FramesOver100Milliseconds;
-        RecordReviewedWorldlines(result);
-        _combat.LatestResult = result;
-        _combat.LatestStamp = searchedStamp;
-        if (UnattendedTestRunner.IsActive)
-            LastCompletedResultForTesting = result;
-        _combat.ContinuationSource = result;
-        BattleDamageTracker.RegisterPlan(searchedState, result);
-        CombatBugReportExporter.RecordCheckpoint(
-            searchedState,
-            "search_completed",
-            result,
-            DescribeReplanAudit());
-        SolverOverlay.ShowResult(
-            host,
-            SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-                result,
-                UnexpectedReplanCount > 0,
-                _combat.ReviewedWorldlinesTotal));
-        SearchCompletionNotifier.Notify(SearchCompletionNotificationKind.Succeeded);
-        Entry.Logger.Info(SolverDiagnostics.DescribeResult(result));
-        if (search.DeployWhenReady)
-        {
-            StartDeployment(host, searchedState, result);
-        }
-        else if (_combat.FullAutoEnabled)
-        {
-            StartFullAutoDeployment(host, searchedState, result);
-        }
     }
+
+    private static SolverOverlaySnapshot MarkRouteAdopted(SolverOverlaySnapshot snapshot)
+        => snapshot with
+        {
+            StatusText = "方案就绪 · 已采用当前路线",
+            StatusTone = SolverOverlayTone.Success,
+        };
 
     private static void StartFullAutoDeployment(NGame host, CombatState state, SolverResult result)
     {

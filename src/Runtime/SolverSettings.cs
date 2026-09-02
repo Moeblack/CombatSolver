@@ -53,6 +53,7 @@ internal sealed record SolverPerformanceValues(
 internal sealed record SolverSettingsData
 {
     public bool SolverDisabled { get; init; }
+    public bool AutomaticCalculationEnabled { get; init; } = true;
     public bool StopFullAutoOnCombatEnd { get; init; }
     public bool StopFullAutoOnDeathTurn { get; init; } = true;
     public bool StopFullAutoOnWorseRecalculation { get; init; } = true;
@@ -90,6 +91,8 @@ internal sealed record SolverSettingsData
     public double? DeploymentInterActionDelaySeconds { get; init; }
     public float? OverlayPositionX { get; init; }
     public float? OverlayPositionY { get; init; }
+    public float? OverlayWidth { get; init; }
+    public float? OverlayHeight { get; init; }
     public string? ReporterContactQq { get; init; }
     public SolverOverlayTheme OverlayTheme { get; init; } = SolverOverlayTheme.Dark;
     public float OverlayOpacity { get; init; } = 1f;
@@ -206,6 +209,7 @@ internal static class SolverSettings
         }
         Entry.Logger.Info(
             $"[CombatSolver/Test] SETTINGS_LOADED persisted={persisted} " +
+            $"automatic_calculation={migrated.AutomaticCalculationEnabled.ToString().ToLowerInvariant()} " +
             $"performance_migration={loaded.PerformanceMigrationVersion}->{migrated.PerformanceMigrationVersion} " +
             $"solver_disabled={migrated.SolverDisabled} " +
             $"stop_on_combat_end={migrated.StopFullAutoOnCombatEnd} " +
@@ -414,6 +418,24 @@ internal static class SolverSettings
             OverlayPositionY = position.Y,
         });
 
+    public static Vector2? OverlaySize
+    {
+        get
+        {
+            SolverSettingsData data = Current;
+            return data.OverlayWidth is { } width && data.OverlayHeight is { } height
+                ? new Vector2(width, height)
+                : null;
+        }
+    }
+
+    public static void SetOverlaySize(Vector2 size)
+        => Update(Current with
+        {
+            OverlayWidth = size.X,
+            OverlayHeight = size.Y,
+        });
+
     public static string FormatSeconds(double value)
         => value.ToString("0.###", CultureInfo.InvariantCulture);
 
@@ -495,6 +517,10 @@ internal static class SolverSettings
             throw new InvalidDataException("OverlayPositionX and OverlayPositionY must both be set or both be null.");
         ValidateRange(data.OverlayPositionX, -100_000f, 100_000f, nameof(data.OverlayPositionX));
         ValidateRange(data.OverlayPositionY, -100_000f, 100_000f, nameof(data.OverlayPositionY));
+        if (data.OverlayWidth.HasValue != data.OverlayHeight.HasValue)
+            throw new InvalidDataException("OverlayWidth and OverlayHeight must both be set or both be null.");
+        ValidateRange(data.OverlayWidth, 1f, 100_000f, nameof(data.OverlayWidth));
+        ValidateRange(data.OverlayHeight, 1f, 100_000f, nameof(data.OverlayHeight));
         if (!Enum.IsDefined(data.OverlayTheme))
             throw new InvalidDataException($"Unknown overlay theme {data.OverlayTheme}.");
         ValidateRange(data.OverlayOpacity, 0.25f, 1f, nameof(data.OverlayOpacity));

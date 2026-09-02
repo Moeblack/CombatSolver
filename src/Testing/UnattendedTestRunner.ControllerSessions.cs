@@ -57,6 +57,7 @@ internal sealed partial class UnattendedTestRunner
             try
             {
                 SolverSettingsSnapshot settings = SolverSettings.Capture();
+                SearchInteractionState interaction = new();
                 SearchPolicySnapshot forcedPolicy = SolverController.CaptureSearchPolicy(
                     settings,
                     combat,
@@ -70,6 +71,7 @@ internal sealed partial class UnattendedTestRunner
                     },
                     ForceShortOnly = true,
                     MaxDegreeOfParallelism = 4,
+                    Interaction = interaction,
                 };
                 CombatRootSnapshot forcedRoot = CombatRootSnapshot.Capture(combat);
                 SolverDisplayNames forcedDisplayNames = SolverDisplayNames.Capture(combat);
@@ -83,10 +85,13 @@ internal sealed partial class UnattendedTestRunner
                     CancellationToken.None,
                     progress =>
                     {
-                        if (progress.CurrentBestResult != null)
+                        if (progress.CurrentBestResult != null
+                            && !forcedAdoptionRequested)
+                        {
                             forcedAdoptionRequested = true;
-                    },
-                    () => forcedAdoptionRequested));
+                            interaction.RequestApplyCurrentTurn();
+                        }
+                    }));
                 if (!forcedAdoptionRequested
                     || !forcedResult.BestNode.Actions.Any(action =>
                         action.Kind == PlanActionKind.UsePotion
@@ -643,6 +648,7 @@ internal sealed partial class UnattendedTestRunner
     private static async Task AssertBoundedSmartPotionAuditAsync(CombatState combat)
     {
         SolverSettingsSnapshot settings = SolverSettings.Capture();
+        SearchInteractionState interaction = new();
         SearchPolicySnapshot policy = SolverController.CaptureSearchPolicy(
             settings,
             combat,
@@ -656,6 +662,7 @@ internal sealed partial class UnattendedTestRunner
             },
             ForceShortOnly = true,
             MaxDegreeOfParallelism = 1,
+            Interaction = interaction,
         };
         CombatRootSnapshot root = CombatRootSnapshot.Capture(combat);
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
@@ -867,9 +874,8 @@ internal sealed partial class UnattendedTestRunner
                 }
                 displayedPotionCount = result.ProjectedBattlePotionCount;
                 displayedHpLost = result.ProjectedBattleHpLost;
-                adoptionRequested = true;
-            },
-            () => adoptionRequested));
+                adoptionRequested = interaction.RequestApplyCurrentTurn();
+            }));
         stopwatch.Stop();
         if (stopwatch.ElapsedMilliseconds > 4_000)
         {

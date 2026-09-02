@@ -71,6 +71,7 @@ internal sealed class SolverCombatSession
     public SolverResult? LatestResult { get; set; }
     public LiveCombatStamp? LatestStamp { get; set; }
     public SolverResult? ContinuationSource { get; set; }
+    public SearchInteractionState? StoppedSearch { get; set; }
     public bool FullAutoEnabled { get; set; }
     public SolverTheftPolicy? TheftPolicy { get; set; }
     public CompleteProjectionBaseline? PendingCompleteProjectionBaseline { get; set; }
@@ -78,6 +79,7 @@ internal sealed class SolverCombatSession
     public ManualProjectionComparison? LastManualProjectionComparison { get; set; }
     public bool ManualRouteImprovementDetected { get; set; }
     public bool AutomaticSearchPaused { get; set; }
+    public int? AutomaticSearchPausedTurn { get; set; }
     public bool ManualSearchAfterTurnSetupRequested { get; set; }
     public int? DeployAfterTurnSetupTurn { get; set; }
     public CombatState? TurnSetupResumeState { get; set; }
@@ -114,20 +116,12 @@ internal sealed class SolverSearchSession(
     public int CancellationDisposeState;
     public bool DeployWhenReady { get; set; } = deployWhenReady;
     public int MaxDegreeOfParallelism { get; set; } = 1;
-    public SolverProgress? Progress;
-    public SearchProgressDisplayState ProgressDisplay { get; } = new();
-    public int AdoptCurrentResultRequestState;
+    public SearchInteractionState Interaction { get; } = new();
     public int FrameCount { get; private set; }
     public int FramesOver33Milliseconds { get; private set; }
     public int FramesOver50Milliseconds { get; private set; }
     public int FramesOver100Milliseconds { get; private set; }
     public double MaxFrameGapMilliseconds { get; private set; }
-
-    public bool AdoptCurrentResultRequested
-        => Volatile.Read(ref AdoptCurrentResultRequestState) != 0;
-
-    public void RequestAdoptCurrentResult()
-        => Interlocked.Exchange(ref AdoptCurrentResultRequestState, 1);
 
     public long ProcessAllocatedBytesAtStart { get; } = GC.GetTotalAllocatedBytes(precise: false);
     public TimeSpan ProcessGcPauseAtStart { get; } = GC.GetTotalPauseDuration();

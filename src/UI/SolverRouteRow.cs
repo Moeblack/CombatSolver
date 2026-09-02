@@ -10,6 +10,7 @@ internal sealed partial class SolverRouteRow : PanelContainer
 
     public Label TurnLabel { get; }
     public HFlowContainer ActionFlow { get; }
+    public Label EnemyDamageLabel { get; }
     public Label OutcomeLabel { get; }
     public Label EnergyLabel { get; }
     public int DeploymentActionCount => _deploymentActions.Count;
@@ -78,6 +79,16 @@ internal sealed partial class SolverRouteRow : PanelContainer
             MouseFilter = MouseFilterEnum.Ignore,
         };
         outcomeLayout.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
+        EnemyDamageLabel = SolverUiTokens.CreateLabel(
+            string.Empty,
+            SolverUiTokens.Type.Body,
+            SolverUiTokens.Palette.Warning,
+            FontType.Bold);
+        EnemyDamageLabel.HorizontalAlignment = HorizontalAlignment.Right;
+        EnemyDamageLabel.AutowrapMode = TextServer.AutowrapMode.Off;
+        EnemyDamageLabel.CustomMinimumSize = new Vector2(92, SolverUiTokens.Size.ActionPillHeight);
+        EnemyDamageLabel.SizeFlagsVertical = SizeFlags.ShrinkCenter;
+        outcomeLayout.AddChild(EnemyDamageLabel);
         OutcomeLabel = SolverUiTokens.CreateLabel(
             string.Empty,
             SolverUiTokens.Type.Metric,
@@ -175,8 +186,13 @@ internal sealed partial class SolverRouteRow : PanelContainer
         ActionFlow.AddChild(SolverActionPill.CreateStatus(text, SolverUiTokens.Palette.TextMuted));
     }
 
-    public void SetOutcome(string text, Color color, string energyText = "")
+    public void SetOutcome(
+        string text,
+        Color color,
+        string energyText = "",
+        string enemyDamageText = "")
     {
+        EnemyDamageLabel.Text = enemyDamageText;
         OutcomeLabel.Text = text;
         OutcomeLabel.AddThemeColorOverride("font_color", color);
         EnergyLabel.Text = energyText;

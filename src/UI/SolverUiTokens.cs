@@ -86,7 +86,7 @@ internal static class SolverUiTokens
         public const float RouteRowHeight = 44f;
         public const float ActionPillHeight = 28f;
         public const float TurnColumnWidth = 88f;
-        public const float OutcomeColumnWidth = 146f;
+        public const float OutcomeColumnWidth = 238f;
         public const float ButtonHeight = 34f;
     }
 

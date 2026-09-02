@@ -19,4 +19,5 @@ internal sealed record SearchPolicySnapshot(
     SearchMemoryPressureSignal MemoryPressureSignal)
 {
     public SearchRequestWorkTotals? RequestWorkTotals { get; init; }
+    public SearchInteractionState? Interaction { get; init; }
 }
