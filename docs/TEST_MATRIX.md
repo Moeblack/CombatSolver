@@ -14,6 +14,7 @@
 | `BOMBARDMENT-EARLY-BEFORE-MAYHEM` | 通过（虔诚雕刻师实包第 2 回合根、DOP4） | 爆破在乱战抽牌前检查既有消耗区，不再把乱战本轮刚耗尽的爆破重复打出；第 3 回合精确复用，计划外重算 `0`。runId `e4f7b25918a74f819d0f3ef5705dcaa9`。 | 2026-09-02 |
 | `HEXED-JOSS-PAPER-TURN-END` | 通过（三骑士实包第 4 回合根、DOP4） | 纸钱按 Power 动态赋予的虚无统计回合末消耗牌，阈值抽牌和后续手牌保持一致；第 5 回合精确复用，计划外重算 `0`。runId `6a26ff90d1de4c7e8238b82d6b335285`。 | 2026-09-02 |
 | `PAELS-LEGION-CARDPLAY-COOLDOWN` | 通过（斧兵实包第 1 回合根、DOP4） | 补偿层产生的卡牌格挡保留 CardPlay 身份，佩尔士兵在出牌完成后启动冷却；第 2 回合精确复用，计划外重算 `0`。runId `0a6b24215996448f9204b84c3fc193da`。 | 2026-09-02 |
+| `UNSETTLING-LAMP-CARD-POWER-SCOPE` | 通过（女王实包第 4 回合根、DOP4） | 卡牌 OnPlay 的通用 Power 效果与专项补偿共用同一卡牌作用域；躁动之灯由鞭打的 Doom 正确消耗，不再错误翻倍后续弱化之触。第 5 回合精确复用，计划外重算 `0`。runId `018bc519e6204a42be24ed6e92788eda`。 | 2026-09-02 |
 
 ## 0.25.2（已发布）
 

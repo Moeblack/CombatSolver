@@ -340,12 +340,14 @@ internal sealed partial class CombatPredictionSimulator
             if (State.CombatState is ICombatPredictionCardExecutionSink startedSink)
                 startedSink.RecordCardPlayStarted(card, cardPlay);
 
-            CardOnPlayMirrors.Invoke(this, card, cardPlay);
-            decimal cardBlockGained = TakeBlockGained(cardPlay);
-
-            if (State.CombatState is ICombatPredictionCardExecutionSink sink)
+            ICombatPredictionCardExecutionSink? effectSink =
+                State.CombatState as ICombatPredictionCardExecutionSink;
+            decimal cardBlockGained;
+            using (effectSink?.BeginCardPowerApplication(card))
             {
-                sink.ApplyCardPlayEffects(
+                CardOnPlayMirrors.Invoke(this, card, cardPlay);
+                cardBlockGained = TakeBlockGained(cardPlay);
+                effectSink?.ApplyCardPlayEffects(
                     this,
                     card,
                     cardPlay,

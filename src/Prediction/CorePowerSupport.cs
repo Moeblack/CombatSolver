@@ -36,7 +36,6 @@ internal static class CorePowerSupport
                 .Where(power => power.Owner == target)
                 .All(power => power.ShouldOwnerDeathTriggerFatal());
         MonologuePower[] pendingMonologues = combat.CapturePendingMonologues(owner);
-        combat.BeginCardPowerApplication(card);
         CardOnPlaySupport.Apply(
             simulator,
             combat,
@@ -360,7 +359,6 @@ internal static class CorePowerSupport
                 combat.AddEnergyNextTurn(card.Owner, card.DynamicVars.Energy.IntValue);
                 break;
         }
-        combat.CompleteCardPowerApplication(card);
         PowerLifecycleSupport.AfterCardPlayed(
             simulator,
             combat,
