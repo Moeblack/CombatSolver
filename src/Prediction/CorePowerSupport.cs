@@ -55,7 +55,7 @@ internal static class CorePowerSupport
         {
             SimCreatureState ownerState = simulator.State.GetCreature(owner);
             if (ownerState.Block <= ownerBlockBefore)
-                simulator.GainBlock(owner, card.DynamicVars.Block, playedCard, null);
+                simulator.GainBlock(owner, card.DynamicVars.Block, playedCard, cardPlay);
             if (card is Armaments && card.IsUpgraded)
             {
                 SimPlayerCombatState playerState = simulator.State.GetPlayerCombatState(card.Owner);
@@ -85,7 +85,7 @@ internal static class CorePowerSupport
                     .Where(entry => ReferenceEquals(entry.CardSource?.Original, playedCard.Original))
                     .Sum(entry => entry.Result.TotalDamage + entry.Result.OverkillDamage);
                 if (block > 0)
-                    simulator.GainBlock(owner, block, ValueProp.Move, playedCard, null);
+                    simulator.GainBlock(owner, block, ValueProp.Move, playedCard, cardPlay);
                 break;
             }
             case BeatIntoShape when target != null:
