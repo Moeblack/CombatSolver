@@ -1614,6 +1614,7 @@ internal sealed partial class SimulatedCombatState
         _registeredCombatCards = simulator.State.Players
             .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
             .ToList();
+        CapturePowerAfflictionRootCards(simulator);
         foreach (PredictedCard card in _registeredCombatCards)
         {
             if (_modHookSubscribers.HasBaseLibCardModifiers)
@@ -1625,6 +1626,8 @@ internal sealed partial class SimulatedCombatState
         {
             PowerModel mutable = GetMutablePowerInstance(power);
             PowerPredictionStateSupport.CaptureRootState(simulator, mutable, power);
+            if (power is DampenPower dampen)
+                CaptureDampenRootState(simulator, dampen);
         }
         foreach (Player player in Players)
         {

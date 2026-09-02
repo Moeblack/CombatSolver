@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.MonsterMoves.MonsterMoveStateMachine;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -89,6 +90,7 @@ internal sealed partial class UnattendedTestRunner
         await ClearPlayerPilesAsync(player);
         await RestoreReplayPilesAsync(combatState, player, savedPlayer.GetProperty("piles"));
         await RunManager.Instance.ActionExecutor.FinishedExecutingActions();
+        RebuildReplayDampenState(player);
         RestoreReplayTurnCardHistory(
             combatState,
             player,
@@ -105,6 +107,37 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException(
                 "replay-state 严格导入不一致：" + expected.DescribeFirstDifference(actual));
+        }
+    }
+
+    private static void RebuildReplayDampenState(Player player)
+    {
+        PlayerCombatState playerState = player.PlayerCombatState
+            ?? throw new InvalidOperationException("replay-state 压制恢复时玩家没有战斗状态。");
+        foreach (DampenPower power in player.Creature.Powers.OfType<DampenPower>())
+        {
+            object data = typeof(PowerModel)
+                .GetField("_internalData", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .GetValue(power)
+                ?? throw new InvalidOperationException("replay-state 压制缺少内部状态。");
+            Type dataType = data.GetType();
+            var casters = (HashSet<Creature>)(dataType.GetField("casters")?.GetValue(data)
+                ?? throw new MissingFieldException(dataType.FullName, "casters"));
+            var originalUpgrades = (Dictionary<CardModel, int>)(dataType
+                .GetField("downgradedCardsToOldUpgradeLevels")?.GetValue(data)
+                ?? throw new MissingFieldException(dataType.FullName, "downgradedCardsToOldUpgradeLevels"));
+            Creature caster = power.Applier is { CurrentHp: > 0 } applier
+                ? applier
+                : throw new InvalidOperationException("replay-state 压制没有存活的施法者。");
+            casters.Clear();
+            casters.Add(caster);
+            originalUpgrades.Clear();
+            foreach (CardModel card in playerState.AllCards)
+            {
+                int originalLevel = card.DeckVersion?.CurrentUpgradeLevel ?? card.CurrentUpgradeLevel;
+                if (originalLevel > card.CurrentUpgradeLevel)
+                    originalUpgrades.Add(card, originalLevel);
+            }
         }
     }
 

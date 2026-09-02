@@ -118,6 +118,15 @@ internal sealed partial class SimulatedCombatState
         NormalizeSwordSageReplays(simulator);
     }
 
+    private void CapturePowerAfflictionRootCards(CombatPredictionSimulator simulator)
+    {
+        if (_liveCardsAtSnapshot != null)
+            throw new InvalidOperationException("Power affliction root cards were captured more than once.");
+        _liveCardsAtSnapshot = new ForkableSet<CardModel>(Players
+            .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
+            .Select(card => card.Original));
+    }
+
     public void ClearSmogAfflictions(CombatPredictionSimulator simulator, Creature owner)
     {
         if (owner.Player is not { } player)
@@ -132,9 +141,7 @@ internal sealed partial class SimulatedCombatState
     private void NormalizePowerAfflictions(CombatPredictionSimulator simulator)
     {
         ForkableSet<CardModel> liveCardsAtSnapshot = _liveCardsAtSnapshot
-            ??= new ForkableSet<CardModel>(Players
-                .SelectMany(player => simulator.State.GetPlayerCombatState(player).AllCards)
-                .Select(card => card.Original));
+            ?? throw new InvalidOperationException("Power affliction root cards were not captured.");
         IReadOnlyList<PowerModel> powers = EffectivePowers();
         int vitalSparkAmount = 0;
         for (int index = 0; index < powers.Count; index++)

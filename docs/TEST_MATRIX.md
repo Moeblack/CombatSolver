@@ -13,6 +13,8 @@
 | `POTION-STALE-SLOT-AND-DISABLED-CAP-0252` | 通过（headless 设置、根捕获与 Smart 上限） | 旧药水腰带槽位不再导致初始化越界；两瓶中禁用一瓶后最大 Smart 梯度为一药。失败基线 `c0d4e5eda2c846cb84107b973f4a4374`，修复 runId `fb708ae2ba4b474aa9c8cf11d6c9a35e`。 | 2026-09-02 |
 | `MAYHEM-EMPTY-REQUIRED-CHOICE-0252` | 通过（两组自动打牌顺序夹具） | 战乱自动打出空候选选牌牌时直接执行空选择语义，不再生成零候选请求。失败基线 `15c4938d272e43038a2968cd998f0d58`，修复 runId `d59b5f0128e34e058a2cdef78d6f1bf4`。 | 2026-09-02 |
 | `KNOWLEDGE-INVALID-CHOICE-BRANCH-0252-FINAL` | 通过（问题包根状态、DOP4） | 无效的知识恶魔计划选牌候选只淘汰自身，其他分支在 30 秒短搜内返回可执行路线。runId `5bbd0920aabe4a4ca69e51d4d821867e`。 | 2026-09-02 |
+| `POWER-AFFLICTION-FIRST-GENERATED-0252-FINAL` | 通过（Fork 边界与感染棱柱实包全自动） | 根卡牌在搜索物化时冻结，第一张新生成牌会正确获得生命火花/流电等状态；感染棱柱实际打出“发现”后结束战斗。runId `1a76d76419c14fa78fd60c8e46220587`、`a33c599436d74965afbada4582739aab`。 | 2026-09-02 |
+| `KNIGHTS-DAMPEN-ROOT-0252-PASS` | 通过（三骑士第 5 回合实包根、DOP4） | 根捕获导入压制施法者和原始升级记录，搜索跨过魔法骑士死亡并返回 6 个可执行动作。runId `98d1af7fd9284e6698eb7deb2f37c51e`。 | 2026-09-02 |
 
 ## 0.25.1（已发布）
 

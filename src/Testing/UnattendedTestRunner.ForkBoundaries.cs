@@ -765,6 +765,20 @@ internal sealed partial class UnattendedTestRunner
         Player player,
         CardModel liveCard)
     {
+        SimulatedCombatState entryCombat = new(combat);
+        CombatPredictionSimulator entrySimulator = new(entryCombat);
+        SimPlayerCombatState entryState = entrySimulator.State.GetPlayerCombatState(player);
+        PredictedCard entryCard = entryState.FindCard(liveCard)
+            ?? throw new InvalidOperationException("Power affliction 首张生成牌测试找不到父卡牌。");
+        PredictedCard firstGeneratedCard = entryCard.CreateClone();
+        entryState.DiscardPile.Add(firstGeneratedCard);
+        entryCombat.RegisterGeneratedCombatCard(firstGeneratedCard);
+        entryCombat.NormalizePowerCardState(entrySimulator);
+        HashSet<PredictedCard> entryKnown = GetPowerAfflictionKnownCards(entryCombat)
+            ?? throw new InvalidOperationException("Power affliction 漏记第一张生成牌。");
+        if (entryKnown.Count != 1 || !entryKnown.Contains(firstGeneratedCard))
+            throw new InvalidOperationException("Power affliction 把第一张生成牌误认成根卡牌。");
+
         SimulatedCombatState parentCombat = new(combat);
         CombatPredictionSimulator parentSimulator = new(parentCombat);
         SimPlayerCombatState parentState = parentSimulator.State.GetPlayerCombatState(player);
