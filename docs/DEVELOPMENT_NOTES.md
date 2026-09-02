@@ -16,6 +16,7 @@
 - 复活中的生物拒绝新挂 Power，实验体重生回合不再保留实机不存在的弱化；Fork 边界回归 runId `daf83b4f2c614f008facdd5f9126ab23`。
 - Fatal 资格在伤害与死亡 Power 清理前冻结；狂宴击杀 `MINION_POWER` 随从不再错误增加 4 点最大生命。女王最小夹具 runId `f80ec3725924407a8603741a1e5d78ce`。
 - 搜索不再调用实机 `MonsterMoveStateMachine.RollMove`；怪物初始行动改为从分支快照中的状态机与 RNG 独立解析，避免外部行动预测补丁在并行搜索中改坏共享集合。Search/Prediction 目录已无 `RollMove` 调用，Fork 边界回归 runId `78f1a80afe664d1cbc97a80b70e131ed`。
+- 强制用药搜索的中间路线先核对指定槽位与药水身份，只有满足全部强制指令的完整胜利线才会展示并允许“采用当前路线”；不再因采用零药中间线而在最终校验时报策略未满足。DOP4 控制器回归 runId `ce7406b333034a61b75c75ee4a5dac75`。
 
 ## 0.25.1（已发布，2026-09-01）：重算、选牌与搜索边界修复
 

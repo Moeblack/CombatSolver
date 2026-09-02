@@ -75,6 +75,11 @@ internal sealed partial class CombatBeamSolver
         void ConsiderCurrentResult(SearchNode node)
         {
             if (ExplicitPotionUseCount(node) < _minimumPotionUses
+                || _enforcePotionDirectives
+                    && !_potionStrategy.EvaluateForcedUses(
+                            node.Actions,
+                            root.HasRenewablePotionShapedRock)
+                        .AllForcedUsesSatisfied
                 || !SolverInterimResultOrdering.IsCompleteVictory(
                     node.ActionCount,
                     node.Snapshot.AllEnemiesDead,

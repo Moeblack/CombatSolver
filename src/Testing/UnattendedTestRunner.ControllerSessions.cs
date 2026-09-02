@@ -68,19 +68,26 @@ internal sealed partial class UnattendedTestRunner
                         SoftTimeBudgetMilliseconds = 5_000,
                     },
                     ForceShortOnly = true,
-                    MaxDegreeOfParallelism = 1,
+                    MaxDegreeOfParallelism = 4,
                 };
                 CombatRootSnapshot forcedRoot = CombatRootSnapshot.Capture(combat);
                 SolverDisplayNames forcedDisplayNames = SolverDisplayNames.Capture(combat);
                 BattleDamageSnapshot forcedBattleDamage = BattleDamageTracker.Observe(combat);
+                bool forcedAdoptionRequested = false;
                 SolverResult forcedResult = await Task.Run(() => CombatSearchCoordinator.Solve(
                     forcedRoot,
                     forcedDisplayNames,
                     forcedBattleDamage,
                     forcedPolicy,
                     CancellationToken.None,
-                    progressCallback: null));
-                if (!forcedResult.BestNode.Actions.Any(action =>
+                    progress =>
+                    {
+                        if (progress.CurrentBestResult != null)
+                            forcedAdoptionRequested = true;
+                    },
+                    () => forcedAdoptionRequested));
+                if (!forcedAdoptionRequested
+                    || !forcedResult.BestNode.Actions.Any(action =>
                         action.Kind == PlanActionKind.UsePotion
                         && action.PotionSlot == forcedPotion.Slot
                         && string.Equals(
@@ -88,7 +95,7 @@ internal sealed partial class UnattendedTestRunner
                             forcedPotion.Potion.Id.Entry,
                             StringComparison.Ordinal)))
                 {
-                    throw new InvalidOperationException("强制用药搜索结果没有使用指定槽位的指定药水。");
+                    throw new InvalidOperationException("强制用药的可采用路线没有使用指定槽位的指定药水。");
                 }
             }
             finally
