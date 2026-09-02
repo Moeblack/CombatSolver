@@ -148,6 +148,7 @@ internal sealed partial class UnattendedTestRunner
 
         AssertPredictedCardForkOwnershipAndObservers(combat, player, card);
         AssertAmountOnTurnStartCacheReuse(combat, player);
+        AssertPowerListenerCacheTransitionsAndForkIsolation(combat, player);
         AssertSparsePowerAfflictionCardTracking(combat, player, card);
         AssertProjectedShuffleEquivalence(simulator, player);
         AssertSpawnHpUsesSimulatedCreatureState(combat);
@@ -788,6 +789,149 @@ internal sealed partial class UnattendedTestRunner
         }
         if (parentPower.AmountOnTurnStart != parentAmountOnTurnStart)
             throw new InvalidOperationException("AmountOnTurnStart 更新跨 Fork 污染父 Power。");
+    }
+
+    private static void AssertPowerListenerCacheTransitionsAndForkIsolation(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState parentCombat = new(combat);
+        CombatPredictionSimulator parentSimulator = new(parentCombat);
+        Creature owner = player.Creature;
+        parentCombat.SetAmount<StrengthPower>(owner, 1);
+        IReadOnlyList<AbstractModel> parentListenersAtOne =
+            ((ICombatPredictionHookListenerSource)parentCombat).HookListeners;
+        IReadOnlyList<AbstractModel> parentRunListenersAtOne =
+            ((ICombatPredictionHookListenerSource)parentCombat).RunHookListeners;
+        IReadOnlyList<PowerModel> parentPowersAtOne = parentCombat.EffectivePowers();
+        StrengthPower parentStrength = parentPowersAtOne
+            .OfType<StrengthPower>()
+            .Single(power => ReferenceEquals(power.Owner, owner));
+        bool canReuseListenerCache = !parentCombat.RootHasBaseLibCardModifiers;
+
+        parentCombat.SetAmount<StrengthPower>(owner, 2);
+        if (canReuseListenerCache
+                && (!ReferenceEquals(
+                    parentListenersAtOne,
+                    ((ICombatPredictionHookListenerSource)parentCombat).HookListeners)
+                    || !ReferenceEquals(
+                        parentRunListenersAtOne,
+                        ((ICombatPredictionHookListenerSource)parentCombat).RunHookListeners))
+            || !ReferenceEquals(parentPowersAtOne, parentCombat.EffectivePowers())
+            || !ReferenceEquals(parentStrength, parentCombat.GetPower<StrengthPower>(owner))
+            || parentStrength.Amount != 2)
+        {
+            throw new InvalidOperationException(
+                "Power 数量从 1 增加到 2 时错误重建了身份不变的 listener 缓存。");
+        }
+
+        CombatPredictionSimulator childSimulator = parentSimulator.Fork();
+        SimulatedCombatState childCombat = (SimulatedCombatState)childSimulator.State.CombatState;
+        StrengthPower childStrength = childCombat.EffectivePowers()
+            .OfType<StrengthPower>()
+            .Single(power => ReferenceEquals(power.Owner, owner));
+        IReadOnlyList<AbstractModel> childListenersAtTwo =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        IReadOnlyList<AbstractModel> childRunListenersAtTwo =
+            ((ICombatPredictionHookListenerSource)childCombat).RunHookListeners;
+        IReadOnlyList<PowerModel> childPowersAtTwo = childCombat.EffectivePowers();
+        if (ReferenceEquals(parentStrength, childStrength)
+            || CountReferences(childListenersAtTwo, childStrength) != 1
+            || CountReferences(childRunListenersAtTwo, childStrength) != 1
+            || CountReferences(childListenersAtTwo, parentStrength) != 0
+            || CountReferences(childRunListenersAtTwo, parentStrength) != 0)
+            throw new InvalidOperationException("Power listener 缓存没有按 Fork 映射到子分支 Power。");
+
+        childCombat.SetAmount<StrengthPower>(owner, 0);
+        IReadOnlyList<AbstractModel> childListenersAtZero =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        IReadOnlyList<AbstractModel> childRunListenersAtZero =
+            ((ICombatPredictionHookListenerSource)childCombat).RunHookListeners;
+        IReadOnlyList<PowerModel> childPowersAtZero = childCombat.EffectivePowers();
+        if (ReferenceEquals(childListenersAtTwo, childListenersAtZero)
+            || ReferenceEquals(childRunListenersAtTwo, childRunListenersAtZero)
+            || ReferenceEquals(childPowersAtTwo, childPowersAtZero)
+            || childListenersAtZero.Any(listener => ReferenceEquals(listener, childStrength))
+            || childPowersAtZero.Any(power => ReferenceEquals(power, childStrength)))
+        {
+            throw new InvalidOperationException(
+                "Power 数量从 2 归零时没有失效缓存并移除对应 listener。");
+        }
+        if (parentStrength.Amount != 2
+            || canReuseListenerCache
+                && (!ReferenceEquals(
+                    parentListenersAtOne,
+                    ((ICombatPredictionHookListenerSource)parentCombat).HookListeners)
+                    || !ReferenceEquals(
+                        parentRunListenersAtOne,
+                        ((ICombatPredictionHookListenerSource)parentCombat).RunHookListeners))
+            || !ReferenceEquals(parentPowersAtOne, parentCombat.EffectivePowers()))
+        {
+            throw new InvalidOperationException("子分支 Power 归零污染了父分支 listener 缓存。");
+        }
+
+        childCombat.SetAmount<StrengthPower>(owner, 1);
+        IReadOnlyList<AbstractModel> childListenersRestored =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        IReadOnlyList<PowerModel> childPowersRestored = childCombat.EffectivePowers();
+        if (ReferenceEquals(childListenersAtZero, childListenersRestored)
+            || ReferenceEquals(childPowersAtZero, childPowersRestored)
+            || CountReferences(childListenersRestored, childStrength) != 1
+            || CountReferences(childPowersRestored, childStrength) != 1)
+        {
+            throw new InvalidOperationException(
+                "Power 数量从 0 恢复到 1 时没有失效缓存或唯一恢复对应 listener。");
+        }
+
+        DexterityPower firstAdded = childCombat.AddPowerInstance<DexterityPower>(owner, 1, owner);
+        NoDrawPower secondAdded = childCombat.AddPowerInstance<NoDrawPower>(owner, 1, owner);
+        IReadOnlyList<AbstractModel> listenersWithAddedPowers =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        int firstIndex = IndexOfReference(listenersWithAddedPowers, firstAdded);
+        int secondIndex = IndexOfReference(listenersWithAddedPowers, secondAdded);
+        if (firstIndex < 0
+            || secondIndex <= firstIndex
+            || CountReferences(listenersWithAddedPowers, firstAdded) != 1
+            || CountReferences(listenersWithAddedPowers, secondAdded) != 1)
+        {
+            throw new InvalidOperationException("新增 Power listener 没有保持唯一身份和施加顺序。");
+        }
+        AssertUniquePowerListenerReferences(listenersWithAddedPowers);
+    }
+
+    private static int IndexOfReference<T>(IReadOnlyList<T> items, T candidate) where T : class
+    {
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index], candidate))
+                return index;
+        }
+        return -1;
+    }
+
+    private static int CountReferences<T>(IReadOnlyList<T> items, T candidate) where T : class
+    {
+        int count = 0;
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index], candidate))
+                count++;
+        }
+        return count;
+    }
+
+    private static void AssertUniquePowerListenerReferences(IReadOnlyList<AbstractModel> listeners)
+    {
+        for (int left = 0; left < listeners.Count; left++)
+        {
+            if (listeners[left] is not PowerModel power)
+                continue;
+            for (int right = left + 1; right < listeners.Count; right++)
+            {
+                if (ReferenceEquals(power, listeners[right]))
+                    throw new InvalidOperationException("Power listener 序列包含重复身份。");
+            }
+        }
     }
 
     private static void AssertSparsePowerAfflictionCardTracking(

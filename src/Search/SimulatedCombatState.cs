@@ -556,7 +556,7 @@ internal sealed partial class SimulatedCombatState
         int previousAmount = simulated._amount;
         simulated._amount = Math.Clamp(simulated._amount + amount, -999_999_999, 999_999_999);
         UpdatePowerListenerOrder((target, typeof(T)), previousAmount, simulated._amount);
-        InvalidateHookListeners();
+        InvalidateHookListenersForAmountTransition(previousAmount, simulated._amount);
         int applied = simulated._amount - previousAmount;
         RecordPowerAmountChange(simulated, applied, applier);
         RecordPossessedStatChange(simulated, applied, applier);
@@ -689,7 +689,7 @@ internal sealed partial class SimulatedCombatState
         int previousAmount = simulated._amount;
         simulated._amount = Math.Clamp(amount, -999_999_999, 999_999_999);
         UpdatePowerListenerOrder((target, typeof(T)), previousAmount, simulated._amount);
-        InvalidateHookListeners();
+        InvalidateHookListenersForAmountTransition(previousAmount, simulated._amount);
     }
 
     public void SetPowerAmount(PowerModel power, int amount)
@@ -705,7 +705,7 @@ internal sealed partial class SimulatedCombatState
                 previousAmount,
                 mutable._amount);
         }
-        InvalidateHookListeners();
+        InvalidateHookListenersForAmountTransition(previousAmount, mutable._amount);
     }
 
     public void SetPowerDynamicVar(
@@ -772,7 +772,7 @@ internal sealed partial class SimulatedCombatState
         simulated._target = target;
         simulated._amount = Math.Clamp(simulated._amount + amount, -999_999_999, 999_999_999);
         UpdatePowerListenerOrder((owner, typeof(T)), previousAmount, simulated._amount);
-        InvalidateHookListeners();
+        InvalidateHookListenersForAmountTransition(previousAmount, simulated._amount);
     }
 
     public void RecordThievery(CombatPredictionSimulator simulator, Creature owner)
@@ -1386,16 +1386,21 @@ internal sealed partial class SimulatedCombatState
         if (_effectivePowers is not null)
             return _effectivePowers;
         IReadOnlyList<AbstractModel> listeners = GetEffectiveHookListeners();
-        int expectedPowerCount = _rootPowerAmounts.Count
-            + _rootMultiInstancePowers.Count
-            + (_powers?.Count ?? 0)
-            + (_addedPowerInstances?.Count ?? 0)
-            + 8;
-        List<PowerModel> powers = new(Math.Min(listeners.Count, expectedPowerCount));
-        foreach (AbstractModel listener in listeners)
+        int listenerCount = listeners.Count;
+        int powerCount = 0;
+        for (int index = 0; index < listenerCount; index++)
         {
-            if (listener is PowerModel power)
-                powers.Add(power);
+            if (listeners[index] is PowerModel)
+                powerCount++;
+        }
+        PowerModel[] powers = powerCount == 0
+            ? Array.Empty<PowerModel>()
+            : new PowerModel[powerCount];
+        int powerIndex = 0;
+        for (int index = 0; index < listenerCount; index++)
+        {
+            if (listeners[index] is PowerModel power)
+                powers[powerIndex++] = power;
         }
         _effectivePowers = powers;
         return _effectivePowers;
@@ -1485,7 +1490,6 @@ internal sealed partial class SimulatedCombatState
         List<AbstractModel> listeners = new(baseListeners.Count
             + (_powers?.Count ?? 0)
             + (_addedPowerInstances?.Count ?? 0));
-        HashSet<PowerModel> emittedPowers = new(ReferenceEqualityComparer.Instance);
         foreach (AbstractModel listener in baseListeners)
         {
             if (listener is not PowerModel power)
@@ -1498,10 +1502,7 @@ internal sealed partial class SimulatedCombatState
                 ?? _powers?.GetValueOrDefault((power.Owner, power.GetType()))
                 ?? power;
             if (effective.Amount != 0)
-            {
                 listeners.Add(effective);
-                emittedPowers.Add(effective);
-            }
         }
         if (_powers != null)
         {
@@ -1509,7 +1510,7 @@ internal sealed partial class SimulatedCombatState
             {
                 if (_powers.TryGetValue(key, out PowerModel? power)
                     && power.Amount != 0
-                    && emittedPowers.Add(power))
+                    && !ContainsPowerReference(listeners, power))
                 {
                     InsertPowerAtOwnerPosition(listeners, power);
                 }
@@ -1519,12 +1520,24 @@ internal sealed partial class SimulatedCombatState
         {
             foreach (PowerModel power in _addedPowerInstances)
             {
-                if (power.Amount != 0 && emittedPowers.Add(power))
+                if (power.Amount != 0 && !ContainsPowerReference(listeners, power))
                     InsertPowerAtOwnerPosition(listeners, power);
             }
         }
         _effectiveHookListeners = listeners;
         return _effectiveHookListeners;
+    }
+
+    private static bool ContainsPowerReference(
+        IReadOnlyList<AbstractModel> listeners,
+        PowerModel candidate)
+    {
+        for (int index = 0; index < listeners.Count; index++)
+        {
+            if (ReferenceEquals(listeners[index], candidate))
+                return true;
+        }
+        return false;
     }
 
     private void InsertPowerAtOwnerPosition(List<AbstractModel> listeners, PowerModel power)
@@ -1563,6 +1576,12 @@ internal sealed partial class SimulatedCombatState
         _effectiveHookListeners = null;
         _effectiveRunHookListeners = null;
         _effectivePowers = null;
+    }
+
+    private void InvalidateHookListenersForAmountTransition(int previousAmount, int currentAmount)
+    {
+        if ((previousAmount == 0) != (currentAmount == 0))
+            InvalidateHookListeners();
     }
 
     private IReadOnlyList<AbstractModel> GetBaseHookListeners()
