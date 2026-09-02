@@ -2879,7 +2879,14 @@ internal sealed partial class CombatBeamSolver
     {
         List<PlanCardChoice> choices = [.. action.GetActionChoicesInExecutionOrder()];
         if (action.Kind == PlanActionKind.PlayCard && action.TurnStartChoices is { Count: > 0 })
-            choices.AddRange(action.TurnStartChoices);
+        {
+            // Knowledge Demon curses are never taken through a cursor. They are read straight off the raw plan
+            // list by KnowledgeDemonChoiceSupport.Resolve during the enemy turn, which for a card that forces the
+            // turn to end runs in AdvanceRound - after EndActionChoices has already asserted this cursor. Leaving
+            // them here makes AssertConsumed report a choice that was never this cursor's to take.
+            choices.AddRange(action.TurnStartChoices
+                .Where(choice => choice.Effect != PlanChoiceEffect.ApplyKnowledgeCurse));
+        }
         return choices.Count == 0 ? null : choices;
     }
 

@@ -49,6 +49,7 @@ internal sealed partial class UnattendedTestRunner
         AssertBeforeCardPlayedPowerConsumptionCommits(combat, player);
         AssertPlayerPowerHooksPrecedeCombatCards(combat, player);
         AssertNestedVoidFormRequestsTurnEnd(combat, player);
+        AssertKnowledgeDemonCurseStaysOutOfCardChoiceCursor();
         AssertExistingPilePotionChoiceReplaysAcrossFork(combat, player);
         AssertGeneratedCardCreatorDrivesSupermassive(combat, player);
         AssertLiveOriginalRemovalDoesNotAffectSnapshot(combat, player, card);
@@ -243,6 +244,48 @@ internal sealed partial class UnattendedTestRunner
                 throw new InvalidOperationException(
                     $"后续玻璃球没有命中新生成扭动虫：hp={state.CurrentHp}/{state.MaxHp}。");
             }
+        }
+    }
+
+    private static void AssertKnowledgeDemonCurseStaysOutOfCardChoiceCursor()
+    {
+        PlanCardChoice actionChoice = new(
+            PlanChoiceEffect.Discard,
+            PileType.Hand,
+            [],
+            "ACTION");
+        PlanCardChoice turnStartChoice = new(
+            PlanChoiceEffect.Exhaust,
+            PileType.Hand,
+            [],
+            "TURN_START",
+            Timing: PlanChoiceTiming.PlayerTurnEnd);
+        PlanCardChoice knowledgeCurse = new(
+            PlanChoiceEffect.ApplyKnowledgeCurse,
+            PileType.None,
+            [],
+            "KNOWLEDGE_DEMON:1:0",
+            Timing: PlanChoiceTiming.EnemyTurn);
+        PlanAction action = new(
+            PlanActionKind.PlayCard,
+            Turn: 1,
+            Choice: actionChoice,
+            TurnStartChoices: [turnStartChoice, knowledgeCurse]);
+        MethodInfo method = typeof(CombatBeamSolver).GetMethod(
+            "ActionChoicesForReplay",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new MissingMethodException(
+                typeof(CombatBeamSolver).FullName,
+                "ActionChoicesForReplay");
+        IReadOnlyList<PlanCardChoice> choices =
+            (IReadOnlyList<PlanCardChoice>?)method.Invoke(null, [action])
+            ?? throw new InvalidOperationException("出牌选牌游标测试没有生成选择列表。");
+        if (!choices.Contains(actionChoice)
+            || !choices.Contains(turnStartChoice)
+            || choices.Contains(knowledgeCurse))
+        {
+            throw new InvalidOperationException(
+                "出牌选牌游标没有精确排除知识恶魔诅咒选择。");
         }
     }
 
