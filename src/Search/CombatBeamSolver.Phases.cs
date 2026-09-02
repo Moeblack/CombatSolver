@@ -125,7 +125,8 @@ internal sealed partial class CombatBeamSolver
                     root.InitialPlayerMaxHp),
                 ProjectedBattlePotionCount: battleDamage.PotionsUsedSoFar + node.PotionCount,
                 EnemyHp: node.Snapshot.EnemyHp,
-                Score: node.Score);
+                Score: node.Score,
+                CombatEndedTurn: won ? node.Action?.Turn : null);
         }
 
 

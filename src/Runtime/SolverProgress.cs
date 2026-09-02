@@ -141,7 +141,8 @@ internal sealed record SolverInterimResult(
     int PotionStrategicCost,
     int ProjectedBattlePotionCount,
     int EnemyHp,
-    double Score);
+    double Score,
+    int? CombatEndedTurn = null);
 
 internal sealed record SolverFrontierTurn(
     int Turn,
