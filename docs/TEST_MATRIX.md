@@ -1,12 +1,12 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.25.2`（当前创意工坊稳定版；下一版本号待定）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.25.3`（当前创意工坊稳定版）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
 
-## 下一版本（开发中，版本号待定）
+## 0.25.3（已发布）
 
 | 场景 | 结果 | 验证内容 | 日期 |
 | --- | --- | --- | --- |
@@ -16,6 +16,8 @@
 | `PAELS-LEGION-CARDPLAY-COOLDOWN` | 通过（斧兵实包第 1 回合根、DOP4） | 补偿层产生的卡牌格挡保留 CardPlay 身份，佩尔士兵在出牌完成后启动冷却；第 2 回合精确复用，计划外重算 `0`。runId `0a6b24215996448f9204b84c3fc193da`。 | 2026-09-02 |
 | `UNSETTLING-LAMP-CARD-POWER-SCOPE` | 通过（女王实包第 4 回合根、DOP4） | 卡牌 OnPlay 的通用 Power 效果与专项补偿共用同一卡牌作用域；躁动之灯由鞭打的 Doom 正确消耗，不再错误翻倍后续弱化之触。第 5 回合精确复用，计划外重算 `0`。runId `018bc519e6204a42be24ed6e92788eda`。 | 2026-09-02 |
 | `ORB-SLOT-CAP-10` | 通过（Fork 边界、DOP4） | 增加轨道槽位统一遵守原版容量上限：`9 + 2 = 10`，满槽后继续增加仍为 `10`。永劫之镜问题包的完整回放曾卡在等待玩家回合，未声称整包复现。runId `2eeb4d75036a4f1a8245275efbbcf31f`。 | 2026-09-02 |
+| `AUTOPLAY-UNMOVABLE-PRIOR-BLOCK` | 通过（Fork 边界、DOP4） | 自动打出的格挡牌读取本回合此前完整的卡牌格挡历史；坚不可摧生效前已有卡牌格挡时不再重复翻倍。runId `a2e032db9bf641b89d6d295fa1106f2d`。 | 2026-09-02 |
+| `ORB-DEATH-SPAWN-BETWEEN-PASSIVES` | 通过（Fork 边界、DOP4） | 闪电球击杀感染目标后先完成四只扭动虫召唤，再结算后续玻璃球；四只新生怪均承受 `4` 点伤害。runId `a2e032db9bf641b89d6d295fa1106f2d`。 | 2026-09-02 |
 
 ## 0.25.2（已发布）
 

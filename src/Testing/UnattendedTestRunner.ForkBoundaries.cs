@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Afflictions;
 using MegaCrit.Sts2.Core.Models.Cards;
 using MegaCrit.Sts2.Core.Models.Enchantments;
+using MegaCrit.Sts2.Core.Models.Orbs;
 using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Models.Powers;
 using MegaCrit.Sts2.Core.Models.Relics;
@@ -150,6 +151,8 @@ internal sealed partial class UnattendedTestRunner
         AssertPendingRandomBranchSpawnRollsAtTurnBoundary(combat);
         AssertDefeatedEnemyRejectsLatePowerApplication(combat, player);
         AssertOrbSlotAdditionCapsAtVanillaMaximum(combat, player);
+        AssertAutoPlayedBlockHonorsPriorTurnHistory(combat, player, card);
+        AssertOrbDeathsSettleBetweenTurnEndPassives(combat, player);
         AssertWhisperingEarringOnlyRunsOnFirstTurn(simulator, simulatedCombat, player);
         AssertPredictionForkContextIdentityIndex();
         AssertForkableListEnumeration();
@@ -159,7 +162,7 @@ internal sealed partial class UnattendedTestRunner
     {
         SimulatedCombatState simulatedCombat = new(combat);
         CombatPredictionSimulator simulator = new(simulatedCombat);
-        SimOrbQueue queue = simulatedCombat.GetPlayerCombatState(player).OrbQueue;
+        SimOrbQueue queue = simulator.State.GetPlayerCombatState(player).OrbQueue;
         if (queue.Capacity >= OrbQueue.maxCapacity)
             throw new InvalidOperationException("轨道上限测试要求初始容量低于原版上限。");
 
@@ -171,6 +174,68 @@ internal sealed partial class UnattendedTestRunner
         simulator.AddOrbSlots(player, 1);
         if (queue.Capacity != OrbQueue.maxCapacity)
             throw new InvalidOperationException("已满的轨道仍然增加了容量。");
+    }
+
+    private static void AssertAutoPlayedBlockHonorsPriorTurnHistory(
+        CombatState combat,
+        Player player,
+        CardModel liveCard)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        PredictedCard priorBlockCard = simulator.State.GetPlayerCombatState(player).FindCard(liveCard)
+            ?? throw new InvalidOperationException("自动出牌历史测试找不到根卡牌。");
+        simulatedCombat.RecordCardPlayed(priorBlockCard, gainedBlock: true);
+        simulatedCombat.Apply<UnmovablePower>(player.Creature, 1, player.Creature);
+
+        PredictedCard defend = new(simulatedCombat.CreateCard<DefendDefect>(player));
+        simulator.AddToPile(defend, PileType.Draw, CardPilePosition.Top);
+        int blockBefore = simulator.State.GetCreature(player.Creature).Block;
+        simulator.AutoPlayFromDrawPile(player, 1, CardPilePosition.Top);
+        int gained = simulator.State.GetCreature(player.Creature).Block - blockBefore;
+        int expected = defend.Preview.DynamicVars.Block.IntValue;
+        if (gained != expected)
+        {
+            throw new InvalidOperationException(
+                $"自动出牌忽略本回合既有卡牌格挡历史：expected={expected} actual={gained}。");
+        }
+    }
+
+    private static void AssertOrbDeathsSettleBetweenTurnEndPassives(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        Creature enemy = simulatedCombat.Enemies.First();
+        simulator.State.GetCreature(enemy).CurrentHp = 3;
+        simulatedCombat.Apply<InfestedPower>(enemy, 1, enemy);
+
+        SimOrbQueue queue = simulator.State.GetPlayerCombatState(player).OrbQueue;
+        queue.Clear();
+        queue.AddCapacity(2);
+        LightningOrb lightning = (LightningOrb)ModelDb.Orb<LightningOrb>().ToMutable();
+        lightning.Owner = player;
+        GlassOrb glass = (GlassOrb)ModelDb.Orb<GlassOrb>().ToMutable();
+        glass.Owner = player;
+        if (!queue.TryEnqueue(lightning) || !queue.TryEnqueue(glass))
+            throw new InvalidOperationException("回合末球结算测试无法建立球队列。");
+
+        queue.BeforeTurnEnd(simulator);
+        Creature[] wrigglers = simulatedCombat.Enemies
+            .Where(candidate => candidate.Monster is MegaCrit.Sts2.Core.Models.Monsters.Wriggler)
+            .ToArray();
+        if (wrigglers.Length != 4)
+            throw new InvalidOperationException($"感染死亡后生成扭动虫数量错误：{wrigglers.Length}。");
+        foreach (Creature wriggler in wrigglers)
+        {
+            SimCreatureState state = simulator.State.GetCreature(wriggler);
+            if (state.MaxHp - state.CurrentHp != 4)
+            {
+                throw new InvalidOperationException(
+                    $"后续玻璃球没有命中新生成扭动虫：hp={state.CurrentHp}/{state.MaxHp}。");
+            }
+        }
     }
 
     private static void AssertRevivingCreatureRejectsNewPowers(CombatState combat, Player player)

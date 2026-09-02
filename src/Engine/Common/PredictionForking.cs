@@ -107,6 +107,9 @@ internal interface ICombatPredictionCardExecutionSink
 {
     IDisposable BeginCardExecutionScope();
 
+    IDisposable BeginHistorySensitiveCardModifierScope(
+        CombatSolver.Engine.Common.PredictedCard card);
+
     IDisposable BeginCardPowerApplication(CombatSolver.Engine.Common.PredictedCard card);
 
     void RecordCardPlayStarted(

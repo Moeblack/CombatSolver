@@ -25,6 +25,8 @@ internal sealed partial class CombatPredictionSimulator
         bool skipXCapture = false,
         string? nestedChoiceSourceId = null)
     {
+        using IDisposable? modifierScope = (State.CombatState as ICombatPredictionCardExecutionSink)
+            ?.BeginHistorySensitiveCardModifierScope(card);
         if (IsOverOrEnding || State.GetCreature(card.Preview.Owner.Creature).IsDead)
         {
             return false;
