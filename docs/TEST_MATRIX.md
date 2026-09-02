@@ -15,6 +15,7 @@
 | `PR31-CONTROLLER-UI-LIFECYCLE` | 通过（headless 控制器/UI/药水生命周期，DOP4） | 自动计算持久化、独立停止/采用/执行控件、候选路线与逐回合对敌伤害、窄药水浮层、三向缩放、内容最小尺寸、折叠恢复及位置/尺寸 JSON 往返均通过。runId `75070ce99c1b48ef9c9608205ac57e19`。 | 2026-09-02 |
 | `PR31-INITIAL-TOASTY-CONTROLS` | 通过（headless 烘焙手套开局搜索，DOP4） | 首次回合准备搜索可采用已展示候选，返回第 1 回合 `25` 个动作；采用、执行和后续重算仍由回合准备事务接管。runId `e6cb54b4de4f4110a996c2563c7f96ea`。 | 2026-09-02 |
 | `OVERLAY-RESIZE-PERSISTENCE-NEXT` | 通过（headless 真实重排） | 宽/高成对持久化、右/下/右下三向缩放、三斜线抓手、`16 ms` 拖动节流、内容最小尺寸、紧凑收起和展开恢复通过；独立药水浮层不改变主面板持久宽度。可见观感未检查。 | 2026-09-02 |
+| `BOSS-HP-STRATEGY-SETTINGS-NEXT` | 通过（headless 设置/UI/搜索策略，DOP4） | 第一、二幕与最终 Boss 两项策略独立 JSON 往返；通关优先分别保留 `45 HP/瓶`、`75 HP` 卖血阈值和最终 Boss 存活边界，最低战损独立恢复 `9 HP/瓶` 与普通 Boss 卖血阈值；两类提示文案和关闭状态互不串联。runId `e52f2ec763ac4361a9a09992ab8ae7d5`。 | 2026-09-02 |
 
 ## 0.26.0（已发布）
 

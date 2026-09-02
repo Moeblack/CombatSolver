@@ -21,6 +21,19 @@ internal enum BossHpRelief
 
 internal static class ActEndingBossPolicy
 {
+    public static BossHpRelief ResolveStrategicHpRelief(
+        BossHpRelief encounterHpRelief,
+        BossHpStrategy actTransitionStrategy,
+        BossHpStrategy finalBossStrategy)
+        => encounterHpRelief switch
+        {
+            BossHpRelief.ActClearHeal when actTransitionStrategy == BossHpStrategy.MinimizeHpLoss
+                => BossHpRelief.None,
+            BossHpRelief.RunEnding when finalBossStrategy == BossHpStrategy.MinimizeHpLoss
+                => BossHpRelief.None,
+            _ => encounterHpRelief,
+        };
+
     public static int RawHpRequiredForPersistentValue(
         int persistentHpValue,
         BossHpRelief bossHpRelief)

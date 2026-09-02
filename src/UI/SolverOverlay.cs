@@ -68,6 +68,7 @@ internal static class SolverOverlay
     private static Button? _settingsButton;
     private static Button? _potionStrategyButton;
     private static Button? _performanceHintButton;
+    private static Button? _bossHpStrategyHintButton;
     private static SolverPotionStrategyPanel? _potionStrategyPanel;
     private static Control? _rightResizeHandle;
     private static Control? _bottomResizeHandle;
@@ -104,6 +105,7 @@ internal static class SolverOverlay
     private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
     private static long _lastResizeLayoutAt;
+    private static BossHpRelief _activeBossHpRelief;
     private static Vector2 _dragOffset;
     private static ResizeEdge _activeResizeEdge = ResizeEdge.BottomRight;
     private static Vector2 _resizeStartMousePosition;
@@ -153,6 +155,8 @@ internal static class SolverOverlay
         => _settingsPanel?.NoGcControlsConfiguredForTesting == true;
     internal static bool VisualSettingsConfiguredForTesting
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
+    internal static bool BossHpStrategySettingsConfiguredForTesting
+        => _settingsPanel?.BossHpStrategySettingsConfiguredForTesting == true;
     internal static bool ResizeUiConfiguredForTesting
         => _rightResizeHandle != null
             && _bottomResizeHandle != null
@@ -169,6 +173,9 @@ internal static class SolverOverlay
                 IsSlimForTesting: true,
             };
     internal static bool PerformanceHintVisibleForTesting => _performanceHintButton?.Visible == true;
+    internal static bool BossHpStrategyHintVisibleForTesting
+        => _bossHpStrategyHintButton?.Visible == true;
+    internal static string? BossHpStrategyHintTextForTesting => _bossHpStrategyHintButton?.Text;
     internal static string? ReviewSummaryTextForTesting => _reviewText?.Text;
     internal static string? SearchSummaryTextForTesting => _summaryText?.Text;
     internal static double SearchProgressRatioForTesting => _lastSearchProgressRatio;
@@ -204,6 +211,50 @@ internal static class SolverOverlay
             SetPerformanceHintVisible(original);
         }
     }
+
+    internal static bool ExerciseBossHpStrategyHintForTesting()
+    {
+        if (_bossHpStrategyHintButton == null)
+            return false;
+        SolverSettingsData originalSettings = SolverSettings.Current;
+        BossHpRelief originalRelief = _activeBossHpRelief;
+        try
+        {
+            SolverSettings.ApplyForTesting(originalSettings with
+            {
+                ActTransitionBossHpStrategy = BossHpStrategy.ProgressionFirst,
+                FinalBossHpStrategy = BossHpStrategy.MinimizeHpLoss,
+                ShowActTransitionBossHpStrategyHint = true,
+                ShowFinalBossHpStrategyHint = true,
+            });
+            _activeBossHpRelief = BossHpRelief.ActClearHeal;
+            RefreshBossHpStrategyHint();
+            bool actTransitionText = BossHpStrategyHintVisibleForTesting
+                && _bossHpStrategyHintButton.Text.Contains("第一、二幕", StringComparison.Ordinal)
+                && _bossHpStrategyHintButton.Text.Contains("通关优先", StringComparison.Ordinal)
+                && _bossHpStrategyHintButton.Text.Contains("80%", StringComparison.Ordinal);
+
+            SolverSettings.ApplyForTesting(SolverSettings.Current with
+            {
+                ShowActTransitionBossHpStrategyHint = false,
+            });
+            RefreshBossHpStrategyHint();
+            bool actTransitionDismissed = !BossHpStrategyHintVisibleForTesting;
+
+            _activeBossHpRelief = BossHpRelief.RunEnding;
+            RefreshBossHpStrategyHint();
+            bool finalIndependent = BossHpStrategyHintVisibleForTesting
+                && _bossHpStrategyHintButton.Text.Contains("最终 Boss", StringComparison.Ordinal)
+                && _bossHpStrategyHintButton.Text.Contains("最低战损", StringComparison.Ordinal);
+            return actTransitionText && actTransitionDismissed && finalIndependent;
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(originalSettings);
+            _activeBossHpRelief = originalRelief;
+            RefreshBossHpStrategyHint();
+        }
+    }
     internal static bool ExercisePotionStrategyUiForTesting()
     {
         if (_potionStrategyButton == null || _potionStrategyPanel == null)
@@ -233,6 +284,8 @@ internal static class SolverOverlay
         => _settingsPanel?.ExerciseSearchCompletionNotificationPolicyForTesting() == true;
     internal static bool ExerciseVisualSettingsForTesting()
         => _settingsPanel?.ExerciseVisualSettingsForTesting() == true;
+    internal static bool ExerciseBossHpStrategySettingsForTesting()
+        => _settingsPanel?.ExerciseBossHpStrategySettingsForTesting() == true;
 
     internal static async Task<bool> ExerciseOverlayResizePersistenceForTestingAsync()
     {
@@ -384,6 +437,7 @@ internal static class SolverOverlay
         _deployQueued = false;
         SetStatus("求解器消息", TextMuted);
         SetPerformanceHintVisible(false);
+        SetCurrentBossHpStrategyHint();
         SetReviewText(null);
         const string legacyTitle = "[b]战斗路线求解器[/b]\n";
         SetMessageContent(text.StartsWith(legacyTitle, StringComparison.Ordinal) ? text[legacyTitle.Length..] : text);
@@ -399,6 +453,7 @@ internal static class SolverOverlay
         _deployQueued = false;
         SetStatus("求解器已禁用", TextMuted);
         SetPerformanceHintVisible(false);
+        SetBossHpStrategyHint(BossHpRelief.None);
         SetReviewText(null);
         SetMessageContent($"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动搜索和路线执行已暂停。[/color]");
         ShowLayer();
@@ -412,6 +467,7 @@ internal static class SolverOverlay
         _deployQueued = false;
         SetStatus("计算已停止", Danger);
         SetPerformanceHintVisible(false);
+        SetCurrentBossHpStrategyHint();
         SetReviewText(null);
         if (_searchBestSnapshot == null && _lastSnapshot == null)
         {
@@ -437,6 +493,7 @@ internal static class SolverOverlay
         _deployQueued = false;
         SetStatus("等待手动计算", TextMuted);
         SetPerformanceHintVisible(false);
+        SetCurrentBossHpStrategyHint();
         SetReviewText(null);
         SetMessageContent(
             $"[color={SolverUiTokens.Palette.TextSecondaryHex}]自动计算已关闭。点击“{(hasPreviousCalculation ? "重新计算" : "开始计算")}”生成当前回合路线。[/color]");
@@ -521,6 +578,7 @@ internal static class SolverOverlay
         _lastReviewedWorldlinesBeforeSearch = reviewedWorldlinesBeforeSearch;
         _lastSearchProgressRatio = 0d;
         EnsureCreated(host);
+        SetCurrentBossHpStrategyHint();
         _deployQueued = deployWhenReady;
         SetStatus(
             "后台计算中",
@@ -604,6 +662,7 @@ internal static class SolverOverlay
         SetReviewText(snapshot.ReviewSummaryText);
         bool hasRouteDetails = !string.IsNullOrEmpty(snapshot.DetailsText);
         SetPerformanceHintVisible(hasRouteDetails && snapshot.ProjectedBattleHpLost > 0);
+        SetCurrentBossHpStrategyHint();
         if (_searchProgressBar != null)
             _searchProgressBar.Visible = false;
 
@@ -1128,6 +1187,7 @@ internal static class SolverOverlay
 
         root.AddChild(CreateHeader());
         root.AddChild(CreatePerformanceHint());
+        root.AddChild(CreateBossHpStrategyHint());
 
         HBoxContainer contentColumns = new()
         {
@@ -1448,6 +1508,32 @@ internal static class SolverOverlay
             SolverUiTokens.Spacing.Xxs));
         _performanceHintButton.Pressed += DismissPerformanceHint;
         return _performanceHintButton;
+    }
+
+    private static Control CreateBossHpStrategyHint()
+    {
+        _bossHpStrategyHintButton = SolverUiTokens.CreateButton(
+            string.Empty,
+            SolverButtonStyle.Secondary);
+        _bossHpStrategyHintButton.Name = "BossHpStrategyHint";
+        _bossHpStrategyHintButton.Visible = false;
+        _bossHpStrategyHintButton.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
+        _bossHpStrategyHintButton.CustomMinimumSize = new Vector2(0, 44);
+        _bossHpStrategyHintButton.AutowrapMode = TextServer.AutowrapMode.WordSmart;
+        _bossHpStrategyHintButton.AddThemeStyleboxOverride("normal", SolverUiTokens.CreateBox(
+            SolverUiTokens.IsLightTheme ? Accent.Lightened(0.84f) : Accent.Darkened(0.78f),
+            Accent,
+            SolverUiTokens.Radius.Large,
+            SolverUiTokens.Spacing.Md,
+            SolverUiTokens.Spacing.Xxs));
+        _bossHpStrategyHintButton.AddThemeStyleboxOverride("hover", SolverUiTokens.CreateBox(
+            SolverUiTokens.IsLightTheme ? Accent.Lightened(0.74f) : Accent.Darkened(0.68f),
+            Accent.Lightened(0.12f),
+            SolverUiTokens.Radius.Large,
+            SolverUiTokens.Spacing.Md,
+            SolverUiTokens.Spacing.Xxs));
+        _bossHpStrategyHintButton.Pressed += DismissBossHpStrategyHint;
+        return _bossHpStrategyHintButton;
     }
 
     private static Control CreateSummarySection()
@@ -1817,6 +1903,78 @@ internal static class SolverOverlay
         Entry.Logger.Info("[CombatSolver/Test] UI_ACTION action=performance_hint_dismissed");
     }
 
+    private static void DismissBossHpStrategyHint()
+    {
+        SolverSettingsData data = SolverSettings.Current;
+        SolverSettingsData updated = _activeBossHpRelief switch
+        {
+            BossHpRelief.ActClearHeal => data with
+            {
+                ShowActTransitionBossHpStrategyHint = false,
+            },
+            BossHpRelief.RunEnding => data with
+            {
+                ShowFinalBossHpStrategyHint = false,
+            },
+            _ => data,
+        };
+        if (!ReferenceEquals(updated, data))
+            SolverSettings.Update(updated);
+        RefreshBossHpStrategyHint();
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] UI_ACTION action=boss_hp_strategy_hint_dismissed " +
+            $"relief={_activeBossHpRelief}");
+    }
+
+    private static void SetCurrentBossHpStrategyHint()
+    {
+        CombatState? state = CombatManager.Instance.DebugOnlyGetState();
+        SetBossHpStrategyHint(
+            state != null && CombatManager.Instance.IsInProgress
+                ? ActEndingBossPolicy.ResolveHpRelief(state)
+                : BossHpRelief.None);
+    }
+
+    private static void SetBossHpStrategyHint(BossHpRelief relief)
+    {
+        _activeBossHpRelief = relief;
+        RefreshBossHpStrategyHint();
+    }
+
+    public static void RefreshBossHpStrategyHint()
+    {
+        if (_bossHpStrategyHintButton == null)
+            return;
+        SolverSettingsData settings = SolverSettings.Current;
+        bool enabled = _activeBossHpRelief switch
+        {
+            BossHpRelief.ActClearHeal => settings.ShowActTransitionBossHpStrategyHint,
+            BossHpRelief.RunEnding => settings.ShowFinalBossHpStrategyHint,
+            _ => false,
+        };
+        bool visible = enabled && !_collapsed && !_settingsVisible;
+        string text = _activeBossHpRelief switch
+        {
+            BossHpRelief.ActClearHeal when settings.ActTransitionBossHpStrategy
+                == BossHpStrategy.MinimizeHpLoss
+                => "本场为第一、二幕的幕末 Boss 战。当前选择最低战损，不折算战后回复；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示",
+            BossHpRelief.ActClearHeal
+                => "本场为第一、二幕的幕末 Boss 战。当前选择通关优先，按战后回复 80% 折算血量并优先保留药水；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示",
+            BossHpRelief.RunEnding when settings.FinalBossHpStrategy
+                == BossHpStrategy.MinimizeHpLoss
+                => "本场为最终 Boss 战。当前选择最低战损，会继续比较路线剩余血量；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示",
+            BossHpRelief.RunEnding
+                => "本场为最终 Boss 战。当前选择通关优先，路线存活后优先保留资源；可在 设置 > 常规 > 幕末 Boss 中切换，重新计算后生效。点击本消息后不再提示",
+            _ => string.Empty,
+        };
+        bool changed = _bossHpStrategyHintButton.Visible != visible
+            || !string.Equals(_bossHpStrategyHintButton.Text, text, StringComparison.Ordinal);
+        _bossHpStrategyHintButton.Text = text;
+        _bossHpStrategyHintButton.Visible = visible;
+        if (changed)
+            QueueResponsiveLayout();
+    }
+
     private static void SetReviewText(string? text)
     {
         if (_reviewText == null)
@@ -1908,6 +2066,7 @@ internal static class SolverOverlay
             _settingsPanel.Visible = !_collapsed && _settingsVisible;
         if (_potionStrategyPanel != null)
             _potionStrategyPanel.Visible = !_collapsed && !_settingsVisible && _potionStrategyVisible;
+        RefreshBossHpStrategyHint();
         if (_settingsButton != null)
         {
             _settingsButton.Text = _settingsVisible ? "返回" : "设置";

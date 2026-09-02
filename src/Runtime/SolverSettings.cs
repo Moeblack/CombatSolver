@@ -41,6 +41,12 @@ internal enum SolverPotionPolicy
     RequireAtLeastOne,
 }
 
+internal enum BossHpStrategy
+{
+    ProgressionFirst,
+    MinimizeHpLoss,
+}
+
 internal readonly record struct PersistedPotionDirective(
     int Slot,
     string PotionId,
@@ -59,12 +65,16 @@ internal sealed record SolverSettingsData
     public bool StopFullAutoOnWorseRecalculation { get; init; } = true;
     public bool EnableDetailedDiagnosticLogs { get; init; }
     public bool ShowBattleDamagePerformanceHint { get; init; } = true;
+    public bool ShowActTransitionBossHpStrategyHint { get; init; } = true;
+    public bool ShowFinalBossHpStrategyHint { get; init; } = true;
     public bool SearchCompletionNotificationsEnabled { get; init; } = true;
     public SolverSearchCompletionNotificationMode SearchCompletionNotificationMode { get; init; }
         = SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground;
     [JsonIgnore]
     public SolverPotionPolicy PotionPolicy { get; init; } = SolverPotionPolicy.Smart;
     public PersistedPotionDirective[] PotionDirectives { get; init; } = [];
+    public BossHpStrategy ActTransitionBossHpStrategy { get; init; } = BossHpStrategy.ProgressionFirst;
+    public BossHpStrategy FinalBossHpStrategy { get; init; } = BossHpStrategy.ProgressionFirst;
     public int PerformanceMigrationVersion { get; init; }
     public SolverPerformancePreset? PerformancePreset { get; init; } = SolverPerformancePreset.Medium;
     public int? SearchMaxDegreeOfParallelism { get; init; }
@@ -105,6 +115,8 @@ internal sealed record SolverSettingsSnapshot(
     bool StopFullAutoOnWorseRecalculation,
     bool EnableDetailedDiagnosticLogs,
     SolverPotionPolicy PotionPolicy,
+    BossHpStrategy ActTransitionBossHpStrategy,
+    BossHpStrategy FinalBossHpStrategy,
     int SearchMaxDegreeOfParallelism,
     SolverSearchProfile ShortProfile,
     SolverSearchProfile DeepProfile,
@@ -220,6 +232,8 @@ internal static class SolverSettings
             $"stop_on_worse_recalculation={migrated.StopFullAutoOnWorseRecalculation} " +
             $"detailed_diagnostic_logs={migrated.EnableDetailedDiagnosticLogs} " +
             $"show_battle_damage_performance_hint={migrated.ShowBattleDamagePerformanceHint} " +
+            $"act_transition_boss_hp_strategy={migrated.ActTransitionBossHpStrategy} " +
+            $"final_boss_hp_strategy={migrated.FinalBossHpStrategy} " +
             $"search_notifications_enabled={migrated.SearchCompletionNotificationsEnabled} " +
             $"search_notification_mode={migrated.SearchCompletionNotificationMode} " +
             $"potion_policy={migrated.PotionPolicy} " +
@@ -254,6 +268,8 @@ internal static class SolverSettings
             data.StopFullAutoOnWorseRecalculation,
             data.EnableDetailedDiagnosticLogs,
             data.PotionPolicy,
+            data.ActTransitionBossHpStrategy,
+            data.FinalBossHpStrategy,
             data.SearchMaxDegreeOfParallelism
                 ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism,
             shortProfile,
@@ -499,6 +515,13 @@ internal static class SolverSettings
         }
         if (!Enum.IsDefined(data.PotionPolicy))
             throw new InvalidDataException($"Unknown potion policy {data.PotionPolicy}.");
+        if (!Enum.IsDefined(data.ActTransitionBossHpStrategy))
+        {
+            throw new InvalidDataException(
+                $"Unknown act transition boss HP strategy {data.ActTransitionBossHpStrategy}.");
+        }
+        if (!Enum.IsDefined(data.FinalBossHpStrategy))
+            throw new InvalidDataException($"Unknown final boss HP strategy {data.FinalBossHpStrategy}.");
         HashSet<(int Slot, string PotionId)> potionDirectiveKeys = [];
         foreach (PersistedPotionDirective directive in data.PotionDirectives)
         {

@@ -48,6 +48,10 @@ internal sealed partial class CombatBeamSolver(
     private readonly int _initialEnemyCount = root.Enemies.Count;
     private readonly bool _isActEndingBoss = root.IsActEndingBoss;
     private readonly BossHpRelief _bossHpRelief = root.BossHpRelief;
+    private readonly BossHpRelief _strategicBossHpRelief = ActEndingBossPolicy.ResolveStrategicHpRelief(
+        root.BossHpRelief,
+        policy.ActTransitionBossHpStrategy,
+        policy.FinalBossHpStrategy);
     private readonly bool _detailedDiagnostics = policy.DetailedDiagnostics;
     private readonly int? _maximumPotionUses = maximumPotionUses;
     private readonly int _minimumPotionUses = minimumPotionUses ?? 0;
@@ -87,7 +91,7 @@ internal sealed partial class CombatBeamSolver(
         _enforcePotionDirectives,
         root.HasRenewablePotionShapedRock,
         _theftPolicy,
-        _bossHpRelief,
+        _strategicBossHpRelief,
         potionFreePolicyBaseline,
         root.InitialPlayerMaxHp,
         _minimumPotionUses,

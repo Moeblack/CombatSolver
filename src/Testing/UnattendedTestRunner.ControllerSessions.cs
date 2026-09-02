@@ -210,6 +210,13 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("界面主题或覆盖层透明度没有按持久化设置加载。");
         }
+        if (!SolverOverlay.BossHpStrategySettingsConfiguredForTesting
+            || !SolverOverlay.ExerciseBossHpStrategySettingsForTesting())
+        {
+            throw new InvalidOperationException("第一、二幕与最终 Boss 的血量策略没有独立持久化。");
+        }
+        if (!SolverOverlay.ExerciseBossHpStrategyHintForTesting())
+            throw new InvalidOperationException("幕末 Boss 血量策略提示没有按战斗类型独立显示和关闭。");
         bool resizeUiConfigured = SolverOverlay.ResizeUiConfiguredForTesting;
         bool resizePersistencePassed = await SolverOverlay.ExerciseOverlayResizePersistenceForTestingAsync();
         if (!resizeUiConfigured || !resizePersistencePassed)
@@ -748,6 +755,33 @@ internal sealed partial class UnattendedTestRunner
                 theftPolicy: null) != 75)
         {
             throw new InvalidOperationException("跨幕回复没有按 80% 同步缩放药水与卖血阈值。");
+        }
+        if (ActEndingBossPolicy.ResolveStrategicHpRelief(
+                BossHpRelief.ActClearHeal,
+                BossHpStrategy.ProgressionFirst,
+                BossHpStrategy.MinimizeHpLoss) != BossHpRelief.ActClearHeal
+            || ActEndingBossPolicy.ResolveStrategicHpRelief(
+                BossHpRelief.ActClearHeal,
+                BossHpStrategy.MinimizeHpLoss,
+                BossHpStrategy.ProgressionFirst) != BossHpRelief.None
+            || ActEndingBossPolicy.ResolveStrategicHpRelief(
+                BossHpRelief.RunEnding,
+                BossHpStrategy.MinimizeHpLoss,
+                BossHpStrategy.ProgressionFirst) != BossHpRelief.RunEnding
+            || ActEndingBossPolicy.ResolveStrategicHpRelief(
+                BossHpRelief.RunEnding,
+                BossHpStrategy.ProgressionFirst,
+                BossHpStrategy.MinimizeHpLoss) != BossHpRelief.None
+            || PotionUsePolicy.SmartRequiredHpSaved(
+                SolverWeights.PotionMinimumHpSaved,
+                BossHpRelief.None) != SolverWeights.PotionMinimumHpSaved
+            || CombatBeamSolver.ResolveSoldHpThreshold(
+                initialPlayerMaxHp: 80,
+                RoomType.Boss,
+                BossHpRelief.None,
+                theftPolicy: null) != SolverWeights.BossSoldHpThreshold)
+        {
+            throw new InvalidOperationException("两类幕末 Boss 的最低战损策略没有独立恢复正常血量权重。");
         }
         if (root.ZeroCostSearchablePotionCount == 0 && root.SearchablePotionCount >= 3
             && (CombatSearchCoordinator.MaximumSmartPotionUses(

@@ -14,6 +14,8 @@ internal sealed record SearchPolicySnapshot(
     int? DeepBudgetOverrideMilliseconds,
     bool IncludeTurnSetup,
     SolverTheftPolicy? TheftPolicy,
+    BossHpStrategy ActTransitionBossHpStrategy,
+    BossHpStrategy FinalBossHpStrategy,
     SearchDiagnosticsSink Diagnostics,
     SearchFramePressureSignal FramePressureSignal,
     SearchMemoryPressureSignal MemoryPressureSignal)

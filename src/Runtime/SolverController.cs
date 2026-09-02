@@ -422,6 +422,8 @@ internal static class SolverController
             UnattendedTestRunner.DeepSearchBudgetOverrideMilliseconds,
             includeTurnSetup,
             theftPolicy,
+            settings.ActTransitionBossHpStrategy,
+            settings.FinalBossHpStrategy,
             new SearchDiagnosticsSink(
                 message => Entry.Logger.Info(message),
                 message => Entry.Logger.Debug(message)),
@@ -1019,6 +1021,8 @@ internal static class SolverController
                 $"cause={CauseToken(replanCause)} previous_boundary={previousBoundary?.ToString() ?? "-"} " +
                 $"turn={turn} deploy_when_ready={deployWhenReady} " +
                 $"theft_policy={theftPolicy?.ToString() ?? "-"} " +
+                $"act_transition_boss_hp_strategy={searchPolicy.ActTransitionBossHpStrategy} " +
+                $"final_boss_hp_strategy={searchPolicy.FinalBossHpStrategy} " +
                 $"frame_baseline_samples={FramePressureSignal.BaselineSampleCount} " +
                 $"frame_baseline_ms={FramePressureSignal.BaselineFrameGapMilliseconds:F1} " +
                 $"frame_pressure_threshold_ms={FramePressureSignal.PressureFrameGapMilliseconds:F1} " +

@@ -10,6 +10,8 @@ internal sealed partial class SolverSettingsPanel
     private CheckButton _stopOnCombatEnd = null!;
     private CheckButton _stopOnDeathTurn = null!;
     private CheckButton _stopOnWorseRecalculation = null!;
+    private OptionButton _actTransitionBossHpStrategy = null!;
+    private OptionButton _finalBossHpStrategy = null!;
     private OptionButton _searchCompletionNotificationPolicy = null!;
     private OptionButton _overlayTheme = null!;
     private HSlider _overlayOpacity = null!;
@@ -23,6 +25,40 @@ internal sealed partial class SolverSettingsPanel
     internal bool VisualSettingsConfiguredForTesting
         => _overlayTheme.GetItemId(_overlayTheme.Selected) == (int)SolverSettings.Current.OverlayTheme
            && Math.Abs(_overlayOpacity.Value - SolverSettings.Current.OverlayOpacity) < 0.001d;
+
+    internal bool BossHpStrategySettingsConfiguredForTesting
+        => _actTransitionBossHpStrategy.GetItemId(_actTransitionBossHpStrategy.Selected)
+               == (int)SolverSettings.Current.ActTransitionBossHpStrategy
+           && _finalBossHpStrategy.GetItemId(_finalBossHpStrategy.Selected)
+               == (int)SolverSettings.Current.FinalBossHpStrategy;
+
+    internal bool ExerciseBossHpStrategySettingsForTesting()
+    {
+        SolverSettingsData original = SolverSettings.Current;
+        try
+        {
+            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(original with
+            {
+                ActTransitionBossHpStrategy = BossHpStrategy.MinimizeHpLoss,
+                FinalBossHpStrategy = BossHpStrategy.ProgressionFirst,
+            }));
+            Reload();
+            bool actTransitionIndependent = BossHpStrategySettingsConfiguredForTesting;
+
+            SolverSettings.ApplyForTesting(SolverSettings.RoundTripForTesting(original with
+            {
+                ActTransitionBossHpStrategy = BossHpStrategy.ProgressionFirst,
+                FinalBossHpStrategy = BossHpStrategy.MinimizeHpLoss,
+            }));
+            Reload();
+            return actTransitionIndependent && BossHpStrategySettingsConfiguredForTesting;
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(original);
+            Reload();
+        }
+    }
 
     internal bool ExerciseVisualSettingsForTesting()
     {
@@ -113,6 +149,26 @@ internal sealed partial class SolverSettingsPanel
             "搜索成功、失败、停止或结果过期时发送 Windows 系统通知和提示音。可关闭、仅在游戏不处于前台时通知，或始终通知；其他平台不会调用 Windows 接口。");
         content.AddChild(solverGrid);
 
+        content.AddChild(CreateSectionHeading("幕末 Boss"));
+        GridContainer bossStrategyGrid = CreateSettingsGrid();
+        _actTransitionBossHpStrategy = CreateBossHpStrategyInput(
+            data => data.ActTransitionBossHpStrategy,
+            (data, strategy) => data with { ActTransitionBossHpStrategy = strategy });
+        AddBasicRow(
+            bossStrategyGrid,
+            "第一、二幕血量取舍",
+            _actTransitionBossHpStrategy,
+            "通关优先会按战后回复 80% 折算血量价值并尽量保留药水；最低战损会按普通战斗完整比较掉血。重新计算后生效。");
+        _finalBossHpStrategy = CreateBossHpStrategyInput(
+            data => data.FinalBossHpStrategy,
+            (data, strategy) => data with { FinalBossHpStrategy = strategy });
+        AddBasicRow(
+            bossStrategyGrid,
+            "最终 Boss 血量取舍",
+            _finalBossHpStrategy,
+            "通关优先只要求路线存活并优先保留资源；最低战损会继续比较剩余血量。重新计算后生效。");
+        content.AddChild(bossStrategyGrid);
+
         content.AddChild(CreateSectionHeading("自动执行"));
         GridContainer executionGrid = CreateSettingsGrid();
         _stopOnCombatEnd = CreateToggle();
@@ -181,6 +237,26 @@ internal sealed partial class SolverSettingsPanel
                     : SolverSearchCompletionNotificationMode.OnlyWhenGameInBackground,
             });
             SetStatus("已保存并立即生效", SolverUiTokens.Palette.Success);
+        };
+        return input;
+    }
+
+    private OptionButton CreateBossHpStrategyInput(
+        Func<SolverSettingsData, BossHpStrategy> read,
+        Func<SolverSettingsData, BossHpStrategy, SolverSettingsData> write)
+    {
+        OptionButton input = CreateOptionInput(260);
+        input.AddItem("通关优先（默认）", (int)BossHpStrategy.ProgressionFirst);
+        input.AddItem("最低战损", (int)BossHpStrategy.MinimizeHpLoss);
+        _reloadInputs.Add(data => input.Selected = input.GetItemIndex((int)read(data)));
+        input.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            BossHpStrategy strategy = (BossHpStrategy)input.GetItemId((int)index);
+            SolverSettings.Update(write(SolverSettings.Current, strategy));
+            SolverOverlay.RefreshBossHpStrategyHint();
+            SetStatus("已保存，重新计算后生效", SolverUiTokens.Palette.Success);
         };
         return input;
     }

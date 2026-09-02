@@ -46,7 +46,7 @@ internal static class CombatSearchCoordinator
                 return;
             }
 
-            SolverInterimResult summary = BuildInterimResult(root, result);
+            SolverInterimResult summary = BuildInterimResult(root, policy, result);
             bool promoted = TryPromoteDisplayedResult(summary);
             if (!promoted && summary != currentDisplayedResult)
                 return;
@@ -1273,7 +1273,7 @@ internal static class CombatSearchCoordinator
                 : candidateWon
                     ? Math.Max(0, candidate.Snapshot.PlayerHp - potionFree.Snapshot.PlayerHp)
                     : 0;
-            int hpRequired = SmartPotionHpRequired(root, candidate);
+            int hpRequired = SmartPotionHpRequired(root, policy, candidate);
             bool protectsLoot = policy.TheftPolicy == SolverTheftPolicy.PreserveResources
                 && candidate.OutstandingStolenResource < potionFree.OutstandingStolenResource;
             bool acceptable = protectsLoot
@@ -1300,6 +1300,7 @@ internal static class CombatSearchCoordinator
 
     private static SolverInterimResult BuildInterimResult(
         CombatRootSnapshot root,
+        SearchPolicySnapshot policy,
         SolverResult result)
         => new(
             Won: result.Snapshot.AllEnemiesDead
@@ -1308,7 +1309,7 @@ internal static class CombatSearchCoordinator
             OutstandingStolenResource: result.OutstandingStolenResource,
             ProjectedBattleHpLost: result.ProjectedBattleHpLost,
             StrategicHpDeficit: StrategicHpDeficit(root, result),
-            PotionStrategicCost: SmartPotionHpRequired(root, result),
+            PotionStrategicCost: SmartPotionHpRequired(root, policy, result),
             ProjectedBattlePotionCount: result.ProjectedBattlePotionCount,
             EnemyHp: result.Snapshot.EnemyHp,
             Score: result.BestNode.Score);
@@ -1355,7 +1356,10 @@ internal static class CombatSearchCoordinator
         }
     }
 
-    private static int SmartPotionHpRequired(CombatRootSnapshot root, SolverResult result)
+    private static int SmartPotionHpRequired(
+        CombatRootSnapshot root,
+        SearchPolicySnapshot policy,
+        SolverResult result)
     {
         int ambergrisCount = result.BestNode.Actions.Count(action =>
             action.Kind == PlanActionKind.UsePotion
@@ -1364,7 +1368,9 @@ internal static class CombatSearchCoordinator
             result.PotionStrategicCostByTurn.Values.Sum(),
             ambergrisCount,
             root.InitialPlayerMaxHp);
-        return PotionUsePolicy.SmartRequiredHpSaved(strategicHpCost, root.BossHpRelief);
+        return PotionUsePolicy.SmartRequiredHpSaved(
+            strategicHpCost,
+            StrategicBossHpRelief(root, policy));
     }
 
     private static int StrategicHpDeficit(CombatRootSnapshot root, SolverResult result)
@@ -1395,7 +1401,7 @@ internal static class CombatSearchCoordinator
             return allowedPotions.Length;
         int paidPotionHpRequired = PotionUsePolicy.SmartRequiredHpSaved(
             SolverWeights.PotionMinimumHpSaved,
-            root.BossHpRelief);
+            StrategicBossHpRelief(root, policy));
         int paidPotionCapacity = paidPotionHpRequired >= int.MaxValue / 4
             ? 0
             : Math.Max(0, potionFreeHpDeficit) / paidPotionHpRequired;
@@ -1403,6 +1409,14 @@ internal static class CombatSearchCoordinator
             allowedPotions.Length,
             allowedPotions.Count(potion => potion.StrategicHpCost == 0) + paidPotionCapacity);
     }
+
+    private static BossHpRelief StrategicBossHpRelief(
+        CombatRootSnapshot root,
+        SearchPolicySnapshot policy)
+        => ActEndingBossPolicy.ResolveStrategicHpRelief(
+            root.BossHpRelief,
+            policy.ActTransitionBossHpStrategy,
+            policy.FinalBossHpStrategy);
 
     private static void MergeAuditTotals(
         SolverResult selected,

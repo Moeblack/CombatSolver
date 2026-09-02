@@ -263,7 +263,7 @@ internal sealed partial class CombatBeamSolver
         => ResolveSoldHpThreshold(
             root.InitialPlayerMaxHp,
             root.EncounterRoomType,
-            _bossHpRelief,
+            _strategicBossHpRelief,
             _theftPolicy);
 
     internal static int ResolveSoldHpThreshold(
