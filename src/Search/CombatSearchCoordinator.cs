@@ -1312,13 +1312,20 @@ internal static class CombatSearchCoordinator
         bool potionFreeWon,
         int potionFreeHpDeficit)
     {
+        SearchablePotionSlotSnapshot[] allowedPotions = root.SearchablePotions
+            .Where(potion => policy.PotionStrategy.AllowsExplicitUse(
+                potion.Slot,
+                potion.PotionId,
+                SolverPotionPolicy.Smart,
+                forceAllDisabled: false))
+            .ToArray();
         if (!potionFreeWon || policy.TheftPolicy == SolverTheftPolicy.PreserveResources)
-            return root.SearchablePotionCount;
+            return allowedPotions.Length;
         int paidPotionCapacity = Math.Max(0, potionFreeHpDeficit)
             / SolverWeights.PotionMinimumHpSaved;
         return Math.Min(
-            root.SearchablePotionCount,
-            root.ZeroCostSearchablePotionCount + paidPotionCapacity);
+            allowedPotions.Length,
+            allowedPotions.Count(potion => potion.StrategicHpCost == 0) + paidPotionCapacity);
     }
 
     private static void MergeAuditTotals(

@@ -26,6 +26,28 @@ internal sealed partial class UnattendedTestRunner
             .FirstOrDefault();
         if (strategyPotion is { } forcedPotion)
         {
+            SolverSettingsData settingsBeforeStaleDirectiveCheck = SolverSettings.Current;
+            try
+            {
+                PersistedPotionDirective staleDirective = new(
+                    player.PotionSlots.Count,
+                    forcedPotion.Potion.Id.Entry,
+                    SolverPotionDirective.Disabled);
+                SolverSettings.ApplyForTesting(settingsBeforeStaleDirectiveCheck with
+                {
+                    PotionDirectives = [staleDirective],
+                });
+                PotionStrategySnapshot staleStrategy = SolverController.CapturePotionStrategy(
+                    combat,
+                    SolverPotionPolicy.Smart);
+                if (staleStrategy.Directives.Count != 0)
+                    throw new InvalidOperationException("超出当前药水栏的持久化策略没有被忽略。");
+            }
+            finally
+            {
+                SolverSettings.ApplyForTesting(settingsBeforeStaleDirectiveCheck);
+            }
+
             SolverController.SetPotionDirectiveForTesting(
                 combat,
                 forcedPotion.Slot,
@@ -591,6 +613,11 @@ internal sealed partial class UnattendedTestRunner
             .Where(item => item.Potion != null && PotionOnUseSupport.CanSearch(item.Potion))
             .Select(item => (item.Slot, item.Potion!))
             .First();
+        (int Slot, PotionModel Potion)[] searchablePotions = Enumerable.Range(0, player.PotionSlots.Count)
+            .Select(slot => (Slot: slot, Potion: player.GetPotionAtSlotIndex(slot)))
+            .Where(item => item.Potion != null && PotionOnUseSupport.CanSearch(item.Potion))
+            .Select(item => (item.Slot, item.Potion!))
+            .ToArray();
         PlanAction potionAction = new(
             PlanActionKind.UsePotion,
             player.PlayerCombatState!.TurnNumber,
@@ -629,6 +656,43 @@ internal sealed partial class UnattendedTestRunner
                     root, policy, potionFreeWon: true, potionFreeHpDeficit: 27) != 3))
         {
             throw new InvalidOperationException("Smart 药水补查没有按每瓶 9 HP 限制多药层数。");
+        }
+        if (searchablePotions.Length >= 2)
+        {
+            (int Slot, PotionModel Potion) disabled = searchablePotions[0];
+            SolverController.SetPotionDirectiveForTesting(
+                combat,
+                disabled.Slot,
+                disabled.Potion.Id.Entry,
+                SolverPotionDirective.Disabled);
+            try
+            {
+                SolverSettingsSnapshot restrictedSettings = SolverSettings.Capture();
+                SearchPolicySnapshot restrictedPolicy = SolverController.CaptureSearchPolicy(
+                    restrictedSettings,
+                    combat,
+                    includeTurnSetup: false,
+                    theftPolicy: SolverController.ResolveTheftPolicy(combat));
+                int maximum = CombatSearchCoordinator.MaximumSmartPotionUses(
+                    root,
+                    restrictedPolicy,
+                    potionFreeWon: false,
+                    potionFreeHpDeficit: 0);
+                if (maximum != searchablePotions.Length - 1)
+                {
+                    throw new InvalidOperationException(
+                        $"禁用一瓶药后 Smart 仍会搜索过多药水层：maximum={maximum} " +
+                        $"searchable={searchablePotions.Length}。");
+                }
+            }
+            finally
+            {
+                SolverController.SetPotionDirectiveForTesting(
+                    combat,
+                    disabled.Slot,
+                    disabled.Potion.Id.Entry,
+                    SolverPotionDirective.Smart);
+            }
         }
         if (SolverInterimResultOrdering.IsResourceTradeImprovement(
                 candidateHpDeficit: 2,

@@ -1300,7 +1300,7 @@ internal static class SolverController
         List<PotionSlotDirective> directives = [];
         foreach (PersistedPotionDirective persisted in SolverSettings.Current.PotionDirectives)
         {
-            PotionModel? potion = player.GetPotionAtSlotIndex(persisted.Slot);
+            PotionModel? potion = GetPotionAtExistingSlot(player, persisted.Slot);
             if (potion != null
                 && string.Equals(potion.Id.Entry, persisted.PotionId, StringComparison.Ordinal))
             {
@@ -1387,7 +1387,7 @@ internal static class SolverController
         PersistedPotionDirective[] retained = settings.PotionDirectives
             .Where(directive =>
             {
-                PotionModel? potion = player.GetPotionAtSlotIndex(directive.Slot);
+                PotionModel? potion = GetPotionAtExistingSlot(player, directive.Slot);
                 return potion != null
                     && string.Equals(potion.Id.Entry, directive.PotionId, StringComparison.Ordinal);
             })
@@ -1399,6 +1399,11 @@ internal static class SolverController
             $"[CombatSolver/Test] POTION_DIRECTIVES_RECONCILED " +
             $"previous={settings.PotionDirectives.Length} current={retained.Length}");
     }
+
+    private static PotionModel? GetPotionAtExistingSlot(Player player, int slot)
+        => slot >= 0 && slot < player.PotionSlots.Count
+            ? player.PotionSlots[slot]
+            : null;
 
     internal static SolverTheftPolicy? ResolveTheftPolicy(CombatState state)
         => TheftEncounterStrategy.IsApplicable(state)
