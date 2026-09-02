@@ -78,17 +78,19 @@ internal static class CardSelectionCardMirrors
         for (var i = 0; i < card.DynamicVars.Cards.IntValue; i++)
         {
             var drawPileCards = context.OwnerState.DrawPile.Cards;
-            var selectedCard = drawPileCards
+            List<PredictedCard> eligibleCards = drawPileCards
                 .Where(predictedCard =>
                     !predictedCard.HasKeyword(context.State, CardKeyword.Unplayable))
-                .ToList()
-                .StableShuffle(context.Rng.Shuffle)
-                .FirstOrDefault();
+                .ToList();
+            CombatBeamSolver.StableShuffleProjection(eligibleCards, context.Rng.Shuffle);
+            var selectedCard = eligibleCards.FirstOrDefault();
 
-            selectedCard ??= drawPileCards
-                .ToList()
-                .StableShuffle(context.Rng.Shuffle)
-                .FirstOrDefault();
+            if (selectedCard is null)
+            {
+                List<PredictedCard> fallbackCards = drawPileCards.ToList();
+                CombatBeamSolver.StableShuffleProjection(fallbackCards, context.Rng.Shuffle);
+                selectedCard = fallbackCards.FirstOrDefault();
+            }
 
             if (selectedCard is null)
             {

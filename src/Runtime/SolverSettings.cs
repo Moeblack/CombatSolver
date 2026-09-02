@@ -69,6 +69,7 @@ internal sealed record SolverSettingsData
     public int? SearchMaxDegreeOfParallelism { get; init; }
     public double? ShortTimeLimitSeconds { get; init; }
     public double? DeepTimeLimitSeconds { get; init; }
+    public bool EnableNoGcRegion { get; init; } = true;
     public double? NoGcRegionBudgetGigabytes { get; init; } = 16d;
     public int? ShortBeamWidth { get; init; }
     public int? DeepBeamWidth { get; init; }
@@ -104,6 +105,7 @@ internal sealed record SolverSettingsSnapshot(
     int SearchMaxDegreeOfParallelism,
     SolverSearchProfile ShortProfile,
     SolverSearchProfile DeepProfile,
+    bool EnableNoGcRegion,
     long NoGcRegionBudgetBytes,
     SolverDeploymentFastMode DeploymentFastMode,
     double DeploymentInterActionDelaySeconds);
@@ -219,6 +221,7 @@ internal static class SolverSettings
             $"max_dop={Capture().SearchMaxDegreeOfParallelism} " +
             $"short_budget_ms={Capture().ShortProfile.SoftTimeBudgetMilliseconds} " +
             $"deep_budget_ms={Capture().DeepProfile.SoftTimeBudgetMilliseconds} " +
+            $"no_gc_enabled={Capture().EnableNoGcRegion.ToString().ToLowerInvariant()} " +
             $"no_gc_budget_bytes={Capture().NoGcRegionBudgetBytes} " +
             $"deployment_fast_mode={migrated.DeploymentFastMode} " +
             $"deployment_delay_seconds={migrated.DeploymentInterActionDelaySeconds ?? 0d:0.###} " +
@@ -248,6 +251,7 @@ internal static class SolverSettings
                 ?? SolverWeights.DefaultSearchMaxDegreeOfParallelism,
             shortProfile,
             deepProfile,
+            data.EnableNoGcRegion,
             noGcBytes,
             data.DeploymentFastMode,
             data.DeploymentInterActionDelaySeconds ?? 0d);
@@ -381,6 +385,10 @@ internal static class SolverSettings
                JsonSerializer.Serialize(data, JsonOptions),
                JsonOptions)
            ?? throw new InvalidDataException("CombatSolver settings round-trip returned null.");
+
+    internal static SolverSettingsData DeserializeForTesting(string json)
+        => JsonSerializer.Deserialize<SolverSettingsData>(json, JsonOptions)
+           ?? throw new InvalidDataException("CombatSolver settings test JSON returned null.");
 
     public static void ResetToDefaults() => Update(CreateCurrentDefaults());
 

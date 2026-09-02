@@ -8,6 +8,7 @@ using MegaCrit.Sts2.Core.Localization.DynamicVars;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Afflictions;
 using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.CardPools;
 using MegaCrit.Sts2.Core.Models.Enchantments;
 using MegaCrit.Sts2.Core.Models.Orbs;
 using MegaCrit.Sts2.Core.Models.Potions;
@@ -17,6 +18,7 @@ using STS2RitsuLib.Models.Capabilities;
 using System.Collections;
 using System.Reflection;
 using CombatSolver.Engine.Common;
+using CombatSolver.Engine.InCombat.Extensions;
 using CombatSolver.Engine.InCombat.Mirrors.Cards.OnPlay;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks;
 using CombatSolver.Engine.InCombat.Mirrors.Hooks.Card;
@@ -35,6 +37,10 @@ internal sealed partial class UnattendedTestRunner
             ?? throw new InvalidOperationException("Fork 边界测试要求手牌中至少有一张牌。");
         SimulatedCombatState simulatedCombat = new(combat);
         CombatPredictionSimulator simulator = new(simulatedCombat);
+        AssertSimulationCardPileLookupFastPath(player, card);
+        AssertRootColorlessGenerationPoolCache(simulator, player);
+        AssertRootCharacterAttackGenerationPoolCache(simulator, player);
+        AssertRitsuExtendedCapabilityFastPaths(player);
         AssertRitsuCapabilityFastPath(simulator, player, card);
         AssertChoiceKeyCache(simulator, player, card);
         AssertChoiceTokenSurvivesStateMutation(combat, player, card);
@@ -51,6 +57,7 @@ internal sealed partial class UnattendedTestRunner
         AssertMissingSandpitIsACompletedFranticEscape(combat, player);
         AssertTerminalMonsterMovesStopForecasting();
         AssertRevivingCreatureRejectsNewPowers(combat, player);
+        AssertRosterSinkRemovalUsesUpdatedRoster(combat);
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -144,6 +151,7 @@ internal sealed partial class UnattendedTestRunner
 
         AssertPredictedCardForkOwnershipAndObservers(combat, player, card);
         AssertAmountOnTurnStartCacheReuse(combat, player);
+        AssertPowerListenerCacheTransitionsAndForkIsolation(combat, player);
         AssertSparsePowerAfflictionCardTracking(combat, player, card);
         AssertProjectedShuffleEquivalence(simulator, player);
         AssertSpawnHpUsesSimulatedCreatureState(combat);
@@ -565,6 +573,29 @@ internal sealed partial class UnattendedTestRunner
         }
     }
 
+    private static void AssertRosterSinkRemovalUsesUpdatedRoster(CombatState combat)
+    {
+        CombatPredictionSimulator simulator = new(new SimulatedCombatState(combat));
+        Creature removed = simulator.State.Enemies.First();
+        simulator.State.RemoveCreature(removed);
+
+        if (simulator.State.Enemies.Contains(removed))
+            throw new InvalidOperationException("预测 roster sink 没有移除敌人。");
+        if (!ReferenceEquals(simulator.State.Enemies, simulator.State.CombatState.Enemies))
+        {
+            throw new InvalidOperationException(
+                "预测 roster sink 已更新底层列表后仍重复构造过滤视图。");
+        }
+
+        CombatPredictionSimulator fork = simulator.Fork();
+        if (fork.State.Enemies.Contains(removed)
+            || !ReferenceEquals(fork.State.Enemies, fork.State.CombatState.Enemies))
+        {
+            throw new InvalidOperationException(
+                "预测 roster sink 的移除结果没有跨 Fork 保持直接 roster 视图。");
+        }
+    }
+
     private static decimal CalculateSupermassive(
         CombatPredictionSimulator simulator,
         PredictedCard card)
@@ -866,6 +897,149 @@ internal sealed partial class UnattendedTestRunner
             throw new InvalidOperationException("AmountOnTurnStart 更新跨 Fork 污染父 Power。");
     }
 
+    private static void AssertPowerListenerCacheTransitionsAndForkIsolation(
+        CombatState combat,
+        Player player)
+    {
+        SimulatedCombatState parentCombat = new(combat);
+        CombatPredictionSimulator parentSimulator = new(parentCombat);
+        Creature owner = player.Creature;
+        parentCombat.SetAmount<StrengthPower>(owner, 1);
+        IReadOnlyList<AbstractModel> parentListenersAtOne =
+            ((ICombatPredictionHookListenerSource)parentCombat).HookListeners;
+        IReadOnlyList<AbstractModel> parentRunListenersAtOne =
+            ((ICombatPredictionHookListenerSource)parentCombat).RunHookListeners;
+        IReadOnlyList<PowerModel> parentPowersAtOne = parentCombat.EffectivePowers();
+        StrengthPower parentStrength = parentPowersAtOne
+            .OfType<StrengthPower>()
+            .Single(power => ReferenceEquals(power.Owner, owner));
+        bool canReuseListenerCache = !parentCombat.RootHasBaseLibCardModifiers;
+
+        parentCombat.SetAmount<StrengthPower>(owner, 2);
+        if (canReuseListenerCache
+                && (!ReferenceEquals(
+                    parentListenersAtOne,
+                    ((ICombatPredictionHookListenerSource)parentCombat).HookListeners)
+                    || !ReferenceEquals(
+                        parentRunListenersAtOne,
+                        ((ICombatPredictionHookListenerSource)parentCombat).RunHookListeners))
+            || !ReferenceEquals(parentPowersAtOne, parentCombat.EffectivePowers())
+            || !ReferenceEquals(parentStrength, parentCombat.GetPower<StrengthPower>(owner))
+            || parentStrength.Amount != 2)
+        {
+            throw new InvalidOperationException(
+                "Power 数量从 1 增加到 2 时错误重建了身份不变的 listener 缓存。");
+        }
+
+        CombatPredictionSimulator childSimulator = parentSimulator.Fork();
+        SimulatedCombatState childCombat = (SimulatedCombatState)childSimulator.State.CombatState;
+        StrengthPower childStrength = childCombat.EffectivePowers()
+            .OfType<StrengthPower>()
+            .Single(power => ReferenceEquals(power.Owner, owner));
+        IReadOnlyList<AbstractModel> childListenersAtTwo =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        IReadOnlyList<AbstractModel> childRunListenersAtTwo =
+            ((ICombatPredictionHookListenerSource)childCombat).RunHookListeners;
+        IReadOnlyList<PowerModel> childPowersAtTwo = childCombat.EffectivePowers();
+        if (ReferenceEquals(parentStrength, childStrength)
+            || CountReferences(childListenersAtTwo, childStrength) != 1
+            || CountReferences(childRunListenersAtTwo, childStrength) != 1
+            || CountReferences(childListenersAtTwo, parentStrength) != 0
+            || CountReferences(childRunListenersAtTwo, parentStrength) != 0)
+            throw new InvalidOperationException("Power listener 缓存没有按 Fork 映射到子分支 Power。");
+
+        childCombat.SetAmount<StrengthPower>(owner, 0);
+        IReadOnlyList<AbstractModel> childListenersAtZero =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        IReadOnlyList<AbstractModel> childRunListenersAtZero =
+            ((ICombatPredictionHookListenerSource)childCombat).RunHookListeners;
+        IReadOnlyList<PowerModel> childPowersAtZero = childCombat.EffectivePowers();
+        if (ReferenceEquals(childListenersAtTwo, childListenersAtZero)
+            || ReferenceEquals(childRunListenersAtTwo, childRunListenersAtZero)
+            || ReferenceEquals(childPowersAtTwo, childPowersAtZero)
+            || childListenersAtZero.Any(listener => ReferenceEquals(listener, childStrength))
+            || childPowersAtZero.Any(power => ReferenceEquals(power, childStrength)))
+        {
+            throw new InvalidOperationException(
+                "Power 数量从 2 归零时没有失效缓存并移除对应 listener。");
+        }
+        if (parentStrength.Amount != 2
+            || canReuseListenerCache
+                && (!ReferenceEquals(
+                    parentListenersAtOne,
+                    ((ICombatPredictionHookListenerSource)parentCombat).HookListeners)
+                    || !ReferenceEquals(
+                        parentRunListenersAtOne,
+                        ((ICombatPredictionHookListenerSource)parentCombat).RunHookListeners))
+            || !ReferenceEquals(parentPowersAtOne, parentCombat.EffectivePowers()))
+        {
+            throw new InvalidOperationException("子分支 Power 归零污染了父分支 listener 缓存。");
+        }
+
+        childCombat.SetAmount<StrengthPower>(owner, 1);
+        IReadOnlyList<AbstractModel> childListenersRestored =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        IReadOnlyList<PowerModel> childPowersRestored = childCombat.EffectivePowers();
+        if (ReferenceEquals(childListenersAtZero, childListenersRestored)
+            || ReferenceEquals(childPowersAtZero, childPowersRestored)
+            || CountReferences(childListenersRestored, childStrength) != 1
+            || CountReferences(childPowersRestored, childStrength) != 1)
+        {
+            throw new InvalidOperationException(
+                "Power 数量从 0 恢复到 1 时没有失效缓存或唯一恢复对应 listener。");
+        }
+
+        DexterityPower firstAdded = childCombat.AddPowerInstance<DexterityPower>(owner, 1, owner);
+        NoDrawPower secondAdded = childCombat.AddPowerInstance<NoDrawPower>(owner, 1, owner);
+        IReadOnlyList<AbstractModel> listenersWithAddedPowers =
+            ((ICombatPredictionHookListenerSource)childCombat).HookListeners;
+        int firstIndex = IndexOfReference(listenersWithAddedPowers, firstAdded);
+        int secondIndex = IndexOfReference(listenersWithAddedPowers, secondAdded);
+        if (firstIndex < 0
+            || secondIndex <= firstIndex
+            || CountReferences(listenersWithAddedPowers, firstAdded) != 1
+            || CountReferences(listenersWithAddedPowers, secondAdded) != 1)
+        {
+            throw new InvalidOperationException("新增 Power listener 没有保持唯一身份和施加顺序。");
+        }
+        AssertUniquePowerListenerReferences(listenersWithAddedPowers);
+    }
+
+    private static int IndexOfReference<T>(IReadOnlyList<T> items, T candidate) where T : class
+    {
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index], candidate))
+                return index;
+        }
+        return -1;
+    }
+
+    private static int CountReferences<T>(IReadOnlyList<T> items, T candidate) where T : class
+    {
+        int count = 0;
+        for (int index = 0; index < items.Count; index++)
+        {
+            if (ReferenceEquals(items[index], candidate))
+                count++;
+        }
+        return count;
+    }
+
+    private static void AssertUniquePowerListenerReferences(IReadOnlyList<AbstractModel> listeners)
+    {
+        for (int left = 0; left < listeners.Count; left++)
+        {
+            if (listeners[left] is not PowerModel power)
+                continue;
+            for (int right = left + 1; right < listeners.Count; right++)
+            {
+                if (ReferenceEquals(power, listeners[right]))
+                    throw new InvalidOperationException("Power listener 序列包含重复身份。");
+            }
+        }
+    }
+
     private static void AssertSparsePowerAfflictionCardTracking(
         CombatState combat,
         Player player,
@@ -1122,6 +1296,165 @@ internal sealed partial class UnattendedTestRunner
             attached.Remove(capability);
             capability.Detach(isInternal: true);
             attachedSnapshot.SetValue(capabilities, null);
+        }
+    }
+
+    private static void AssertSimulationCardPileLookupFastPath(Player player, CardModel liveCard)
+    {
+        if (!SimulationCardPileLookupFastPath.CanUse())
+            return;
+
+        CardPile? expected = liveCard.Pile;
+        using IDisposable isolation = SimulationNotificationIsolation.Enter();
+        CardPile? actual = liveCard.Pile;
+        if (!ReferenceEquals(actual, expected)
+            || !ReferenceEquals(actual, SimulationCardPileLookupFastPath.Find(liveCard)))
+        {
+            throw new InvalidOperationException("求解牌堆无分配快路径没有保持原版牌堆身份。");
+        }
+
+        CardModel transient = PredictionUtils.CloneCardStateForSimulation(liveCard);
+        transient._owner = player;
+        if (transient.Pile != null || SimulationCardPileLookupFastPath.Find(transient) != null)
+            throw new InvalidOperationException("求解牌堆无分配快路径错误归属了临时卡牌。");
+    }
+
+    private static void AssertRootColorlessGenerationPoolCache(
+        CombatPredictionSimulator simulator,
+        Player player)
+    {
+        if (simulator.State.CombatState is not ICombatPredictionRunSnapshot runSnapshot
+            || simulator.State.CombatState is not ICombatPredictionCardGenerationPoolSnapshot poolSnapshot)
+        {
+            throw new InvalidOperationException("生成牌根缓存测试缺少预测根状态接口。");
+        }
+
+        CardMultiplayerConstraint constraint = runSnapshot.CardMultiplayerConstraint;
+        CardPoolModel canonicalPool = ModelDb.CardPool<ColorlessCardPool>();
+        if (!poolSnapshot.TryGetRootEligibleCards(
+                player,
+                canonicalPool,
+                constraint,
+                out IReadOnlyList<CardModel>? rootEligible))
+        {
+            throw new InvalidOperationException("原生无色牌池没有建立根级生成候选缓存。");
+        }
+
+        CardModel[] uncachedEligible = player.GetUnlockedCards(canonicalPool, constraint)
+            .FilterForCombatAndPlayerCount(constraint)
+            .ToArray();
+        if (rootEligible.Count != uncachedEligible.Length
+            || rootEligible.Where((card, index) =>
+                    !ReferenceEquals(card, uncachedEligible[index]))
+                .Any())
+        {
+            throw new InvalidOperationException("根级无色生成候选与未缓存过滤结果的顺序不同。");
+        }
+
+        CombatPredictionSimulator fork = simulator.Fork();
+        if (fork.State.CombatState is not ICombatPredictionCardGenerationPoolSnapshot forkPoolSnapshot
+            || !forkPoolSnapshot.TryGetRootEligibleCards(
+                player,
+                canonicalPool,
+                constraint,
+                out IReadOnlyList<CardModel>? forkEligible)
+            || !ReferenceEquals(rootEligible, forkEligible))
+        {
+            throw new InvalidOperationException("模拟 Fork 没有共享不可变的根级无色生成候选。");
+        }
+
+        CardPoolModel characterPool = player.Character.CardPool;
+        if (!ReferenceEquals(characterPool, canonicalPool)
+            && poolSnapshot.TryGetRootEligibleCards(
+                player,
+                characterPool,
+                constraint,
+                out _))
+        {
+            throw new InvalidOperationException("根级无色候选缓存错误命中了非原生/自定义牌池。");
+        }
+
+        PredictionRngState sourceRng = simulator.Rng.CombatCardGeneration.CaptureState();
+        foreach (int count in new[] { 1, 3 })
+        {
+            var baselineRng = simulator.Rng.CombatCardGeneration.Clone();
+            var cachedRng = simulator.Rng.CombatCardGeneration.Clone();
+            PredictedCard[] baseline = player.GetUnlockedCards(canonicalPool, constraint)
+                .GetDistinctForCombat(
+                    player,
+                    count,
+                    baselineRng,
+                    constraint)
+                .ToArray();
+            PredictedCard[] cached = simulator
+                .GetDistinctUnlockedColorlessForCombat(
+                    player,
+                    count,
+                    cachedRng,
+                    constraint)
+                .ToArray();
+            PredictionRngState baselineState = baselineRng.CaptureState();
+            PredictionRngState cachedState = cachedRng.CaptureState();
+            if (baseline.Length != cached.Length
+                || baseline.Where((card, index) =>
+                        ReferenceEquals(card, cached[index])
+                        || ReferenceEquals(card.Original, cached[index].Original)
+                        || card.Preview.GetType() != cached[index].Preview.GetType()
+                        || card.Preview.Id != cached[index].Preview.Id
+                        || card.Preview.CurrentUpgradeLevel
+                            != cached[index].Preview.CurrentUpgradeLevel
+                        || !ReferenceEquals(card.Preview.Owner, player)
+                        || !ReferenceEquals(cached[index].Preview.Owner, player)
+                        || CombatBeamSolver.CaptureCardStateFingerprintForTesting(card)
+                            != CombatBeamSolver.CaptureCardStateFingerprintForTesting(cached[index]))
+                    .Any()
+                || baselineState != cachedState)
+            {
+                throw new InvalidOperationException(
+                    $"根级无色生成候选缓存改变了 count={count} 的抽取顺序、卡牌或 RNG 状态：" +
+                    $"baseline_ids=[{string.Join(',', baseline.Select(card => card.Original.Id.Entry))}] " +
+                    $"cached_ids=[{string.Join(',', cached.Select(card => card.Original.Id.Entry))}] " +
+                    $"baseline_upgrades=[{string.Join(',', baseline.Select(card => card.Preview.CurrentUpgradeLevel))}] " +
+                    $"cached_upgrades=[{string.Join(',', cached.Select(card => card.Preview.CurrentUpgradeLevel))}] " +
+                    $"baseline_rng=(counter={baselineState.Counter},s0=0x{baselineState.State0:X16}," +
+                    $"s1=0x{baselineState.State1:X16},s2=0x{baselineState.State2:X16}," +
+                    $"s3=0x{baselineState.State3:X16}) " +
+                    $"cached_rng=(counter={cachedState.Counter},s0=0x{cachedState.State0:X16}," +
+                    $"s1=0x{cachedState.State1:X16},s2=0x{cachedState.State2:X16}," +
+                    $"s3=0x{cachedState.State3:X16})。");
+            }
+        }
+
+        if (simulator.Rng.CombatCardGeneration.CaptureState() != sourceRng)
+            throw new InvalidOperationException("生成牌缓存 shadow 测试推进了原模拟器 RNG。");
+
+        if (rootEligible.Count == 0)
+            return;
+        var firstRng = simulator.Rng.CombatCardGeneration.Clone();
+        var secondRng = simulator.Rng.CombatCardGeneration.Clone();
+        PredictedCard first = simulator
+            .GetDistinctUnlockedColorlessForCombat(player, 1, firstRng, constraint)
+            .Single();
+        PredictedCard second = simulator
+            .GetDistinctUnlockedColorlessForCombat(player, 1, secondRng, constraint)
+            .Single();
+        if (ReferenceEquals(first, second)
+            || ReferenceEquals(first.Original, second.Original)
+            || first.Preview.Id != second.Preview.Id
+            || CombatBeamSolver.CaptureCardStateFingerprintForTesting(first)
+                != CombatBeamSolver.CaptureCardStateFingerprintForTesting(second))
+        {
+            throw new InvalidOperationException("缓存没有为等价抽取创建隔离的分支级卡牌实例。");
+        }
+
+        CardModel canonicalSelected = rootEligible.Single(card => card.Id == first.Preview.Id);
+        int canonicalReplayCount = canonicalSelected.BaseReplayCount;
+        int secondReplayCount = second.Preview.BaseReplayCount;
+        first.MutablePreview.BaseReplayCount++;
+        if (second.Preview.BaseReplayCount != secondReplayCount
+            || canonicalSelected.BaseReplayCount != canonicalReplayCount)
+        {
+            throw new InvalidOperationException("缓存生成牌的分支突变污染了兄弟分支或 canonical CardModel。");
         }
     }
 

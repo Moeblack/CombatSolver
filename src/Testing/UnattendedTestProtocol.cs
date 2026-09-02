@@ -1,3 +1,4 @@
+using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Godot;
@@ -163,6 +164,7 @@ internal sealed class UnattendedTestRequest
     public int? DeepMaxCardBranchesPerNodeForTest { get; init; }
     public SolverPotionPolicy? PotionPolicyForTest { get; init; }
     public SolverTheftPolicy? TheftPolicyForTest { get; init; }
+    public bool? EnableNoGcRegionForTest { get; init; }
     public double? NoGcRegionBudgetGigabytesForTest { get; init; }
     public double? DeploymentInterActionDelaySecondsForTest { get; init; }
     public bool AssertDeploymentSpeedRestored { get; init; }
@@ -426,10 +428,66 @@ internal sealed class UnattendedTestResult
     public long ManagedFragmentedBytes { get; init; }
     public long WorkingSetBytes { get; init; }
     public long PrivateMemoryBytes { get; init; }
+    public UnattendedSolverMetrics? SolverMetrics { get; init; }
     public UnattendedStageTiming[] StageTimings { get; init; } = [];
     public string[] CompletedChecks { get; init; } = [];
     public string? Error { get; init; }
     public DateTimeOffset FinishedAtUtc { get; init; } = DateTimeOffset.UtcNow;
+}
+
+internal sealed class UnattendedSolverMetrics
+{
+    public SolverSearchPhase Phase { get; init; }
+    public SearchBoundaryReason Boundary { get; init; }
+    public int SelectedExpanded { get; init; }
+    public int SelectedTransitions { get; init; }
+    public int SelectedChoiceBranches { get; init; }
+    public long TotalExpanded { get; init; }
+    public long TotalTransitions { get; init; }
+    public long TotalChoiceBranches { get; init; }
+    public double ElapsedMilliseconds { get; init; }
+    public double TotalElapsedMilliseconds { get; init; }
+    public long WorkerAllocatedBytes { get; init; }
+    public long TotalWorkerAllocatedBytes { get; init; }
+    public int TotalGen0Collections { get; init; }
+    public int TotalGen1Collections { get; init; }
+    public int TotalGen2Collections { get; init; }
+    public double TotalGcPauseMilliseconds { get; init; }
+    public double MaxGcPauseMilliseconds { get; init; }
+    public int MaxParallelConcurrency { get; init; }
+    public int ParallelActionReplayWaves { get; init; }
+    public int ParallelActionReplayWorkItems { get; init; }
+    public int MaxParallelActionReplayConcurrency { get; init; }
+    public int DeferredRoundChoiceActions { get; init; }
+    public int DeferredRoundChoiceLayerWidthTotal { get; init; }
+    public int MaxDeferredRoundChoiceLayerWidth { get; init; }
+    public int DeferredRoundChoiceFiniteQuotaFallbacks { get; init; }
+    public int DeferredRoundChoiceFinitePrimaryLayers { get; init; }
+    public int DeferredRoundChoiceFinitePendingFallbacks { get; init; }
+    public int ParallelRoundChoiceReplayWaves { get; init; }
+    public int ParallelRoundChoiceReplayWorkItems { get; init; }
+    public int MaxParallelRoundChoiceReplayConcurrency { get; init; }
+    public int SearchedTurns { get; init; }
+    public int ShufflesCrossed { get; init; }
+    public double Score { get; init; }
+    public int ProjectedBattleHpLost { get; init; }
+    public int PotionCount { get; init; }
+    public bool OnlyDeathRoutes { get; init; }
+    public int FinalHp { get; init; }
+    public int FinalEnemyHp { get; init; }
+    public int? CombatEndedTurn { get; init; }
+    public double CapturedAtElapsedMilliseconds { get; init; }
+    public long ManagedLiveBytes { get; init; }
+    public long ManagedHeapBytes { get; init; }
+    public long ManagedFragmentedBytes { get; init; }
+    public long WorkingSetBytes { get; init; }
+    public long PrivateMemoryBytes { get; init; }
+    public bool ConfiguredNoGcRegionEnabled { get; init; }
+    public long ConfiguredNoGcRegionBudgetBytes { get; init; }
+    public GCLatencyMode GcLatencyMode { get; init; }
+    public bool NoGcRegionActive { get; init; }
+    public long NoGcRegionBudgetBytes { get; init; }
+    public int NoGcRegionRolloverCount { get; init; }
 }
 
 internal sealed class UnattendedStageTiming

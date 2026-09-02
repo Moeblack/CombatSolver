@@ -2,7 +2,7 @@
 
 param(
     [int]$TimeoutSeconds = 360,
-    [ValidateRange(1, 8)]
+    [ValidateRange(1, 16)]
     [int]$SearchMaxDegreeOfParallelism = 2,
     [switch]$VerifyBaseLibCardModifierBoundary
 )
@@ -83,6 +83,8 @@ $request = [ordered]@{
     verifyIncrementalSearch = $false
     verifyBaseLibCardModifierBoundary = $VerifyBaseLibCardModifierBoundary.IsPresent
     performancePresetForTest = "Medium"
+    enableNoGcRegionForTest = $true
+    noGcRegionBudgetGigabytesForTest = 16
     deploymentFastModeForTest = "Instant"
     deploymentInterActionDelaySecondsForTest = 0
     assertDeploymentSpeedRestored = $true

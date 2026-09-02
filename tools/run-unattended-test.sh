@@ -191,6 +191,7 @@ add_option deployment-fast-mode-for-test "" string optional_string "FollowGame|N
 add_option performance-preset-for-test "" string optional_string "Low|Medium|High|VeryHigh|Custom"
 add_option potion-policy-for-test "" string optional_string "Disabled|Smart|RequireAtLeastOne"
 add_option theft-policy-for-test "" string optional_string "PreserveResources|LetEscape"
+add_option enable-no-gc-region-for-test -1 int tri_bool
 add_option no-gc-region-budget-gigabytes-for-test -1 number positive_number
 add_option deployment-inter-action-delay-seconds-for-test -1 number nonnegative_number
 for name in assert-deployment-speed-restored export-bug-report-after-setup export-bug-report-after-combat; do
@@ -346,11 +347,11 @@ done
 
 ((option_value[ascension] >= 0 && option_value[ascension] <= 10)) || die "--ascension must be between 0 and 10"
 search_max_dop="${option_value[search-max-degree-of-parallelism-for-test]}"
-((search_max_dop == -1 || (search_max_dop >= 1 && search_max_dop <= 8))) || \
-    die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 8"
+((search_max_dop == -1 || (search_max_dop >= 1 && search_max_dop <= 16))) || \
+    die "--search-max-degree-of-parallelism-for-test must be -1 or between 1 and 16"
 for name in expected-initial-deep-search-triggered expected-initial-deep-search-improved-result \
     expected-initial-only-death-routes-found expected-initial-act-ending-boss \
-    enable-detailed-diagnostic-logs-for-test; do
+    enable-no-gc-region-for-test enable-detailed-diagnostic-logs-for-test; do
     value="${option_value[$name]}"
     ((value == -1 || value == 0 || value == 1)) || die "--$name must be -1, 0, or 1"
 done
@@ -473,6 +474,12 @@ resolved_run_snapshot_path=""
 if ! is_blank "${option_value[run-snapshot-path]}"; then
     resolved_run_snapshot_path="$(realpath -e -- "${option_value[run-snapshot-path]}")" || \
         runtime_error "run snapshot not found: ${option_value[run-snapshot-path]}"
+fi
+
+resolved_replay_state_path=""
+if ! is_blank "${option_value[replay-state-path]}"; then
+    resolved_replay_state_path="$(realpath -e -- "${option_value[replay-state-path]}")" || \
+        runtime_error "replay state not found: ${option_value[replay-state-path]}"
 fi
 
 json_array_from_text() {
@@ -648,6 +655,7 @@ request="$(jq -cn \
     --argjson types "$wire_types" \
     --arg runId "$run_id" \
     --arg runSnapshotPath "$resolved_run_snapshot_path" \
+    --arg replayStatePath "$resolved_replay_state_path" \
     --argjson initialEnemyCurrentHps "$initial_enemy_current_hps" \
     --argjson initialEnemyMoveIds "$initial_enemy_move_ids" \
     --argjson initialEnemyStateLogs "$initial_enemy_state_logs" \
@@ -686,6 +694,7 @@ request="$(jq -cn \
         schemaVersion: 1,
         runId: $runId,
         runSnapshotPath: (if ($runSnapshotPath | blank) then null else $runSnapshotPath end),
+        replayStatePath: (if ($replayStatePath | blank) then null else $replayStatePath end),
         initialEnemyCurrentHps: $initialEnemyCurrentHps,
         initialEnemyMoveIds: $initialEnemyMoveIds,
         initialEnemyStateLogs: $initialEnemyStateLogs,

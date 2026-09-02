@@ -31,9 +31,9 @@ Entry / turn hooks
 | `src/Runtime/BaseLibCloneConcurrencyPatch.cs` | BaseLib 克隆扩展存在时，让原版 `MutableClone` 与内嵌模拟的模型深克隆共用窄串行边界，保护其全局弱表 | 整段搜索串行化、BaseLib 业务语义与候选政策 |
 | `src/Runtime/PowerDynamicVarWarmup.cs` | 主线程根捕获时物化规范 Power 与当前战斗 Power 的显示变量 | 搜索评分、Power 语义与 worker 本地化 |
 | `src/Runtime/PowerDynamicVarMaterializationGuardPatch.cs` | 搜索模拟惰性创建 Power 显示变量时立即报告根捕获缺失 | Power 语义、显示内容与搜索阶段串行化 |
-| `src/Runtime/SearchGcPolicy.cs` | 默认交由 CLR 分代 GC；保留旧自动 GC 生命周期的关闭实现与兼容入口，并提供玩家显式触发的手动全代回收 | Beam 剪枝、候选评分与模拟语义 |
+| `src/Runtime/SearchGcPolicy.cs` | 管理玩家显式开关的进程级 GC 模式：开启时按原样预算建立战斗级 NoGC、执行搜索内安全检查点与引用释放后的压力回收；稳定关闭时使用 CLR 常规分代 GC 且不新增自动补账压力，从开启切换时仍结清此前义务；模式切换和手动回收与活动搜索计数共用安全边界 | Beam 剪枝、候选评分、模拟语义与同步阻塞 UI |
 | `src/Runtime/SearchMemoryPressureSignal.cs` | 将 Runtime 的进程分配边界和回收入口注入搜索；不让 Search 直接操作 GC 模式 | 设置读取与搜索评分 |
-| `src/Runtime/SolverSettings.cs` | 持久化性能、执行、搜索并行度、逐槽药水策略和搜索结束通知设置，并在主线程捕获不可变搜索 snapshot | 搜索期读取全局设置 |
+| `src/Runtime/SolverSettings.cs` | 持久化性能、执行、搜索并行度、NoGC 开关与独立预算、逐槽药水策略和搜索结束通知设置，并在主线程捕获不可变搜索 snapshot | 搜索期读取全局设置 |
 | `src/Runtime/PlayerTurnSetupPatches.cs` | 首回合原生页面出现后的 Start 根搜索；后续回合观察上一轮 `EndTurn.TurnStartChoices` 的原生页面，全自动直接可见重放，单步默认交还玩家并允许执行/全自动入口接管既有选择；进入 Play 后交给 continuation 核对；跨 Reset 的 Setup/部署延迟由 lifecycle token 取消 | 普通 Play 阶段搜索与动作部署 |
 | `src/Runtime/NativeChoiceRuntime.cs` | 观测原版战斗选择请求，按卡牌语义状态匹配计划实例，并锁定、驱动真实页面控件 | 选择分支枚举和战斗结算 |
 | `src/Runtime/CombatBugReportExporter.cs` | 主线程冻结当前/最近战斗的实机取证状态；单消费者后台 FIFO 按检查点顺序整理并一次序列化为 UTF-8 字节，导出任务作为队列屏障等待此前记录完成 | 后台读取 live 战斗、通用 replay/native-state 导入 |
@@ -49,7 +49,8 @@ Entry / turn hooks
 
 - `SearchPolicySnapshot.cs`：主线程捕获的不可变搜索设置和逐槽药水策略；后台不读取 UI 或玩家设置。
 - `SearchDiagnosticsSink.cs`：搜索日志出口。
-- `SearchFramePressureSignal.cs`：Runtime 向 worker 提供的帧压力信号。
+- `SearchFramePressureSignal.cs`：Runtime 向 worker 提供的帧压力信号；以最近 `31` 个非搜索帧中位数建立基线，压力阈值为 `max(33 ms, baseline × 1.5)`，无显示服务的 headless 请求旁路帧恢复等待。
+- `SearchRequestWorkTotals.cs`：一次请求内所有正常、失败和取消 solver 的展开、转移与选牌工作量精确记账一次；不把被取消的部分工作误记为零，也不承担结果质量排序。
 - `CombatSearchCoordinator.cs`：一次请求的搜索编排；Smart 从无药基线按恰好 `N` 瓶逐层搜索，同层药水共同竞争并在首个合格层停止；跨 solver 只合并严格单调改善的完整获胜路线摘要，并在玩家采纳后返回对应完整结果。Disabled/RequireAtLeastOne 保持各自政策。所有层共享请求级时间余量并合并总指标。
 - `CombatPlan.cs`：Runtime 消费的计划、结果和续用数据。结果不得保留历史 Simulator 对象图。
 
@@ -61,7 +62,7 @@ Entry / turn hooks
 | `CombatBeamSolver.Models.cs` | `SearchNode`、`SimulationSnapshot`、转置标签、`SearchFeatures`、单次运行 `SearchRunContext` |
 | `CombatBeamSolver.Phases.cs` | `Solve`、阶段循环、总预算与回合层预算保留、完整获胜路线发布及玩家采纳收束检查点 |
 | `CombatBeamSolver.Expansion.cs` | 可执行卡牌/药水/结束回合候选展开和动作回放入口 |
-| `CombatBeamSolver.ParallelExpansion.cs` | 固定 worker lane、父节点原始候选并发物化、按输入顺序串行提交与快照所有权 |
+| `CombatBeamSolver.ParallelExpansion.cs` | 固定 worker lane、父节点原始候选并发物化、自然单例父节点的有界 card action/target 回放、按输入顺序串行提交与快照所有权 |
 | `CombatBeamSolver.Retention.cs` | prune/retention 调用边界与相关小型辅助 |
 | `CombatBeamSolver.BeamRetentionPolicy.cs` | 状态去重、中间分数排序、多样性通道、动作/回合开始选牌保路、药水配额和小型 Pareto |
 | `CombatBeamSolver.FinalPlanOrdering.cs` | 终局胜负、偷窃、战损、药水、卖血和搜索边界排序 |
@@ -71,7 +72,13 @@ Entry / turn hooks
 
 `SearchRunContext` 只活于一次 solver：计数器、性能指标、节流器、转置表和 stand-pat/威胁/coverage/路由缓存均在这里。根配置留在 solver，不把可变运行状态退回入口文件。
 
-普通搜索按进程可用逻辑处理器数量选择初始展开 lane：至少 4 个时默认 DOP4，2–3 个时默认 DOP2，只有 1 个时使用 DOP1；用户显式设置始终优先。设置中的“关闭（单线程）”映射 DOP1，数值项为 `2..8`，实际值还会按可用逻辑处理器钳制。coordinator 自己执行 lane 0，其余低优先级后台 lane 在一次 `Solve` 内复用 solver、缓存和 `SearchWorkPacer`。worker 不写全局 transposition、dominance 或 fallback：它们只物化原始候选，coordinator 仍按父节点输入顺序提交，因此固定节点预算下 DOP 不改变搜索语义。详细诊断和增量严格回放强制 DOP1。并行搜索失败提示会保留本次请求的 DOP；DOP 大于 1 时先引导上传问题包，再建议切换为“关闭（单线程）”。并行阶段指标为各 lane 的累计 CPU 时间，可以超过墙钟耗时；`parallel_waves / work_items / max_concurrency` 单独证明并发实际发生。一个 wave 会在提交前同时持有至多 DOP 个父节点的原始候选快照；高于默认值属于用户主动的速度/CPU/峰值内存权衡，扩大上限前必须单独验证高选择分支的峰值 live graph。节点预算截断时，coordinator 立即释放未展开父节点和不会进入下一层的候选模拟器，并用 `node_limit_snapshots_released` 记录实际释放数。
+普通搜索按进程可用逻辑处理器数量选择初始展开 lane：至少 4 个时默认 DOP4，2–3 个时默认 DOP2，只有 1 个时使用 DOP1；用户显式设置始终优先。设置中的“关闭（单线程）”映射 DOP1，数值项为 `2..16`，实际值还会按进程可用逻辑处理器钳制。coordinator 自己执行 lane 0，其余低优先级后台 lane 在一次 `Solve` 内复用 solver、缓存和 `SearchWorkPacer`。worker 不写全局 transposition、dominance 或 fallback：它们只物化原始候选，coordinator 仍按父节点输入顺序提交，因此固定节点预算下 DOP 不改变搜索语义。详细诊断和增量严格回放强制 DOP1。
+
+父节点外层 wave 不按手牌数强制拆成 singleton。NoGC 开启时从 2 个父节点开始，只有已完成的 multi-parent wave 未超出预约才按 `2 → 4 → 8 → DOP` 自适应扩宽；singleton 不会替尚未观测的宽 wave 提前放大容量。安全准入把全搜索已观测的最坏父节点分配量加 `1.5×` 余量，并为 wave 中每个并发父节点完整预约；实际宽度不超过 `floor(allocationLimit / perParentReserve)`。连单个父节点都无法放入内部预约时退回纯串行，不借 inner replay 冒险。每轮提交前和提交后只在已提交边界检查内存，必要时释放可重建缓存、退出 NoGC、回收并重新建立区域。自然只剩一个且预约可容纳的并行父节点时，才借用同一组空闲 lane 并发执行该父节点的 card action/target 初始 probe，不与外层并发嵌套。
+
+某个 action 到达 `PendingChoice` 时，worker 只移交该 probe 的唯一所有权；action wave 全部到达 barrier 后，coordinator 按原 action index 构造 direct primary、Knowledge Demon 或 TurnStart/nested 的选择层，串行穿过宽度一的层，并把首个宽度至少二的可独立 frontier 独占调度到同一组 lane。direct-primary 的有限下游配额属于各自独立分支，可以并行；在 primary 之前已经出现 PendingChoice 且带有限共享配额的层仍保持原序串行。各 lane 从 coordinator 串行准备的 parent Fork seed 完整回放 resolved action，再串行处理后续选择；NoGC 剩余预算不足或只剩一个分支时也保持原序串行。结果、异常和提交均按 action index、再按 choice branch index 合并。NoGC 冷启动微批最多两个 outcome；round-choice 后续容量按单 outcome 分配高水位的至少 `1.5×` 安全余量计算，内部不建立 GC checkpoint。
+
+并行搜索失败提示会保留本次请求的 DOP；DOP 大于 1 时先引导上传问题包，再建议切换为“关闭（单线程）”。并行阶段指标为各 lane 的累计 CPU 时间，可以超过墙钟耗时；`parallel_waves / work_items / max_concurrency`、`parallel_action_*` 与 `parallel_round_choice_*` 分别证明父节点、自然 singleton action 和宽选择层并发实际发生，`deferred_round_choice_*` 记录命中层宽与有限配额回退。一个 wave 会在提交前同时持有至多 DOP 个父节点、一个 action 微批或一个 round-choice 微批的原始候选快照；高于默认值属于用户主动的速度、CPU 与峰值内存权衡。节点预算截断时，coordinator 立即释放未展开父节点和不会进入下一层的候选模拟器，并用 `node_limit_snapshots_released` 记录实际释放数。
 
 `BeamRetentionPolicy` 决定哪些中间候选继续活着；动作选牌、嵌套选牌和 `EndTurn.TurnStartChoices` 都以来源、效果、卡牌语义状态和上下文形成保路签名。`FinalPlanOrdering` 决定完整候选中最终采用哪条。两者不能合并成单一“总分排序”。`SearchFeatures` 是终局排序读取节点状态的只读投影。转置状态键中的九条战斗 RNG 必须包含完整内部状态；相同调用计数不能证明两个 RNG 后续等价。
 
@@ -95,7 +102,7 @@ Entry / turn hooks
 
 ### 4.1 基础层
 
-`src/Engine/InCombat/Simulation/` 负责通用战斗命令时序、伤害、牌堆、历史、RNG、球和 Fork。它不包含单张卡、单个 Power 或具体怪物的搜索策略。
+`src/Engine/InCombat/Simulation/` 负责通用战斗命令时序、伤害、牌堆、历史、RNG、球和 Fork。它不包含单张卡、单个 Power 或具体怪物的搜索策略。`CombatPredictionHistory` 以不可变 prefix segment + 分支本地 mutable tail 保存事件；动作后缀消费者必须使用冻结上界的 `EntriesFrom/EntriesBetween`，不能先遍历完整 prefix 再 `Skip`，否则长线会把一次局部查询放大为随深度增长的重复工作。
 
 `src/Engine/Common/` 提供 `PredictedCard`、`PredictionForkContext`、`PredictionStateStore` 和通用模型克隆。一次 Fork 内的所有结构必须共享同一个 context；分支可变对象必须显式重映射。`BaseLibCloneConcurrency` 是原版与预测克隆共用的外部扩展并发边界，只包围模型深克隆阶段。
 
@@ -129,7 +136,7 @@ Entry / turn hooks
 
 renderer 不得重新读取 `SolverResult`、`PlanAction`、`PlanCardChoice` 或 `ModelDb`。部署需要的标量由 Runtime 单独持有，不从控件反向读取。
 
-`SolverSettingsPanel` 是设置页的单一控件所有者，按 partial 分离构建职责：主文件负责标题、常规/性能/反馈三页切换、重载、提交、恢复默认和固定状态栏；`General` 负责求解器、通知及自动执行设置；`Performance` 负责预设、并行度、内存预算和折叠的自定义搜索参数；`BugReports` 负责诊断、联系方式与问题包导出/上传；`Controls` 只提供本面板共享的 Godot 控件样式、输入校验和行布局。partial 之间不建立第二份设置状态，持久化仍只写 `SolverSettingsData`。
+`SolverSettingsPanel` 是设置页的单一控件所有者，按 partial 分离构建职责：主文件负责标题、常规/性能/反馈三页切换、重载、提交、恢复默认和固定状态栏；`General` 负责求解器、通知及自动执行设置；`Performance` 负责预设、并行度、NoGC 开关、独立内存预算、排队式手动回收和折叠的自定义搜索参数；`BugReports` 负责诊断、联系方式与问题包导出/上传；`Controls` 只提供本面板共享的 Godot 控件样式、输入校验和行布局。partial 之间不建立第二份设置状态，持久化仍只写 `SolverSettingsData`。
 
 `SolverPotionStrategyPanel` 是主界面逐瓶药水策略的控件所有者。它只在主线程按当前槽位读取图标、标题和可搜索性，选择结果写入当前 `SolverCombatSession`；`SolverController` 以槽位和药水 ID 捕获不可变 `PotionStrategySnapshot`，策略变化会废弃旧 continuation 并启动新搜索。新进入槽位的药水没有旧身份覆盖，默认按智能使用处理。
 

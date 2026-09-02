@@ -16,6 +16,7 @@ internal sealed partial class UnattendedTestRunner
                 "DOP1/DOP2 搜索等价测试至少需要两个可用逻辑处理器。");
         }
 
+        AssertAdaptiveFramePressureBaseline();
         await AssertNoGcBudgetTransitionAsync();
 
         SolverSettingsData originalSettings = SolverSettings.Current;
@@ -38,10 +39,23 @@ internal sealed partial class UnattendedTestRunner
             ShortBudgetOverrideMilliseconds = null,
             DeepBudgetOverrideMilliseconds = null,
         };
+        if (string.Equals(
+                Godot.DisplayServer.GetName(),
+                "headless",
+                StringComparison.OrdinalIgnoreCase)
+            && capturedPolicy.FramePressureSignal.RecoveryEnabled)
+        {
+            throw new InvalidOperationException("headless 搜索策略没有旁路渲染帧恢复。");
+        }
         SolverDisplayNames displayNames = SolverDisplayNames.Capture(combat);
         BattleDamageSnapshot battleDamage = BattleDamageTracker.Observe(combat);
         AssertFullRngStateIdentity(combat);
         CombatRootSnapshot rootSnapshot = CombatRootSnapshot.Capture(combat);
+        await AssertCanceledSearchWorkRecordedOnceAsync(
+            rootSnapshot,
+            displayNames,
+            battleDamage,
+            capturedPolicy);
 
         SearchPolicySnapshot serialPolicy = capturedPolicy with { MaxDegreeOfParallelism = 1 };
         SearchPolicySnapshot parallelPolicy = capturedPolicy with { MaxDegreeOfParallelism = 2 };
@@ -112,6 +126,171 @@ internal sealed partial class UnattendedTestRunner
         }
     }
 
+    private static async Task AssertCanceledSearchWorkRecordedOnceAsync(
+        CombatRootSnapshot rootSnapshot,
+        SolverDisplayNames displayNames,
+        BattleDamageSnapshot battleDamage,
+        SearchPolicySnapshot capturedPolicy)
+    {
+        SearchRequestWorkTotals requestWorkTotals = new();
+        SearchPolicySnapshot canceledPolicy = capturedPolicy with
+        {
+            MaxDegreeOfParallelism = 1,
+            RequestWorkTotals = requestWorkTotals,
+        };
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+        try
+        {
+            await Task.Run(() => new CombatBeamSolver(
+                rootSnapshot,
+                displayNames,
+                battleDamage,
+                canceledPolicy,
+                cancellation.Token).Solve());
+            throw new InvalidOperationException("预取消搜索没有抛出取消异常。");
+        }
+        catch (OperationCanceledException ex) when (ex.CancellationToken == cancellation.Token)
+        {
+        }
+
+        SearchRequestWorkSnapshot totals = requestWorkTotals.Snapshot();
+        if (requestWorkTotals.RecordedSolverCountForTesting != 1
+            || totals.ExpandedNodes != 0
+            || totals.TransitionCount != 0
+            || totals.ChoiceBranchesEvaluated != 0)
+        {
+            throw new InvalidOperationException(
+                $"取消搜索的请求工作量没有精确记录一次：" +
+                $"records={requestWorkTotals.RecordedSolverCountForTesting} " +
+                $"expanded={totals.ExpandedNodes} transitions={totals.TransitionCount} " +
+                $"choices={totals.ChoiceBranchesEvaluated}。");
+        }
+    }
+
+    private static void AssertAdaptiveFramePressureBaseline()
+    {
+        SearchFramePressureSignal signal = new();
+        for (int index = 0; index < 31; index++)
+            signal.ObserveFrame(50d, searchActive: false);
+        signal.ResetPressure();
+        if (signal.BaselineSampleCount != 31
+            || Math.Abs(signal.BaselineFrameGapMilliseconds - 50d) > 0.001d
+            || Math.Abs(signal.PressureFrameGapMilliseconds - 75d) > 0.001d)
+        {
+            throw new InvalidOperationException(
+                $"低帧率基线没有形成相对帧压力阈值：" +
+                $"samples={signal.BaselineSampleCount} " +
+                $"baseline={signal.BaselineFrameGapMilliseconds:F3} " +
+                $"threshold={signal.PressureFrameGapMilliseconds:F3}。");
+        }
+        signal.ObserveFrame(50d, searchActive: true);
+        if (signal.PressureEpochForTesting != 0)
+            throw new InvalidOperationException("稳定的低帧率基线被误判为搜索帧压力。");
+        signal.ObserveFrame(75d, searchActive: true);
+        if (signal.PressureEpochForTesting != 1)
+            throw new InvalidOperationException("相对基线明显退化的帧没有触发搜索帧压力。");
+
+        int backgroundObservedEpoch = 0;
+        signal.ObserveFrame(
+            500d,
+            searchActive: true,
+            frameRecoveryAllowed: false);
+        if (signal.FrameRecoveryAllowed
+            || signal.PressureEpochForTesting != 1
+            || signal.WaitForRecovery(ref backgroundObservedEpoch)
+            || backgroundObservedEpoch != 1)
+        {
+            throw new InvalidOperationException(
+                "窗口失焦后的后台帧仍触发或继承了搜索帧恢复等待。");
+        }
+        signal.ObserveFrame(
+            50d,
+            searchActive: true,
+            frameRecoveryAllowed: true);
+        if (!signal.FrameRecoveryAllowed
+            || signal.WaitForRecovery(ref backgroundObservedEpoch))
+        {
+            throw new InvalidOperationException(
+                "窗口重新聚焦后仍继承失焦前的过期帧压力。");
+        }
+
+        SearchFramePressureSignal sixtyFpsSignal = new();
+        for (int index = 0; index < 31; index++)
+            sixtyFpsSignal.ObserveFrame(1000d / 60d, searchActive: false);
+        sixtyFpsSignal.ResetPressure();
+        if (Math.Abs(sixtyFpsSignal.PressureFrameGapMilliseconds - 33d) > 0.001d)
+        {
+            throw new InvalidOperationException(
+                $"60 FPS 基线没有保留 33ms 的绝对响应下限：" +
+                $"threshold={sixtyFpsSignal.PressureFrameGapMilliseconds:F3}。");
+        }
+
+        SearchFramePressureSignal sparseSignal = new();
+        sparseSignal.ObserveFrame(200d, searchActive: false);
+        sparseSignal.ResetPressure();
+        if (Math.Abs(sparseSignal.BaselineFrameGapMilliseconds - (1000d / 60d)) > 0.001d
+            || Math.Abs(sparseSignal.PressureFrameGapMilliseconds - 33d) > 0.001d)
+        {
+            throw new InvalidOperationException(
+                $"稀疏加载帧错误抬高了帧压力阈值：" +
+                $"baseline={sparseSignal.BaselineFrameGapMilliseconds:F3} " +
+                $"threshold={sparseSignal.PressureFrameGapMilliseconds:F3}。");
+        }
+
+        SearchFramePressureSignal disabledSignal = new();
+        for (int index = 0; index < 31; index++)
+            disabledSignal.ObserveFrame(50d, searchActive: false);
+        disabledSignal.ResetPressure(recoveryEnabled: false);
+        disabledSignal.ObserveFrame(500d, searchActive: true);
+        int disabledObservedEpoch = 0;
+        if (disabledSignal.RecoveryEnabled
+            || disabledSignal.PressureEpochForTesting != 0
+            || disabledSignal.WaitForRecovery(ref disabledObservedEpoch))
+        {
+            throw new InvalidOperationException("无显示服务的搜索仍触发了帧恢复等待。");
+        }
+
+        signal.ResetPressure();
+        if (signal.PressureEpochForTesting != 0)
+            throw new InvalidOperationException("新搜索继承了上一轮帧压力 epoch。");
+
+        SearchProgressDisplayState progressDisplay = new(startedAtTick: 10_000);
+        SolverProgress sameProgress = new(
+            StartTurnNumber: 1,
+            CurrentTurnNumber: 1,
+            CompletedTurnLayers: 0,
+            PlayDepth: 0,
+            ExpandedNodes: 7,
+            ReviewedWorldlines: 37,
+            MaxNodes: 100,
+            FrontierNodes: 0,
+            EndedNodes: 0,
+            ElapsedMilliseconds: 100,
+            Phase: "test");
+        if (progressDisplay.TryCreate(sameProgress, 10_199, out _)
+            || !progressDisplay.TryCreate(sameProgress, 10_200, out SolverProgress firstDisplay)
+            || progressDisplay.TryCreate(sameProgress, 10_399, out _)
+            || !progressDisplay.TryCreate(sameProgress, 10_400, out SolverProgress secondDisplay)
+            || firstDisplay.ElapsedMilliseconds != 200
+            || secondDisplay.ElapsedMilliseconds != 400
+            || secondDisplay.ExpandedNodes != sameProgress.ExpandedNodes
+            || secondDisplay.ReviewedWorldlines != sameProgress.ReviewedWorldlines
+            || !string.Equals(secondDisplay.Phase, sameProgress.Phase, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "搜索计时器没有在复用同一进度对象时按 200ms 间隔保持单调。");
+        }
+
+        progressDisplay.Restart(20_000);
+        SolverProgress publishedAhead = sameProgress with { ElapsedMilliseconds = 4_000 };
+        if (!progressDisplay.TryCreate(publishedAhead, 20_200, out SolverProgress aheadDisplay)
+            || aheadDisplay.ElapsedMilliseconds != 4_000)
+        {
+            throw new InvalidOperationException("搜索计时器覆盖了 worker 发布的更大耗时。");
+        }
+    }
+
     private static void AssertFullRngStateIdentity(CombatState combat)
     {
         Rng rng = combat.RunState.Rng.CombatCardSelection;
@@ -153,6 +332,8 @@ internal sealed partial class UnattendedTestRunner
         await SearchGcPolicy.ReclaimIfPendingAsync(
             "unattended_no_gc_budget_transition_setup",
             forceCollection: true);
+        await AssertNoGcDisableTransitionAsync(initialBudgetBytes, deadline.Token);
+        await AssertManualGcAtInSearchCheckpointAsync(initialBudgetBytes, deadline.Token);
         await AssertInSearchReclaimAsync(deadline.Token);
         await AssertCombatEndReclaimPolicyAsync(deadline.Token);
         SearchGcPolicy.ResetCountersForTesting();
@@ -248,6 +429,237 @@ internal sealed partial class UnattendedTestRunner
         }
     }
 
+    private static async Task AssertManualGcAtInSearchCheckpointAsync(
+        long budgetBytes,
+        CancellationToken cancellationToken)
+    {
+        await SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_manual_gc_checkpoint_setup",
+            forceCollection: true);
+        SearchGcPolicy.ResetCountersForTesting();
+        SearchMemoryPressureSignal signal = new();
+        IDisposable? scope = SearchGcPolicy.EnterLowLatencySearch(
+            enableNoGcRegion: true,
+            budgetBytes,
+            signal,
+            cancellationToken);
+        Task? manualGc = null;
+        Task? checkpoint = null;
+        int generation2Before = GC.CollectionCount(GC.MaxGeneration);
+        try
+        {
+            manualGc = SearchGcPolicy.ForceManualGc();
+            if (manualGc.IsCompleted)
+                throw new InvalidOperationException("活动 NoGC 搜索中的手动 GC 没有排队。");
+            checkpoint = Task.Run(
+                () => signal.ReclaimAndContinue(cancellationToken),
+                cancellationToken);
+            await Task.WhenAll(manualGc, checkpoint).WaitAsync(cancellationToken);
+            if (signal.ReclaimCount != 1
+                || GC.CollectionCount(GC.MaxGeneration) <= generation2Before
+                || SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 0
+                || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 0)
+            {
+                throw new InvalidOperationException(
+                    $"搜索内检查点没有恰好吸收手动 GC：" +
+                    $"checkpoints={signal.ReclaimCount} " +
+                    $"gen2_delta={GC.CollectionCount(GC.MaxGeneration) - generation2Before} " +
+                    $"background_reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                    $"background_gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting}。");
+            }
+        }
+        finally
+        {
+            scope?.Dispose();
+            scope = null;
+            if (checkpoint != null)
+                await checkpoint.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            if (manualGc != null)
+                await manualGc.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await SearchGcPolicy.ExitNoGcRegionWhenSearchesIdleAsync("no_gc_disabled")
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await SearchGcPolicy.ReclaimIfPendingAsync(
+                    "unattended_manual_gc_checkpoint_cleanup")
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+        if (SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 0
+            || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 0)
+        {
+            throw new InvalidOperationException(
+                "搜索内检查点满足手动 GC 后又重复安排了后台 Gen2。");
+        }
+    }
+
+    private static async Task AssertNoGcDisableTransitionAsync(
+        long budgetBytes,
+        CancellationToken cancellationToken)
+    {
+        GCLatencyMode initialLatencyMode = GCSettings.LatencyMode;
+        IDisposable? enabledScope = SearchGcPolicy.EnterLowLatencySearch(
+            enableNoGcRegion: true,
+            budgetBytes,
+            new SearchMemoryPressureSignal(),
+            cancellationToken);
+        SearchMemoryPressureSignal disabledSignal = new();
+        bool disabledCheckpointInvoked = false;
+        disabledSignal.Configure(
+            GC.GetTotalAllocatedBytes(precise: false),
+            allocationLimitBytes: 1,
+            _ => disabledCheckpointInvoked = true);
+        Task<IDisposable> disabledScopeTask = Task.Run(() =>
+            SearchGcPolicy.EnterLowLatencySearch(
+                enableNoGcRegion: false,
+                budgetBytes,
+                disabledSignal,
+                cancellationToken),
+            cancellationToken);
+        IDisposable? disabledScope = null;
+        Task? transitionManualGc = null;
+        Task? manualGc = null;
+        Task<IDisposable>? reenabledScopeTask = null;
+        IDisposable? reenabledScope = null;
+        try
+        {
+            await Task.Delay(50, cancellationToken);
+            if (disabledScopeTask.IsCompleted)
+                throw new InvalidOperationException("关闭 NoGC 没有等待现有区域的活动搜索退出。");
+            transitionManualGc = SearchGcPolicy.ForceManualGc();
+            await Task.Delay(50, cancellationToken);
+            if (transitionManualGc.IsCompleted)
+            {
+                throw new InvalidOperationException(
+                    "NoGC→常规 GC 切换尚未退出活动搜索时手动 GC 提前完成。");
+            }
+            enabledScope.Dispose();
+            enabledScope = null;
+            disabledScope = await disabledScopeTask.WaitAsync(cancellationToken);
+            await transitionManualGc.WaitAsync(cancellationToken);
+            if (SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting != 0
+                || GCSettings.LatencyMode != initialLatencyMode
+                || disabledSignal.AllocationLimitBytes != long.MaxValue
+                || disabledCheckpointInvoked)
+            {
+                throw new InvalidOperationException(
+                    $"关闭 NoGC 后没有恢复 CLR 常规 GC：" +
+                    $"budget={SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting} " +
+                    $"latency={GCSettings.LatencyMode} " +
+                    $"limit={disabledSignal.AllocationLimitBytes}。");
+            }
+            try
+            {
+                disabledSignal.ReclaimAndContinue(cancellationToken);
+                throw new InvalidOperationException("关闭 NoGC 后仍保留了搜索内存检查点回调。");
+            }
+            catch (InvalidOperationException ex) when (
+                ex.Message == "搜索内存回收信号尚未配置。")
+            {
+            }
+
+            manualGc = SearchGcPolicy.ForceManualGc();
+            reenabledScopeTask = Task.Run(() =>
+                SearchGcPolicy.EnterLowLatencySearch(
+                    enableNoGcRegion: true,
+                    budgetBytes,
+                    new SearchMemoryPressureSignal(),
+                    cancellationToken),
+                cancellationToken);
+            await Task.Delay(50, cancellationToken);
+            if (manualGc.IsCompleted)
+                throw new InvalidOperationException("CLR 常规 GC 搜索尚未退出时手动 GC 提前完成。");
+            if (reenabledScopeTask.IsCompleted)
+                throw new InvalidOperationException("CLR 常规 GC 搜索尚未退出时 NoGC 搜索提前进入。");
+
+            disabledScope.Dispose();
+            disabledScope = null;
+            reenabledScope = await reenabledScopeTask.WaitAsync(cancellationToken);
+            await manualGc.WaitAsync(cancellationToken);
+            if (SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting != budgetBytes)
+            {
+                throw new InvalidOperationException(
+                    $"重新启用 NoGC 后没有恢复用户预算：" +
+                    $"expected={budgetBytes} " +
+                    $"actual={SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting}。");
+            }
+        }
+        finally
+        {
+            enabledScope?.Dispose();
+            disabledScope?.Dispose();
+            await ((Task)disabledScopeTask)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            if (disabledScopeTask.IsCompletedSuccessfully)
+                disabledScopeTask.Result.Dispose();
+            reenabledScope?.Dispose();
+            if (reenabledScopeTask != null)
+            {
+                await ((Task)reenabledScopeTask)
+                    .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+            if (reenabledScopeTask?.IsCompletedSuccessfully == true)
+                reenabledScopeTask.Result.Dispose();
+            if (manualGc != null)
+            {
+                await manualGc
+                    .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+            if (transitionManualGc != null)
+            {
+                await transitionManualGc
+                    .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+            await SearchGcPolicy.ExitNoGcRegionWhenSearchesIdleAsync(
+                    "unattended_no_gc_disabled_cleanup")
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await SearchGcPolicy.ReclaimIfPendingAsync(
+                    "unattended_no_gc_disabled_cleanup",
+                    forceCollection: true)
+                .ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+
+        SearchGcPolicy.DetachCombatLifecyclePressure(
+            "unattended_no_gc_disabled_lifecycle_setup");
+        SearchGcPolicy.ResetCountersForTesting();
+        GCLatencyMode steadyDisabledLatencyMode = GCSettings.LatencyMode;
+        using (SearchGcPolicy.EnterLowLatencySearch(
+                   enableNoGcRegion: false,
+                   budgetBytes,
+                   new SearchMemoryPressureSignal(),
+                   cancellationToken))
+        {
+            if (GCSettings.LatencyMode != steadyDisabledLatencyMode
+                || SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting != 0)
+            {
+                throw new InvalidOperationException(
+                    $"稳定关闭 NoGC 的搜索改变了 CLR latency：" +
+                    $"expected={steadyDisabledLatencyMode} actual={GCSettings.LatencyMode} " +
+                    $"budget={SearchGcPolicy.CurrentNoGcRegionBudgetBytesForTesting}。");
+            }
+        }
+        if (GCSettings.LatencyMode != steadyDisabledLatencyMode)
+            throw new InvalidOperationException("关闭 NoGC 的搜索退出后没有保留 CLR latency。");
+        SearchGcPolicy.ReportCombatLifecycleAllocation(
+            270L * 1024 * 1024,
+            "unattended_no_gc_disabled_root_snapshot",
+            automaticGcEnabled: false);
+        SearchGcPolicy.CombatLifecyclePressure disabledPressure =
+            SearchGcPolicy.DetachCombatLifecyclePressure(
+                "unattended_no_gc_disabled_lifecycle");
+        await SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_no_gc_disabled_lifecycle");
+        if (disabledPressure.AllocatedBytes != 0
+            || disabledPressure.RequiresCollection
+            || SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 0
+            || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 0)
+        {
+            throw new InvalidOperationException(
+                $"关闭 NoGC 的稳定战斗仍登记了自动 Gen2 压力：" +
+                $"allocated={disabledPressure.AllocatedBytes} " +
+                $"requires_collection={disabledPressure.RequiresCollection} " +
+                $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting}。");
+        }
+    }
+
     private static async Task AssertInSearchReclaimAsync(CancellationToken cancellationToken)
     {
         const long budgetBytes = 1_000_000_000L;
@@ -270,10 +682,12 @@ internal sealed partial class UnattendedTestRunner
         CancellationToken cancellationToken)
     {
         const long budgetBytes = 1_000_000_000L;
+        await AssertManualGcPreservesLifecyclePressureAsync(cancellationToken);
         SearchGcPolicy.ResetCountersForTesting();
         SearchGcPolicy.ReportCombatLifecycleAllocation(
             1024 * 1024,
-            "unattended_low_allocation_root_snapshot");
+            "unattended_low_allocation_root_snapshot",
+            automaticGcEnabled: true);
         IDisposable lowAllocationScope = SearchGcPolicy.EnterLowLatencySearch(
             budgetBytes,
             new SearchMemoryPressureSignal(),
@@ -308,7 +722,8 @@ internal sealed partial class UnattendedTestRunner
         long rootAllocated = GC.GetTotalAllocatedBytes(precise: true) - rootAllocatedBefore;
         SearchGcPolicy.ReportCombatLifecycleAllocation(
             rootAllocated,
-            "unattended_high_allocation_root_snapshot");
+            "unattended_high_allocation_root_snapshot",
+            automaticGcEnabled: true);
         if (rootAllocated < 270L * 1024 * 1024)
         {
             throw new InvalidOperationException(
@@ -367,6 +782,51 @@ internal sealed partial class UnattendedTestRunner
                 $"managed_live_released={managedLiveReleased}。");
         }
         await AssertExhaustionReclaimReferenceCoverageAsync(cancellationToken);
+    }
+
+    private static async Task AssertManualGcPreservesLifecyclePressureAsync(
+        CancellationToken cancellationToken)
+    {
+        SearchGcPolicy.DetachCombatLifecyclePressure(
+            "unattended_manual_gc_lifecycle_setup");
+        await SearchGcPolicy.ReclaimIfPendingAsync(
+            "unattended_manual_gc_lifecycle_setup",
+            forceCollection: true);
+        SearchGcPolicy.ResetCountersForTesting();
+        const long lifecycleAllocation = 270L * 1024 * 1024;
+        SearchGcPolicy.ReportCombatLifecycleAllocation(
+            lifecycleAllocation,
+            "unattended_manual_gc_live_combat",
+            automaticGcEnabled: true);
+        await SearchGcPolicy.ForceManualGc().WaitAsync(cancellationToken);
+        SearchGcPolicy.CombatLifecyclePressure pressure =
+            SearchGcPolicy.DetachCombatLifecyclePressure(
+                "unattended_manual_gc_reference_release");
+        if (pressure.AllocatedBytes != lifecycleAllocation || !pressure.RequiresCollection)
+        {
+            throw new InvalidOperationException(
+                $"手动 GC 错误清除了仍被战斗引用持有的生命周期压力：" +
+                $"allocated={pressure.AllocatedBytes} " +
+                $"requires_collection={pressure.RequiresCollection}。");
+        }
+        int releaseCallbackCount = 0;
+        await SearchGcPolicy.ReclaimAfterReferenceReleaseAsync(
+                "unattended_manual_gc_reference_release",
+                pressure.RequiresCollection,
+                includeCombatLifecyclePressure: false,
+                Task.CompletedTask,
+                () => Interlocked.Increment(ref releaseCallbackCount))
+            .WaitAsync(cancellationToken);
+        if (releaseCallbackCount != 1
+            || SearchGcPolicy.BackgroundReclaimStartedCountForTesting != 2
+            || SearchGcPolicy.BackgroundGen2CompletedCountForTesting != 2)
+        {
+            throw new InvalidOperationException(
+                $"手动 GC 后没有在引用释放边界补做生命周期回收：" +
+                $"callback={releaseCallbackCount} " +
+                $"reclaims={SearchGcPolicy.BackgroundReclaimStartedCountForTesting} " +
+                $"gen2={SearchGcPolicy.BackgroundGen2CompletedCountForTesting}。");
+        }
     }
 
     private static async Task AssertExhaustionReclaimReferenceCoverageAsync(

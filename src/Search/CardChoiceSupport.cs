@@ -51,7 +51,6 @@ internal static partial class CardChoiceSupport
             .LastOrDefault(entry => playedCard.References(entry.Trace?.Source));
         if (generated != null)
         {
-            List<PredictedCard> options = generated.Options.Select(option => option.Clone()).ToList();
             int minCount = card is Abundance ? 1 : 0;
             return RangeSpec(
                 owner,
@@ -59,7 +58,7 @@ internal static partial class CardChoiceSupport
                 PileType.None,
                 minCount,
                 1,
-                options);
+                generated.Options);
         }
 
         return card switch

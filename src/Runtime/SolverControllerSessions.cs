@@ -22,6 +22,49 @@ internal sealed record ManualProjectionComparison(
     public int Difference => CurrentProjectedBattleHpLost - PreviousProjectedBattleHpLost;
 }
 
+internal sealed class SearchProgressDisplayState(long startedAtTick)
+{
+    public SearchProgressDisplayState() : this(Environment.TickCount64)
+    {
+    }
+
+    public long StartedAtTick { get; private set; } = startedAtTick;
+    public long LastRenderAtTick { get; private set; } = startedAtTick;
+    public SolverProgress? RenderedProgress { get; private set; }
+
+    public void Restart(long nowTick)
+    {
+        StartedAtTick = nowTick;
+        LastRenderAtTick = nowTick;
+        RenderedProgress = null;
+    }
+
+    public bool TryCreate(
+        SolverProgress? progress,
+        long nowTick,
+        out SolverProgress displayProgress)
+    {
+        if (progress == null
+            || nowTick - LastRenderAtTick < SolverWeights.ProgressUiIntervalMilliseconds)
+        {
+            displayProgress = null!;
+            return false;
+        }
+
+        long elapsedMilliseconds = Math.Max(
+            progress.ElapsedMilliseconds,
+            Math.Max(
+                RenderedProgress?.ElapsedMilliseconds ?? 0L,
+                Math.Max(0L, nowTick - StartedAtTick)));
+        displayProgress = elapsedMilliseconds == progress.ElapsedMilliseconds
+            ? progress
+            : progress with { ElapsedMilliseconds = elapsedMilliseconds };
+        LastRenderAtTick = nowTick;
+        RenderedProgress = displayProgress;
+        return true;
+    }
+}
+
 internal sealed class SolverCombatSession
 {
     public CombatState? State { get; set; }
@@ -72,8 +115,7 @@ internal sealed class SolverSearchSession(
     public bool DeployWhenReady { get; set; } = deployWhenReady;
     public int MaxDegreeOfParallelism { get; set; } = 1;
     public SolverProgress? Progress;
-    public SolverProgress? RenderedProgress { get; set; }
-    public long LastProgressRenderAt { get; set; } = Environment.TickCount64;
+    public SearchProgressDisplayState ProgressDisplay { get; } = new();
     public int AdoptCurrentResultRequestState;
     public int FrameCount { get; private set; }
     public int FramesOver33Milliseconds { get; private set; }
@@ -86,6 +128,7 @@ internal sealed class SolverSearchSession(
 
     public void RequestAdoptCurrentResult()
         => Interlocked.Exchange(ref AdoptCurrentResultRequestState, 1);
+
     public long ProcessAllocatedBytesAtStart { get; } = GC.GetTotalAllocatedBytes(precise: false);
     public TimeSpan ProcessGcPauseAtStart { get; } = GC.GetTotalPauseDuration();
 

@@ -16,4 +16,7 @@ internal sealed record SearchPolicySnapshot(
     SolverTheftPolicy? TheftPolicy,
     SearchDiagnosticsSink Diagnostics,
     SearchFramePressureSignal FramePressureSignal,
-    SearchMemoryPressureSignal MemoryPressureSignal);
+    SearchMemoryPressureSignal MemoryPressureSignal)
+{
+    public SearchRequestWorkTotals? RequestWorkTotals { get; init; }
+}

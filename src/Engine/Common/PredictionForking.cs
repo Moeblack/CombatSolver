@@ -23,6 +23,21 @@ internal interface ICombatPredictionRunSnapshot
     CombatSolver.Engine.InCombat.Simulation.CombatPredictionRngSet CreatePredictionRngSet();
 }
 
+internal interface ICombatPredictionCardGenerationPoolSnapshot
+{
+    bool TryGetRootEligibleCards(
+        MegaCrit.Sts2.Core.Entities.Players.Player player,
+        MegaCrit.Sts2.Core.Models.CardPoolModel cardPool,
+        MegaCrit.Sts2.Core.Entities.Cards.CardMultiplayerConstraint multiplayerConstraint,
+        out IReadOnlyList<MegaCrit.Sts2.Core.Models.CardModel> cards);
+
+    bool TryGetRootEligibleCharacterAttackCards(
+        MegaCrit.Sts2.Core.Entities.Players.Player player,
+        MegaCrit.Sts2.Core.Models.CardPoolModel cardPool,
+        MegaCrit.Sts2.Core.Entities.Cards.CardMultiplayerConstraint multiplayerConstraint,
+        out IReadOnlyList<MegaCrit.Sts2.Core.Models.CardModel> cards);
+}
+
 internal interface ICombatPredictionPlayerLimits
 {
     int GetMaxHandSize(MegaCrit.Sts2.Core.Entities.Players.Player player);

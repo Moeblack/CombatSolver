@@ -66,35 +66,52 @@ internal static class CorePowerSupport
         {
             case BlightStrike when target != null:
             {
-                int damage = simulator.History.Entries
-                    .Skip(historyEntryStart)
-                    .OfType<CombatPredictionDamageReceivedEntry>()
-                    .Where(entry => ReferenceEquals(entry.CardSource?.Original, playedCard.Original)
+                int damage = 0;
+                foreach (CombatPredictionHistoryEntry historyEntry in
+                         simulator.History.EntriesFrom(historyEntryStart))
+                {
+                    if (historyEntry is CombatPredictionDamageReceivedEntry entry
+                        && ReferenceEquals(entry.CardSource?.Original, playedCard.Original)
                         && ReferenceEquals(entry.Receiver, target))
-                    .Sum(entry => entry.Result.TotalDamage);
+                    {
+                        damage = checked(damage + entry.Result.TotalDamage);
+                    }
+                }
                 if (damage > 0)
                     combat.Apply<DoomPower>(target, damage, owner);
                 break;
             }
             case Fisticuffs:
             {
-                int block = simulator.History.Entries
-                    .Skip(historyEntryStart)
-                    .OfType<CombatPredictionDamageReceivedEntry>()
-                    .Where(entry => ReferenceEquals(entry.CardSource?.Original, playedCard.Original))
-                    .Sum(entry => entry.Result.TotalDamage + entry.Result.OverkillDamage);
+                int block = 0;
+                foreach (CombatPredictionHistoryEntry historyEntry in
+                         simulator.History.EntriesFrom(historyEntryStart))
+                {
+                    if (historyEntry is CombatPredictionDamageReceivedEntry entry
+                        && ReferenceEquals(entry.CardSource?.Original, playedCard.Original))
+                    {
+                        int contribution = entry.Result.TotalDamage + entry.Result.OverkillDamage;
+                        block = checked(block + contribution);
+                    }
+                }
                 if (block > 0)
                     simulator.GainBlock(owner, block, ValueProp.Move, playedCard, cardPlay);
                 break;
             }
             case BeatIntoShape when target != null:
             {
-                int currentHits = simulator.History.Entries
-                    .Skip(historyEntryStart)
-                    .OfType<CombatPredictionDamageReceivedEntry>()
-                    .Count(entry => entry.Dealer == owner
+                int currentHits = 0;
+                foreach (CombatPredictionHistoryEntry historyEntry in
+                         simulator.History.EntriesFrom(historyEntryStart))
+                {
+                    if (historyEntry is CombatPredictionDamageReceivedEntry entry
+                        && entry.Dealer == owner
                         && entry.Receiver == target
-                        && entry.Result.Props.IsPoweredAttack());
+                        && entry.Result.Props.IsPoweredAttack())
+                    {
+                        currentHits = checked(currentHits + 1);
+                    }
+                }
                 int priorHits = Math.Max(
                     0,
                     combat.GetPoweredAttackHitsThisTurn(owner, target) - currentHits);
@@ -383,12 +400,20 @@ internal static class CorePowerSupport
         PredictedCard playedCard,
         Creature target,
         int historyEntryStart)
-        => simulator.History.Entries
-            .Skip(historyEntryStart)
-            .OfType<CombatPredictionDamageReceivedEntry>()
-            .Any(entry => ReferenceEquals(entry.CardSource?.Original, playedCard.Original)
+    {
+        foreach (CombatPredictionHistoryEntry historyEntry in
+                 simulator.History.EntriesFrom(historyEntryStart))
+        {
+            if (historyEntry is CombatPredictionDamageReceivedEntry entry
+                && ReferenceEquals(entry.CardSource?.Original, playedCard.Original)
                 && entry.Receiver == target
-                && entry.Result.WasTargetKilled);
+                && entry.Result.WasTargetKilled)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public static void TriggerPoison(
         CombatPredictionSimulator simulator,
@@ -583,7 +608,7 @@ internal static class CorePowerSupport
         List<PredictedCard>? toFlush = null;
         if (PersistentRelicSupport.ShouldFlush(combat, player))
         {
-            foreach (PredictedCard card in playerState.Hand.Cards)
+            foreach (PredictedCard card in playerState.Hand)
             {
                 if (!card.Preview.ShouldRetainThisTurn)
                     (toFlush ??= []).Add(card);

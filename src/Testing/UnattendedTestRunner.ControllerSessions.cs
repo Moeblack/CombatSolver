@@ -185,6 +185,8 @@ internal sealed partial class UnattendedTestRunner
         }
         if (!SolverOverlay.ManualGcButtonConfiguredForTesting)
             throw new InvalidOperationException("手动 GC 按钮没有归属性能设置页。");
+        if (!SolverOverlay.NoGcControlsConfiguredForTesting)
+            throw new InvalidOperationException("NoGC 开关或预算输入没有归属性能设置页。");
         if (!SolverOverlay.ExercisePerformanceHintForTesting())
             throw new InvalidOperationException("战损结果没有可用的性能预设重试胶囊提示。");
         if (strategyPotion is { } potionEntry)
@@ -289,10 +291,11 @@ internal sealed partial class UnattendedTestRunner
         SolverSettingsData notificationDefaults = new();
         if (SolverSettings.ResolvePerformancePreset(notificationDefaults)
                 != SolverPerformancePreset.Medium
+            || !notificationDefaults.EnableNoGcRegion
             || notificationDefaults.NoGcRegionBudgetGigabytes
                 != SolverSettings.DefaultNoGcRegionBudgetGigabytes)
         {
-            throw new InvalidOperationException("新安装和恢复默认没有使用中性能档与 16 GB 独立内存预算。");
+            throw new InvalidOperationException("新安装和恢复默认没有使用中性能档与启用的 16 GB 独立内存预算。");
         }
         if (!notificationDefaults.SearchCompletionNotificationsEnabled
             || notificationDefaults.SearchCompletionNotificationMode
@@ -574,6 +577,48 @@ internal sealed partial class UnattendedTestRunner
         finally
         {
             SolverSettings.ApplyForTesting(settingsBeforeDelayCancellation);
+        }
+
+        await SearchGcPolicy.CaptureRootSnapshotBarrier().WaitAsync(TimeSpan.FromSeconds(30));
+        SearchGcPolicy.DetachCombatLifecyclePressure(
+            "unattended_disabled_gc_reference_barrier_setup");
+        SolverSettingsData settingsBeforeDisabledGcReset = SolverSettings.Current;
+        TaskCompletionSource disabledReferenceReleaseGate = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        Task disabledDeferredOperation = Task.CompletedTask;
+        try
+        {
+            SolverSettings.ApplyForTesting(settingsBeforeDisabledGcReset with
+            {
+                EnableNoGcRegion = false,
+            });
+            disabledDeferredOperation = SolverController.StartCombatDeferredOperation(async token =>
+            {
+                await disabledReferenceReleaseGate.Task;
+                token.ThrowIfCancellationRequested();
+            });
+            SolverController.Reset("unattended_disabled_gc_reference_barrier");
+            Task disabledReferenceRelease = SolverController.LastCombatReferenceReleaseForTesting;
+            if (disabledReferenceRelease.IsCompleted)
+            {
+                throw new InvalidOperationException(
+                    "关闭 NoGC 的 Reset 夹具没有建立故意延迟的旧图释放任务。");
+            }
+            Task disabledRootCaptureBarrier = SearchGcPolicy.CaptureRootSnapshotBarrier();
+            if (!disabledRootCaptureBarrier.IsCompletedSuccessfully)
+            {
+                throw new InvalidOperationException(
+                    "全程关闭 NoGC 的战斗仍阻塞下一场根快照，未保持 CLR 常规回收语义。");
+            }
+            disabledReferenceReleaseGate.TrySetResult();
+            await disabledReferenceRelease.WaitAsync(TimeSpan.FromSeconds(1));
+            await disabledDeferredOperation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        }
+        finally
+        {
+            disabledReferenceReleaseGate.TrySetResult();
+            await disabledDeferredOperation.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            SolverSettings.ApplyForTesting(settingsBeforeDisabledGcReset);
         }
 
         var deploymentLifecycle =

@@ -12,11 +12,9 @@ internal static class SearchGcPolicy
     private const int ReclaimCompletionTimeoutMilliseconds = 30_000;
     private const int ConcurrentSearchExitPollMilliseconds = 10;
     private static readonly Lock Gate = new();
-    // 手动 GC 模式：禁用求解器驱动的所有自动 GC 生命周期（No-GC 区域、补账回收、显式收集）。
-    // CLR 的分代自动收集保持运行；只有玩家点击 UI 的“手动 GC”按钮才会触发全量强制回收。
-    // 用 static readonly 非 const，避免编译期折叠使短路分支被标记为不可达代码。
-    private static readonly bool AutoGcEnabled = false;
     private static int _activeSearches;
+    private static int _defaultGcSearches;
+    private static bool _automaticGcLifecycleUsed;
     private static GCLatencyMode _previousMode;
     private static bool _latencyModeOwned;
     private static bool _noGcRegionActive;
@@ -24,9 +22,12 @@ internal static class SearchGcPolicy
     private static bool _reclaimRequired;
     private static bool _reclaimRequested;
     private static bool _reclaimActive;
+    private static bool _manualReclaimRequested;
     private static string _reclaimReason = "unspecified";
     private static TaskCompletionSource? _reclaimCompletion;
     private static Task _reclaimTask = Task.CompletedTask;
+    private static TaskCompletionSource? _manualReclaimCompletion;
+    private static Task _manualReclaimTask = Task.CompletedTask;
     private static Task _referenceReleaseBarrier = Task.CompletedTask;
     private static long _referenceReleaseEpoch;
     private static long _requiredReferenceReleaseCollectionEpoch;
@@ -151,10 +152,19 @@ internal static class SearchGcPolicy
                 return _referenceReleaseEpoch;
         }
     }
+    internal static bool AutomaticGcLifecycleUsed
+    {
+        get
+        {
+            lock (Gate)
+                return _automaticGcLifecycleUsed;
+        }
+    }
 
     private enum NoGcRegionStartOutcome
     {
         Started,
+        SkippedAfterUnexpectedLoss,
         InsufficientMemory,
         RegionSizeUnsupported,
         PlatformUnsupported,
@@ -190,12 +200,23 @@ internal static class SearchGcPolicy
         }
     }
 
-    internal static void ReportCombatLifecycleAllocation(long allocatedBytes, string source)
+    internal static void ReportCombatLifecycleAllocation(
+        long allocatedBytes,
+        string source,
+        bool automaticGcEnabled)
     {
         if (allocatedBytes < 0)
             throw new ArgumentOutOfRangeException(nameof(allocatedBytes));
         lock (Gate)
         {
+            if (!automaticGcEnabled && !_automaticGcLifecycleUsed)
+            {
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] GC_COMBAT_LIFECYCLE_SKIPPED " +
+                    $"source={source} allocated={allocatedBytes} reason=no_gc_disabled");
+                return;
+            }
+            _automaticGcLifecycleUsed |= automaticGcEnabled;
             long previous = _combatLifecycleAllocatedBytes;
             _combatLifecycleAllocatedBytes = checked(previous + allocatedBytes);
             if (previous < BackgroundReclaimThresholdBytes
@@ -215,6 +236,7 @@ internal static class SearchGcPolicy
         {
             long allocatedBytes = _combatLifecycleAllocatedBytes;
             _combatLifecycleAllocatedBytes = 0;
+            _automaticGcLifecycleUsed = false;
             bool requiresCollection = allocatedBytes >= BackgroundReclaimThresholdBytes;
             Entry.Logger.Info(
                 $"[CombatSolver/Test] GC_COMBAT_LIFECYCLE_DETACHED reason={reason} " +
@@ -225,8 +247,6 @@ internal static class SearchGcPolicy
 
     internal static Task CaptureRootSnapshotBarrier()
     {
-        if (!AutoGcEnabled)
-            return Task.CompletedTask;
         lock (Gate)
             return _referenceReleaseBarrier;
     }
@@ -235,12 +255,25 @@ internal static class SearchGcPolicy
         long noGcRegionBudgetBytes,
         SearchMemoryPressureSignal memoryPressureSignal,
         CancellationToken cancellationToken)
+        => EnterLowLatencySearch(
+            enableNoGcRegion: true,
+            noGcRegionBudgetBytes,
+            memoryPressureSignal,
+            cancellationToken);
+
+    public static IDisposable EnterLowLatencySearch(
+        bool enableNoGcRegion,
+        long noGcRegionBudgetBytes,
+        SearchMemoryPressureSignal memoryPressureSignal,
+        CancellationToken cancellationToken)
     {
         if (noGcRegionBudgetBytes <= 0)
             throw new ArgumentOutOfRangeException(nameof(noGcRegionBudgetBytes));
         ArgumentNullException.ThrowIfNull(memoryPressureSignal);
-        if (!AutoGcEnabled)
-            return NoOpGcScope;
+        if (!enableNoGcRegion)
+            return EnterDefaultGcSearch(memoryPressureSignal, cancellationToken);
+        lock (Gate)
+            _automaticGcLifecycleUsed = true;
         long noGcRegionLohBudgetBytes = Math.Max(
             256L * 1024 * 1024,
             noGcRegionBudgetBytes / 6);
@@ -249,6 +282,8 @@ internal static class SearchGcPolicy
         {
             Task? reclaimTask = null;
             bool waitForActiveSearchExit = false;
+            bool waitForDefaultGcSearchExit = false;
+            bool requestedBudgetDiffers = false;
             lock (Gate)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -264,17 +299,26 @@ internal static class SearchGcPolicy
                 {
                     reclaimTask = _reclaimTask;
                 }
+                else if (_manualReclaimRequested)
+                {
+                    reclaimTask = _manualReclaimTask;
+                }
+                else if (_defaultGcSearches > 0)
+                {
+                    waitForActiveSearchExit = true;
+                    waitForDefaultGcSearchExit = true;
+                }
                 else
                 {
                     long allocatedBytesAtEntry = GC.GetTotalAllocatedBytes(precise: false);
-                    bool requestedBudgetDiffers = (_noGcRegionActive || _activeSearches > 0)
+                    requestedBudgetDiffers = (_noGcRegionActive || _activeSearches > 0)
                         && (_noGcRegionBudgetBytes != noGcRegionBudgetBytes
                             || _noGcRegionLohBudgetBytes != noGcRegionLohBudgetBytes);
-                    if (_activeSearches > 0 && requestedBudgetDiffers)
+                    if (_activeSearches > 0)
                     {
-                        // A process-wide No-GC region cannot be resized while another search uses it.
-                        // Wait without registering a reclaim request: doing so could deadlock if the
-                        // active search reaches its own in-search memory checkpoint before exiting.
+                        // In-search checkpoints temporarily end the process-wide No-GC region. Sharing
+                        // it between searches would make both checkpoint callers wait for the other to
+                        // leave. Serialize these scopes; expansion lanes within one search remain parallel.
                         waitForActiveSearchExit = true;
                     }
                     else if (_activeSearches == 0)
@@ -335,7 +379,8 @@ internal static class SearchGcPolicy
                                 RequireCollectionAfterNextReferenceReleaseLocked();
                                 RestoreLatencyModeLocked();
                                 Entry.Logger.Warn(
-                                    "[CombatSolver/Test] GC_LATENCY no_gc_region_exhausted=true " +
+                                    "[CombatSolver/Test] GC_LATENCY no_gc_region_lost=true " +
+                                    "reason=latency_mode_changed " +
                                     "reclaim=background_non_compacting");
                                 reclaimTask = RequestReclaimLocked("no_gc_region_exhausted");
                             }
@@ -373,46 +418,57 @@ internal static class SearchGcPolicy
                                     $"budget={noGcRegionBudgetBytes} loh_budget={noGcRegionLohBudgetBytes} " +
                                     $"fallback={GCSettings.LatencyMode}");
                             }
-                            ConfigureSearchMemoryLimit(
-                                memoryPressureSignal,
-                                allocatedBytesAtEntry,
-                                noGcRegionBudgetBytes,
-                                noGcRegionBudgetBytes,
-                                noGcRegionLohBudgetBytes);
+                            if (_noGcRegionActive)
+                            {
+                                ConfigureSearchMemoryLimit(
+                                    memoryPressureSignal,
+                                    allocatedBytesAtEntry,
+                                    noGcRegionBudgetBytes,
+                                    noGcRegionBudgetBytes,
+                                    noGcRegionLohBudgetBytes);
+                            }
+                            else
+                            {
+                                memoryPressureSignal.Disable();
+                            }
                             _activeSearches++;
                             return new SearchScope(allocatedBytesAtEntry, memoryPressureSignal);
                         }
-                    }
-                    else
-                    {
-                        long remaining = _noGcRegionActive
-                            ? Math.Max(
-                                0,
-                                _noGcRegionBudgetBytes - Math.Max(
-                                    0,
-                                    allocatedBytesAtEntry - _noGcRegionAllocatedBytesAtStart))
-                            : noGcRegionBudgetBytes;
-                        ConfigureSearchMemoryLimit(
-                            memoryPressureSignal,
-                            allocatedBytesAtEntry,
-                            remaining,
-                            _noGcRegionActive ? _noGcRegionBudgetBytes : noGcRegionBudgetBytes,
-                            _noGcRegionActive ? _noGcRegionLohBudgetBytes : noGcRegionLohBudgetBytes);
-                        _activeSearches++;
-                        return new SearchScope(allocatedBytesAtEntry, memoryPressureSignal);
                     }
                 }
             }
 
             if (waitForActiveSearchExit)
             {
+                if (waitForDefaultGcSearchExit)
+                {
+                    if (!budgetChangeLogged)
+                    {
+                        Entry.Logger.Info(
+                            "[CombatSolver/Test] GC_MODE_WAIT requested=no_gc " +
+                            "reason=default_gc_search_active");
+                        budgetChangeLogged = true;
+                    }
+                    cancellationToken.ThrowIfCancellationRequested();
+                    Thread.Sleep(ConcurrentSearchExitPollMilliseconds);
+                    continue;
+                }
                 if (!budgetChangeLogged)
                 {
-                    lock (Gate)
-                        _budgetChangeWaitCountForTesting++;
-                    Entry.Logger.Info(
-                        $"[CombatSolver/Test] GC_NO_GC_REGION_BUDGET_WAIT " +
-                        $"requested={noGcRegionBudgetBytes} reason=active_search");
+                    if (requestedBudgetDiffers)
+                    {
+                        lock (Gate)
+                            _budgetChangeWaitCountForTesting++;
+                        Entry.Logger.Info(
+                            $"[CombatSolver/Test] GC_NO_GC_REGION_BUDGET_WAIT " +
+                            $"requested={noGcRegionBudgetBytes} reason=active_search");
+                    }
+                    else
+                    {
+                        Entry.Logger.Info(
+                            "[CombatSolver/Test] GC_MODE_WAIT requested=no_gc " +
+                            "reason=no_gc_search_active");
+                    }
                     budgetChangeLogged = true;
                 }
                 cancellationToken.ThrowIfCancellationRequested();
@@ -427,10 +483,52 @@ internal static class SearchGcPolicy
         }
     }
 
+    private static IDisposable EnterDefaultGcSearch(
+        SearchMemoryPressureSignal memoryPressureSignal,
+        CancellationToken cancellationToken)
+    {
+        bool waitLogged = false;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ExitNoGcRegionWhenSearchesIdleAsync("no_gc_disabled")
+                .WaitAsync(cancellationToken)
+                .GetAwaiter()
+                .GetResult();
+            lock (Gate)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                bool onlyDefaultGcSearchesActive = _activeSearches == _defaultGcSearches;
+                if (onlyDefaultGcSearchesActive
+                    && !_noGcRegionActive
+                    && !_latencyModeOwned
+                    && _regionExitOnlyTask.IsCompleted
+                    && _referenceReleaseBarrier.IsCompleted
+                    && !_reclaimActive
+                    && !_reclaimRequested
+                    && !_manualReclaimRequested)
+                {
+                    _activeSearches++;
+                    _defaultGcSearches++;
+                    memoryPressureSignal.Disable();
+                    Entry.Logger.Info(
+                        "[CombatSolver/Test] GC_LATENCY policy=clr_default no_gc_enabled=false");
+                    return new DefaultGcSearchScope();
+                }
+            }
+            if (!waitLogged)
+            {
+                Entry.Logger.Info(
+                    "[CombatSolver/Test] GC_MODE_WAIT requested=default_gc " +
+                    "reason=no_gc_search_active");
+                waitLogged = true;
+            }
+            Thread.Sleep(ConcurrentSearchExitPollMilliseconds);
+        }
+    }
+
     internal static Task ExitNoGcRegionWhenSearchesIdleAsync(string reason)
     {
-        if (!AutoGcEnabled)
-            return Task.CompletedTask;
         lock (Gate)
         {
             if (!_regionExitOnlyTask.IsCompleted)
@@ -450,8 +548,6 @@ internal static class SearchGcPolicy
 
     private static void StartRegionExitOnlyLocked(string reason)
     {
-        if (!AutoGcEnabled)
-            return;
         if (!_regionExitOnlyRequested || _activeSearches != 0)
             throw new InvalidOperationException("No-GC 区域只能在搜索线程退出后结束。");
         TaskCompletionSource completion = _regionExitOnlyCompletion
@@ -471,10 +567,12 @@ internal static class SearchGcPolicy
 
         bool isCombatEnd = reason is not ("no_gc_region_rollover"
             or "no_gc_region_exhausted"
-            or "before_next_search");
+            or "before_next_search"
+            or "no_gc_disabled");
         _ = Task.Run(async () =>
         {
             Exception? failure = null;
+            TaskCompletionSource? failedManualCompletion = null;
             int gen2Before = GC.CollectionCount(GC.MaxGeneration);
             Stopwatch stopwatch = Stopwatch.StartNew();
             try
@@ -503,13 +601,28 @@ internal static class SearchGcPolicy
                 lock (Gate)
                 {
                     _regionExitOnlyCompletion = null;
-                    if (failure == null && _reclaimRequested && _activeSearches == 0)
-                        StartReclaimLocked();
+                    if (failure == null && _activeSearches == 0)
+                    {
+                        if (_manualReclaimRequested && !_reclaimRequested)
+                            RequestReclaimLocked("manual_gc");
+                        if (_reclaimRequested)
+                            StartReclaimLocked();
+                    }
+                    else if (failure != null && _manualReclaimRequested)
+                    {
+                        failedManualCompletion = _manualReclaimCompletion;
+                        _manualReclaimRequested = false;
+                        _manualReclaimCompletion = null;
+                        _manualReclaimTask = Task.CompletedTask;
+                    }
                 }
                 if (failure == null)
                     completion.SetResult();
                 else
+                {
                     completion.SetException(failure);
+                    failedManualCompletion?.SetException(failure);
+                }
             }
         });
     }
@@ -582,13 +695,57 @@ internal static class SearchGcPolicy
                 requiredCoverageEpoch: null);
     }
 
+    // The settings action must cooperate with the same process-wide lifecycle as automatic
+    // reclamation. Queueing the request avoids blocking the Godot main thread and lets an
+    // active search leave its No-GC region at the existing safe search-exit boundary.
+    internal static Task ForceManualGc()
+    {
+        Task reclaim;
+        lock (Gate)
+        {
+            if (_activeSearches > 0 && _reclaimActive)
+            {
+                // An active reclaim can only be an in-search memory checkpoint: background
+                // reclaim never starts until every search scope has exited. Its blocking Gen2
+                // therefore already satisfies this manual request without scheduling a second one.
+                reclaim = _reclaimTask;
+            }
+            else if (_activeSearches > 0)
+            {
+                if (!_manualReclaimRequested)
+                {
+                    _manualReclaimRequested = true;
+                    _manualReclaimCompletion = new TaskCompletionSource(
+                        TaskCreationOptions.RunContinuationsAsynchronously);
+                    _manualReclaimTask = _manualReclaimCompletion.Task;
+                }
+                reclaim = _manualReclaimTask;
+            }
+            else
+            {
+                reclaim = ReclaimIfPendingLocked(
+                    "manual_gc",
+                    forceCollection: true,
+                    includeCombatLifecyclePressure: false,
+                    requiredCoverageEpoch: null);
+            }
+        }
+        _ = reclaim.ContinueWith(
+            task => Entry.Logger.Error(
+                $"[CombatSolver/Test] MANUAL_GC_FAILED exception={task.Exception?.GetBaseException()}"),
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        Entry.Logger.Info(
+            $"[CombatSolver/Test] MANUAL_GC queued=true completed={reclaim.IsCompleted.ToString().ToLowerInvariant()}");
+        return reclaim;
+    }
+
     private static Task ReclaimAfterReferenceReleaseBoundaryAsync(
         string reason,
         bool forceCollection,
         bool includeCombatLifecyclePressure)
     {
-        if (!AutoGcEnabled)
-            return Task.CompletedTask;
         lock (Gate)
         {
             long releaseEpoch = checked(++_referenceReleaseEpoch);
@@ -615,8 +772,6 @@ internal static class SearchGcPolicy
         bool includeCombatLifecyclePressure,
         long? requiredCoverageEpoch)
     {
-        if (!AutoGcEnabled)
-            return Task.CompletedTask;
         bool lifecycleCollectionRequired = includeCombatLifecyclePressure
             && _combatLifecycleAllocatedBytes >= BackgroundReclaimThresholdBytes;
         if (includeCombatLifecyclePressure)
@@ -728,8 +883,6 @@ internal static class SearchGcPolicy
 
     private static Task RequestReclaimLocked(string reason)
     {
-        if (!AutoGcEnabled)
-            return Task.CompletedTask;
         _regionExitRequired = true;
         if (!_reclaimActive && !_reclaimRequested)
         {
@@ -756,13 +909,21 @@ internal static class SearchGcPolicy
 
     private static void StartReclaimLocked()
     {
-        if (!AutoGcEnabled)
-            return;
         if (!_reclaimRequested || _activeSearches != 0)
             throw new InvalidOperationException("GC 回收只能在请求已登记且搜索线程退出后启动。");
 
         TaskCompletionSource completion = _reclaimCompletion
             ?? throw new InvalidOperationException("GC 回收请求缺少完成信号。");
+        TaskCompletionSource? manualCompletion = null;
+        if (_manualReclaimRequested)
+        {
+            manualCompletion = _manualReclaimCompletion
+                ?? throw new InvalidOperationException("手动 GC 请求缺少完成信号。");
+            _manualReclaimRequested = false;
+            _manualReclaimCompletion = null;
+            _manualReclaimTask = Task.CompletedTask;
+            _reclaimRequired = true;
+        }
         string reason = _reclaimReason;
         bool endNoGcRegion = _noGcRegionActive
             && GCSettings.LatencyMode == GCLatencyMode.NoGCRegion;
@@ -901,9 +1062,15 @@ internal static class SearchGcPolicy
                         RequestReclaimLocked(_reclaimReason);
                 }
                 if (failure == null)
+                {
                     completion.SetResult();
+                    manualCompletion?.SetResult();
+                }
                 else
+                {
                     completion.SetException(failure);
+                    manualCompletion?.SetException(failure);
+                }
             }
         });
     }
@@ -1020,6 +1187,11 @@ internal static class SearchGcPolicy
                 StartReclaimLocked();
                 return;
             }
+            if (_manualReclaimRequested)
+            {
+                RequestReclaimLocked("manual_gc");
+                return;
+            }
             if (_noGcRegionActive)
             {
                 Entry.Logger.Info(
@@ -1030,6 +1202,22 @@ internal static class SearchGcPolicy
             Entry.Logger.Info(
                 $"[CombatSolver/Test] GC_LATENCY exit restored={GCSettings.LatencyMode} " +
                 $"entry={_previousMode}");
+        }
+    }
+
+    private static void ExitDefaultGcSearch()
+    {
+        lock (Gate)
+        {
+            if (_defaultGcSearches <= 0 || _activeSearches <= 0)
+                throw new InvalidOperationException("CLR 常规 GC 搜索作用域计数失衡。");
+            _defaultGcSearches--;
+            if (--_activeSearches != 0)
+                return;
+            if (_reclaimRequested && _regionExitOnlyTask.IsCompleted)
+                StartReclaimLocked();
+            else if (_manualReclaimRequested && _regionExitOnlyTask.IsCompleted)
+                RequestReclaimLocked("manual_gc");
         }
     }
 
@@ -1051,11 +1239,21 @@ internal static class SearchGcPolicy
                 signal,
                 regionBudgetBytes,
                 lohBudgetBytes,
-                cancellationToken));
+                cancellationToken),
+            HasUnexpectedNoGcLoss);
         Entry.Logger.Info(
             $"[CombatSolver/Test] GC_SEARCH_ALLOCATION_LIMIT limit={allocationLimitBytes} " +
             $"remaining_region={remainingRegionBytes} region_budget={regionBudgetBytes} " +
             $"loh_budget={lohBudgetBytes}");
+    }
+
+    private static bool HasUnexpectedNoGcLoss()
+    {
+        lock (Gate)
+        {
+            return _noGcRegionActive
+                && GCSettings.LatencyMode != GCLatencyMode.NoGCRegion;
+        }
     }
 
     private static void ReclaimWithinSearch(
@@ -1065,7 +1263,9 @@ internal static class SearchGcPolicy
         CancellationToken cancellationToken)
     {
         TaskCompletionSource checkpointCompletion;
+        TaskCompletionSource? manualCompletion = null;
         bool endNoGcRegion;
+        bool noGcRegionLost;
         bool restoreLatencyMode;
         GCLatencyMode previousMode;
         while (true)
@@ -1075,13 +1275,22 @@ internal static class SearchGcPolicy
             {
                 if (_activeSearches == 1 && !_reclaimActive && !_reclaimRequested)
                 {
+                    if (_manualReclaimRequested)
+                    {
+                        manualCompletion = _manualReclaimCompletion
+                            ?? throw new InvalidOperationException("手动 GC 请求缺少完成信号。");
+                        _manualReclaimRequested = false;
+                        _manualReclaimCompletion = null;
+                        _manualReclaimTask = Task.CompletedTask;
+                    }
                     checkpointCompletion = new TaskCompletionSource(
                         TaskCreationOptions.RunContinuationsAsynchronously);
                     _reclaimActive = true;
                     _reclaimCompletion = checkpointCompletion;
                     _reclaimTask = checkpointCompletion.Task;
-                    endNoGcRegion = _noGcRegionActive
-                        && GCSettings.LatencyMode == GCLatencyMode.NoGCRegion;
+                    noGcRegionLost = _noGcRegionActive
+                        && GCSettings.LatencyMode != GCLatencyMode.NoGCRegion;
+                    endNoGcRegion = _noGcRegionActive && !noGcRegionLost;
                     restoreLatencyMode = _latencyModeOwned;
                     previousMode = _previousMode;
                     _noGcRegionActive = false;
@@ -1093,7 +1302,9 @@ internal static class SearchGcPolicy
         }
 
         Exception? failure = null;
-        NoGcRegionStartOutcome restartOutcome = NoGcRegionStartOutcome.InsufficientMemory;
+        NoGcRegionStartOutcome restartOutcome = noGcRegionLost
+            ? NoGcRegionStartOutcome.SkippedAfterUnexpectedLoss
+            : NoGcRegionStartOutcome.InsufficientMemory;
         bool collectionCompleted = false;
         long liveBefore = GC.GetTotalMemory(forceFullCollection: false);
         using Process processBefore = Process.GetCurrentProcess();
@@ -1116,9 +1327,12 @@ internal static class SearchGcPolicy
                 cancellationToken.ThrowIfCancellationRequested();
                 _previousMode = GCSettings.LatencyMode;
                 _latencyModeOwned = true;
-                restartOutcome = TryStartNoGcRegion(
-                    regionBudgetBytes,
-                    lohBudgetBytes);
+                if (endNoGcRegion)
+                {
+                    restartOutcome = TryStartNoGcRegion(
+                        regionBudgetBytes,
+                        lohBudgetBytes);
+                }
                 _noGcRegionActive = restartOutcome == NoGcRegionStartOutcome.Started;
                 if (_noGcRegionActive)
                     _lastEstablishedNoGcRegionBudgetBytesForTesting = regionBudgetBytes;
@@ -1126,13 +1340,22 @@ internal static class SearchGcPolicy
                 _noGcRegionBudgetBytes = regionBudgetBytes;
                 _noGcRegionLohBudgetBytes = lohBudgetBytes;
                 if (!_noGcRegionActive)
+                {
                     GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
-                ConfigureSearchMemoryLimit(
-                    signal,
-                    _noGcRegionAllocatedBytesAtStart,
-                    regionBudgetBytes,
-                    regionBudgetBytes,
-                    lohBudgetBytes);
+                    // The runtime may terminate a region for memory pressure or an external
+                    // collection. Retrying the same reservation during this search recreates the
+                    // failure loop, so fall back once and let the CLR collect normally.
+                    signal.Disable();
+                }
+                else
+                {
+                    ConfigureSearchMemoryLimit(
+                        signal,
+                        _noGcRegionAllocatedBytesAtStart,
+                        regionBudgetBytes,
+                        regionBudgetBytes,
+                        lohBudgetBytes);
+                }
             }
         }
         catch (Exception ex)
@@ -1147,7 +1370,9 @@ internal static class SearchGcPolicy
             Entry.Logger.Info(
                 $"[CombatSolver/Test] HEAP_RECLAIM reason=in_search_memory_checkpoint " +
                 $"mode=blocking_non_compacting no_gc_region_ended={endNoGcRegion} " +
+                $"no_gc_region_lost={noGcRegionLost.ToString().ToLowerInvariant()} " +
                 $"no_gc_region_restart={FormatStartOutcome(restartOutcome)} " +
+                $"fallback_latched={(restartOutcome != NoGcRegionStartOutcome.Started).ToString().ToLowerInvariant()} " +
                 $"elapsed_ms={stopwatch.Elapsed.TotalMilliseconds:F1} " +
                 $"gc_pause_delta_ms={(GC.GetTotalPauseDuration() - pauseBefore).TotalMilliseconds:F1} " +
                 $"collection_completed={collectionCompleted.ToString().ToLowerInvariant()} " +
@@ -1158,6 +1383,9 @@ internal static class SearchGcPolicy
             {
                 _reclaimActive = false;
                 _reclaimCompletion = null;
+                _activeReclaimCollectsGeneration2 = false;
+                _activeGeneration2CollectionStarted = false;
+                _activeGeneration2CoverageEpoch = 0;
                 if (failure == null && (_regionExitRequired || _reclaimRequired))
                     RequestReclaimLocked(_reclaimReason);
             }
@@ -1165,6 +1393,13 @@ internal static class SearchGcPolicy
                 checkpointCompletion.SetResult();
             else
                 checkpointCompletion.SetException(failure);
+            if (manualCompletion != null)
+            {
+                if (failure == null || collectionCompleted)
+                    manualCompletion.SetResult();
+                else
+                    manualCompletion.SetException(failure);
+            }
         }
 
         if (failure != null)
@@ -1206,6 +1441,7 @@ internal static class SearchGcPolicy
         => outcome switch
         {
             NoGcRegionStartOutcome.Started => "started",
+            NoGcRegionStartOutcome.SkippedAfterUnexpectedLoss => "skipped_after_unexpected_loss",
             NoGcRegionStartOutcome.InsufficientMemory => "insufficient_memory",
             NoGcRegionStartOutcome.RegionSizeUnsupported => "region_size_unsupported",
             NoGcRegionStartOutcome.PlatformUnsupported => "platform_unsupported",
@@ -1220,25 +1456,17 @@ internal static class SearchGcPolicy
         _latencyModeOwned = false;
     }
 
-    // 手动 GC 模式下的空作用域：不建立 No-GC 区域、不改变延迟模式、不请求任何自动回收。
-    private static readonly IDisposable NoOpGcScope = new NoOpScope();
-    private sealed class NoOpScope : IDisposable
+    private sealed class DefaultGcSearchScope : IDisposable
     {
+        private bool _disposed;
+
         public void Dispose()
         {
+            if (_disposed)
+                return;
+            _disposed = true;
+            ExitDefaultGcSearch();
         }
-    }
-
-    // 手动 GC：阻塞式强制全量回收（含待终结对象）。仅在玩家点击 UI 按钮时调用。
-    internal static void ForceManualGc()
-    {
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
-        Entry.Logger.Info(
-            $"[CombatSolver/Test] MANUAL_GC forced_gen2=" +
-            $"{GC.CollectionCount(GC.MaxGeneration)} " +
-            $"managed_live_bytes={GC.GetTotalMemory(forceFullCollection: false)}");
     }
 
     private sealed class SearchScope(

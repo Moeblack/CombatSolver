@@ -107,6 +107,8 @@ internal static class SolverOverlay
         => _settingsPanel?.SettingsTabsConfiguredForTesting == true;
     internal static bool ManualGcButtonConfiguredForTesting
         => _settingsPanel?.ManualGcButtonConfiguredForTesting == true;
+    internal static bool NoGcControlsConfiguredForTesting
+        => _settingsPanel?.NoGcControlsConfiguredForTesting == true;
     internal static bool VisualSettingsConfiguredForTesting
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
     internal static bool PotionStrategyUiConfiguredForTesting

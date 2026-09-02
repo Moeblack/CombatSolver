@@ -165,16 +165,11 @@ internal sealed partial class CombatBeamSolver
                 (int)Math.Round(CardChoiceSupport.CardValue(liveCard.Preview)));
         }
         ThreatFocus focus = BuildThreatFocus(simulator, combat);
-        StrategicEffectContext strategicContext = StrategicEffectContext.Build(
-            liveCards,
-            enemyHp,
-            focus.TotalThreat,
-            focus.IncomingHitCount);
-        StrategicEffectVector strategicEffects = StrategicEffectVector.Zero;
-        int offensivePersistentBuffValue = 0;
-        PersistentSetupTraits persistentSetupTraits = PersistentSetupTraits.None;
-        foreach (PowerModel power in combat.EffectivePowers())
+        IReadOnlyList<PowerModel> effectivePowers = combat.EffectivePowers();
+        StrategicEffectRequirements strategicRequirements = StrategicEffectRequirements.None;
+        for (int powerIndex = 0; powerIndex < effectivePowers.Count; powerIndex++)
         {
+            PowerModel power = effectivePowers[powerIndex];
             if (!ReferenceEquals(power.Owner, _player.Creature)
                 || power.Amount <= 0
                 || power.TypeForCurrentAmount != PowerType.Buff
@@ -182,7 +177,31 @@ internal sealed partial class CombatBeamSolver
             {
                 continue;
             }
-            StrategicEffectVector effect = StrategicEffectModel.Evaluate(power, strategicContext);
+            strategicRequirements |= StrategicEffectModel.Requirements(power);
+        }
+        StrategicEffectContext? strategicContext = null;
+        StrategicEffectVector strategicEffects = StrategicEffectVector.Zero;
+        int offensivePersistentBuffValue = 0;
+        PersistentSetupTraits persistentSetupTraits = PersistentSetupTraits.None;
+        for (int powerIndex = 0; powerIndex < effectivePowers.Count; powerIndex++)
+        {
+            PowerModel power = effectivePowers[powerIndex];
+            if (!ReferenceEquals(power.Owner, _player.Creature)
+                || power.Amount <= 0
+                || power.TypeForCurrentAmount != PowerType.Buff
+                || power is ITemporaryPower)
+            {
+                continue;
+            }
+            strategicContext ??= StrategicEffectContext.Build(
+                liveCards,
+                enemyHp,
+                focus.TotalThreat,
+                focus.IncomingHitCount,
+                strategicRequirements);
+            StrategicEffectVector effect = StrategicEffectModel.Evaluate(
+                power,
+                strategicContext.Value);
             strategicEffects += effect;
             offensivePersistentBuffValue += effect.DamagePotential + effect.ScalingPotential;
             persistentSetupTraits |= PersistentPowerSetupTrait(power);
@@ -220,12 +239,17 @@ internal sealed partial class CombatBeamSolver
             combat,
             playerState,
             _player.Creature);
+        int summonNextTurn = combat.GetAmount<SummonNextTurnPower>(_player.Creature);
+        int summonNextTurnValue = summonNextTurn == 0
+            ? 0
+            : summonNextTurn
+                * (4 + Math.Min(12, liveCards.Count(card =>
+                    card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2));
         int futureResourceValue = combat.GetAmount<EnergyNextTurnPower>(_player.Creature) * 16
             + combat.GetAmount<DrawCardsNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<StarNextTurnPower>(_player.Creature) * 8
             + combat.GetAmount<RetainHandPower>(_player.Creature) * 4
-            + combat.GetAmount<SummonNextTurnPower>(_player.Creature)
-                * (4 + Math.Min(12, liveCards.Count(card => card.Preview.Tags.Contains(CardTag.OstyAttack)) * 2))
+            + summonNextTurnValue
             + retainedHandValue
             + freeCardOpportunityValue;
         Creature? currentOsty = combat.GetOsty(_player);
@@ -394,7 +418,7 @@ internal sealed partial class CombatBeamSolver
         int totalEnergyCost = 0;
         int totalStarCost = 0;
         int zeroCostPlayableCount = 0;
-        foreach (PredictedCard card in playerState.Hand.Cards)
+        foreach (PredictedCard card in playerState.Hand)
         {
             if (!combat.CanPlayCard(simulator, card))
                 continue;
@@ -503,7 +527,7 @@ internal sealed partial class CombatBeamSolver
     {
         ulong first = 0;
         ulong second = 0;
-        foreach (PredictedCard card in pile.Cards)
+        foreach (PredictedCard card in pile)
         {
             StateFingerprint cardKey = BuildCardStateFingerprint(card);
             first += StateFingerprintBuilder.MixFirst(cardKey.First);
@@ -1094,7 +1118,7 @@ internal sealed partial class CombatBeamSolver
         SearchMeasurement measurement = _run.Performance.Begin();
         StateFingerprintBuilder pileKey = new();
         pileKey.Add(pile.Cards.Count);
-        foreach (PredictedCard card in pile.Cards)
+        foreach (PredictedCard card in pile)
         {
             StateFingerprint cardFingerprint = BuildCardStateFingerprint(card);
             pileKey.Add(cardFingerprint.First);

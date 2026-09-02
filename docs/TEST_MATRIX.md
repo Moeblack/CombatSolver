@@ -1,10 +1,32 @@
 # CombatSolver 测试清单
 
-> 基线：CombatSolver `0.25.3`（当前创意工坊稳定版）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
+> 基线：CombatSolver `0.25.3`（当前创意工坊稳定版；下一版本待定）、塔 2 `0.111.0`、RitsuLib 实测 `0.5.18`（清单最低 `0.5.13`）、CombatSolver 内置战斗模拟引擎。无人测试运行隔离的原版 `--headless` 游戏进程，不使用自建 STS CLI；性能最终门槛另由 Steam 可见会话验证。完整战斗基准使用 `Instant / 0 秒` 部署。
 
 单项启动器未请求退出时会保留各平台 marker 精确持有的 headless 游戏进程，供后续身份兼容的请求复用；完整矩阵始终遵守文档命令声明的有界生命周期组。两端都核对请求与实际可执行文件、进程启动身份、隔离数据目录以及 Mod DLL/manifest 的 SHA-256，而不仅依赖 PID；Linux 还通过 `/proc` 核对 starttime 和进程环境。重编译后会安全重启，不会复用内存中的旧程序集；marker 损坏、来自旧协议或无法证明已失效且可能仍有活进程时封闭失败，保留现场并拒绝冒险接管。Windows 通过独立 `APPDATA / LOCALAPPDATA`、Linux 通过独立 XDG 数据目录隔离测试数据；两端都关闭 Steam，只在隔离设置中确认允许加载 Mod，并在 headless 生命周期内临时投影对应平台创意工坊中的 RitsuLib。只有当当前请求的异步工作静稳、主线程稳定并收到匹配 `schemaVersion/runId/held` 的 ready ACK 后，启动器才会复用进程；任何 `Failed`、静稳/ACK 超时或中断都会清理已精确认领的进程。Linux Bash 启动器默认把测试内游戏速度设为 `Instant`，可用 `--headless-fast-mode-for-test` 覆盖；Windows PowerShell 启动器保留既有默认值，可用 `-HeadlessFastModeForTest Instant` 显式启用。同一战斗能容纳的行动继续合并到一个批次夹具中连续执行。
 
 维护时默认使用分层快速回归：普通语义改动跑单效果严格差分；Fork、跨回合历史和续用改动补一个最小两回合或最早复用边界；搜索/部署改动的最终候选才运行必要的完整自动场。快速 unattended 请求总超时不超过 `120` 秒，超时后缩小 fixture 或记为未验证，不在同一轮延长等待。下方完整矩阵是发布门禁和专项审计入口，不是每次修复都要执行的默认清单。
+
+性能指标口径：`selected_*` 只描述最终选中的单个 solver；请求级 `total_expanded_nodes / total_transitions / total_choice_branches` 对正常、失败和取消的每个 solver 精确记录一次。`total_solver_ms`、solver 分配与 GC 累计只覆盖正常返回并被 coordinator 合并的层，不包含取消中的部分工作，因此完整耗时使用请求/阶段墙钟，内存使用进程峰值工作集。Smart 多层的取消时点可能令请求总工作量小幅波动，语义验收优先比较胜负、战损、回合和动作路线。峰值工作集是瞬时进程峰值，不能跨阶段相加；`16 GB` NoGC 是运行时请求预算，不等于实际占用或硬上限；NoGC 活跃时 `GC.GetTotalMemory(false)` 不是严格 live-set 测量。
+
+## 下一版本（开发中；基于 0.25.3）
+
+| 场景 | 结果 | 验证内容 | 日期 |
+| --- | --- | --- | --- |
+| `PR27-MERGE-FORK-PARALLEL` | 通过（合并态 Fork 边界、DOP4） | PR #27 的低分配状态、roster、缓存与分支所有权断言通过，同时保留 `0.25.3` 的选牌、复活、自动出牌历史和球死亡召唤断言；结构门禁 `REFACTOR_BOUNDARIES_OK search_files=59`。runId `a1747125352741efa72ec01a2ae64c4a`。 | 2026-09-02 |
+| `INFESTED-PRISMS-V0251-FULL-SMART-DOP8-A/B` | 通过（最终低分配候选、最新上游同根完整搜索） | 上游/最终阶段墙钟 `112798.755 → 9846.963 ms`，加速 `11.46×`；结束采样工作集 `11,204,886,528 B`。请求累计 `24109/157893/69006` 展开/转移/选牌分支，选中 solver 为 `5861/31244/12125`；保持 `42 HP`、预计战损 `18`、第 `7` 回合和同一动作路线。runId `80921c75b7224f4b887e096f07505739`。 | 2026-09-02 |
+| `LONG-LINE-V0251-FULL-SMART-DOP8-A/B` | 通过（四个公开合成长线根） | Silent 396、Necrobinder、Mecha、Queen 的上游→候选阶段墙钟为 `120464.516→55984.737`、`120399.236→29898.891`、`23853.522→8034.665`、`67789.142→29062.616 ms`，加速 `2.15×/4.03×/2.97×/2.33×`；胜负、战损、回合与动作语义不退化。 | 2026-09-02 |
+| `SILENT-396-NOGC-BUDGET-BALANCE` | 通过（同根 16/4/2 GB） | `4 GB` 为 `53440.887 ms`、峰值工作集 `4.60 GB`，同 16 GB 路线和工作量且相对上游加速 `2.25×`；`2 GB` 为 `54006.365 ms`、峰值约 `3.4 GB`，同路线且加速 `2.23×`。证明预算是玩家可见的速度/内存权衡，不被预设改写或静默钳制。runId `86b10633dd78400fb9176877855074d3` / `fb93590ed2c04cc7b602fe16ea33f824`。 | 2026-09-02 |
+| `PERF-NOGC-TOGGLE-DOP-LIFECYCLE-V0251` | 通过（headless GC/DOP 时序门） | 实际覆盖 NoGC→常规 GC→NoGC、切换中手动回收、关闭模式活动计数、搜索检查点吸收手动回收、引用释放后生命周期补账、`1→2 GB` 重建、取消工作量精确一次、节点快照释放及 DOP1/DOP2 全字段等价和真实并发。runId `df0ab7f8f52c41a2b856aea39c411f49`。 | 2026-09-02 |
+| `SEARCH-GC-CLR-UPSTREAM-SHORT-FINAL` | 通过（关闭态端到端） | 配置保留 `false / 17,000,000,000 B`，实际为区域未激活、预算 `0 B`、latency `Interactive`；CLR 可自主回收，不把 GC 次数或 pause 错断言为零。runId `6473c714239b4f63a8735b9291d47629`。 | 2026-09-02 |
+| `NOGC-SETTINGS-CONTROLLER-LIFECYCLE-FINAL` | 通过（设置页与 Reset 生命周期） | 新装默认开关与 16 GB、旧 JSON、关闭后预算保留、UI 控件归属均通过；全程关闭的 Reset 不建立自动 GC 根屏障，已启用模式的旧义务仍安全结清。runId `50b51af7a92f42948862686001b1b2cb`。 | 2026-09-02 |
+| `PARALLEL-WAVE-ROUND-CHOICE-FINAL` | 通过（安全准入、玩家根与并行指标） | 每个并发 parent 按全局高水位 `1.5×` 预约，never-fit 纯串行，仅 multi-parent 成功 wave 扩宽；自然 singleton action replay、round-choice 唯一所有权及原序合并均实际命中。EXOSKELETONS DOP8 为 `5,686 / 199,522 / 175,150`、`44.608 s`、T4/掉 1；`max parent/action/round = 8/8/5`，runId `6ae1570a41054d369669d65895d285db`。最终 DOP1/DOP2 全政策字段等价、Fork/根快照边界通过，runId `66ca91f7b0934ea6aefd69d4ff563826`。 | 2026-09-02 |
+| `PERF-PLAYER-ROOTS-LOW-ALLOCATION-FINAL` | 通过（最终低分配候选的 3 个性能根） | `16 GB` 下 INFESTED `24,109/157,893/69,006`、`9.847 s / 5.730 GB`、42 HP/T7，runId `80921c75b7224f4b887e096f07505739`；PHANTASMAL `24,526/477,315/353,923`、`74.328 s / 42.860 GB`、4 HP/T7，runId `6be970228d0b477d8da0fa2748523819`；EXOSKELETONS `5,686/199,522/175,150`、`42.150 s / 22.180 GB`、96 HP/T4，runId `a97129a4cc514665ba7d222169ac1aef`。三者胜负、战损、回合和动作路线不退化。AEONGLASS 已转独立质量分支。 | 2026-09-02 |
+| `PERF-EXOSKELETONS-NOGC16-32-FINAL` | 通过（同 DLL、同工作量的 CPU/内存权衡） | NoGC `16 → 32 GB` 保持 `5,686/199,522/175,150`、评分和 96 HP/T4 路线，墙钟 `42.150 → 28.242 s`；结束工作集 `7.66 → 12.83 GB`、private `18.60 → 35.64 GB`。runId `a97129a4cc514665ba7d222169ac1aef` / `efd4eb77f20848cbbdd147c4a9a12c5f`。PHANTASMAL 同设置为 `74.328/75.273 s`，32 GB 没有收益且结束工作集升至约 `21.90 GB`，所以不作通用默认。 | 2026-09-02 |
+| `PERF-ALLOCATION-ENUMERATOR-FORK-BOUNDARY` | 通过（低分配枚举与 Fork 所有权） | StateStore static factory、牌堆/AllCards/Forkable concrete enumerator、roster sink 与直接 COW Fork 构造已编译；Fork 边界完成 parent/child 隔离、阵容移除和状态存储验证，runId `5004871b37f94cbeaf6986556fd53533`。结构门禁 `REFACTOR_BOUNDARIES_OK search_files=59`。 | 2026-09-02 |
+| `POWER-LISTENER-CACHE-FINAL` | 通过（Fork 隔离与三个性能根） | Fork 夹具通过 `1→2` 缓存身份、`2→0→1` 结构失效、父子缓存 Power 身份隔离及新增 Power 唯一/顺序，runId `962946a034004fd88cf7bec055c5a04f`。INFESTED 保持 `24,109/157,893/69,006`、42 HP/T7，`9.945 s / 5.474 GB`；PHANTASMAL 保持 `24,526/477,315/353,923`、4 HP/T7，`75.122 s / 40.015 GB`；EXOSKELETONS 保持 `5,686/199,522/175,150`、96 HP/T4，`42.257 s / 20.261 GB`。相对上一最终低分配根累计分配约降 `4.5%/6.6%/8.7%`，耗时中性。runId `5371edccb4c74f9dab68d85a51daa641`、`71606a471f5a44d9b1315af133c5987c`、`9b811499b12d4d0188f0d8db12e0ee4d`。 | 2026-09-02 |
+| `PERF-EXOSKELETONS-DOP-SWEEP` | 通过（最终安全 admission、同结果并行扩展） | DOP4/8/12/16 均返回同一 `5,686 / 199,522 / 175,150`、96 HP/T4 路线，墙钟为 `44.896 / 44.608 / 43.157 / 43.082 s`；runId `53c14038d4984e9cac9c0113c6861991`、`6ae1570a41054d369669d65895d285db`、`d2029212067941978790f232ff126680`、`e53770540a464f4e94dec64d830e17d0`。DOP4→16 只快 `4.0%`，12→16 仅 `0.2%`，因此开放 16 但仍默认 DOP4。 | 2026-09-02 |
+| `PERF-NOGC-LONG-ROOT-CHECKPOINTS` | 通过（安全点与观察内存） | 最终 `16 GB` INFESTED/PHANTASMAL/EXOSKELETONS 分别跨越 `0/4/6` 个 `SEARCH_MEMORY_CHECKPOINT/RESUMED` 成对边界；需要回收的两场均退出区域、回收并继续。结果与检查点日志观察到的最大工作集约 `11.25/12.22/7.28 GB`；这是离散观察值，不冒充连续采样的精确峰值。 | 2026-09-02 |
+| `PERF-V0251-VISIBLE-STEAM` | 未验证（Steam 客户端阻断） | 可见门已尝试三次，最近一次仍未在 `60 s` 内启动游戏；没有留下游戏进程，协议文件已恢复。当前数据来自隔离 Linux headless，不替代完整 Mod 组合下的主线程 p95/p99/max 和可见搜索吞吐。 | 2026-09-02 |
 
 ## 0.25.3（已发布）
 
@@ -28,7 +50,7 @@
 | `KNOWLEDGE-INVALID-CHOICE-BRANCH-0252-FINAL` | 通过（问题包根状态、DOP4） | 无效的知识恶魔计划选牌候选只淘汰自身，其他分支在 30 秒短搜内返回可执行路线。runId `5bbd0920aabe4a4ca69e51d4d821867e`。 | 2026-09-02 |
 | `POWER-AFFLICTION-FIRST-GENERATED-0252-FINAL` | 通过（Fork 边界与感染棱柱实包全自动） | 根卡牌在搜索物化时冻结，第一张新生成牌会正确获得生命火花/流电等状态；感染棱柱实际打出“发现”后结束战斗。runId `1a76d76419c14fa78fd60c8e46220587`、`a33c599436d74965afbada4582739aab`。 | 2026-09-02 |
 | `KNIGHTS-DAMPEN-ROOT-0252-PASS` | 通过（三骑士第 5 回合实包根、DOP4） | 根捕获导入压制施法者和原始升级记录，搜索跨过魔法骑士死亡并返回 6 个可执行动作。runId `98d1af7fd9284e6698eb7deb2f37c51e`。 | 2026-09-02 |
-| `BLESSED-ANTLER-GAMBLING-CHIP-0252` | 通过（假商人实包全自动、DOP4） | 受祝鹿角先随机插入晕眩，再计算花粉核心抽牌和筹码候选；原生手牌页搜索/选择各一次并在首回合结束战斗。runId `8a140d914a4848d096b00651ba4f438a`。 | 2026-09-02 |
+| `BLESSED-ANTLER-GAMBLING-CHIP-0252` | 通过（假商人实包全自动、DOP4） | 受祝鹿角先随机插入晕眩，再计算花粉核心抽牌和筹码候选；原生手牌页只搜索/选择一次并在首回合结束战斗。runId `8a140d914a4848d096b00651ba4f438a`。 | 2026-09-02 |
 | `SLIMED-NATIVE-CHOICE-0252-BASELINE` | 通过（黏液狂战士第 2 回合实包全自动、DOP4） | 当前编译版从问题根状态执行到第 9 回合结束战斗，燃烧契约与宇宙漠然的原生选牌未再漂移。runId `4ddbe88bfcc648f9a5ecf36da6a6a67a`。 | 2026-09-02 |
 | `REVIVING-CREATURE-POWER-GATE-0252` | 通过（Fork 边界、DOP4） | 复活阶段统一拒绝新 Power，实验体重生时不会保留实机不存在的弱化。runId `daf83b4f2c614f008facdd5f9126ab23`。 | 2026-09-02 |
 | `QUEEN-MINION-FATAL-0252-MINIMAL` | 通过（女王随从 Fatal 最小夹具、DOP4） | 狂宴首动作击杀 1 HP 火炬头随从后最大生命保持 `80`，不触发 Fatal。runId `f80ec3725924407a8603741a1e5d78ce`。 | 2026-09-02 |

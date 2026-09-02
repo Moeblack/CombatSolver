@@ -23,10 +23,17 @@ internal static class CardExecutionSupport
         else
             simulator.AutoPlay(card, target, nestedChoiceSourceId: nestedChoiceSourceId);
 
-        CombatPredictionCardPlayStartedEntry? started = simulator.History.Entries
-            .Skip(historyStart)
-            .OfType<CombatPredictionCardPlayStartedEntry>()
-            .FirstOrDefault(entry => ReferenceEquals(entry.CardPlay.Card, card.Preview));
+        CombatPredictionCardPlayStartedEntry? started = null;
+        foreach (CombatPredictionHistoryEntry entry in simulator.History.EntriesFrom(historyStart))
+        {
+            if (entry is not CombatPredictionCardPlayStartedEntry candidate
+                || !ReferenceEquals(candidate.CardPlay.Card, card.Preview))
+            {
+                continue;
+            }
+            started = candidate;
+            break;
+        }
         if (started == null)
             return false;
         return nestedChoiceSourceId == null || !simulator.HasPendingChoice;
