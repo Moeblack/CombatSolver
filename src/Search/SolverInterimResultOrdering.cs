@@ -26,6 +26,11 @@ internal static class SolverInterimResultOrdering
             return candidate.ProjectedBattlePotionCount < current.ProjectedBattlePotionCount;
         if (candidate.EnemyHp != current.EnemyHp)
             return candidate.EnemyHp < current.EnemyHp;
+        if (candidate.Won && candidate.CombatEndedTurn != current.CombatEndedTurn)
+        {
+            return (candidate.CombatEndedTurn ?? int.MaxValue)
+                < (current.CombatEndedTurn ?? int.MaxValue);
+        }
         return candidate.Score > current.Score;
     }
 

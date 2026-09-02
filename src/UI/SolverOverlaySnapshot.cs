@@ -75,8 +75,51 @@ internal sealed record SolverOverlaySnapshot(
         => Capture(result, turn, unexpectedReplan, pendingTurnSetup: true, reviewedWorldlinesTotal);
 
 
-    public static SolverOverlaySnapshot CaptureRoutePreview(
-        SolverRoutePreview preview)
+    public static SolverOverlaySnapshot CaptureCurrentTurn(SolverCurrentTurnPreview preview)
+    {
+        SolverOverlayActionSnapshot[] actions = preview.Actions
+            .Where(action => action.IsExecutable)
+            .Select(action => CaptureAction(action, []))
+            .ToArray();
+        PlanAction? endTurn = preview.Actions
+            .LastOrDefault(action => action.Kind == PlanActionKind.EndTurn);
+        SolverOverlayTurnSnapshot currentTurn = new(
+            preview.Turn,
+            TurnStartChoices: [],
+            actions,
+            endTurn == null ? null : CaptureAction(endTurn, []),
+            EnemyHpDamageLost: preview.EnemyHpLost,
+            preview.HpLost,
+            preview.EnergyLeft,
+            preview.CombatEnded);
+        SolverOverlayTurnSnapshot[] turns = preview.FrontierTurns is { Count: > 0 } frontier
+            ? frontier.Select(BuildOverlayTurn).ToArray()
+            : [currentTurn];
+        int furthestTurn = preview.FrontierTurns is { Count: > 0 } frontierTurns
+            ? frontierTurns[^1].Turn
+            : preview.Turn;
+        string outcome = preview.CombatEnded
+            ? "本回合结束战斗"
+            : preview.HpLost > 0
+                ? $"本回合预计掉血 {preview.HpLost} HP"
+                : "本回合预计掉血 0 HP";
+        return new SolverOverlaySnapshot(
+            preview.Turn,
+            $"搜索前沿预览 · 已规划至第 {furthestTurn} 回合",
+            SolverOverlayTone.Accent,
+            $"[color={SolverUiTokens.Palette.TextSecondaryHex}]搜索前沿预览，尚未验证完整胜利  │  {outcome}[/color]",
+            string.Empty,
+            preview.Actions.Count(action => action.Kind == PlanActionKind.UsePotion),
+            preview.HpLost,
+            outcome,
+            OnlyDeathRoutesFound: false,
+            turns,
+            DetailsText: string.Empty,
+            HasRisk: false);
+    }
+
+    public static SolverOverlaySnapshot CaptureSpeculativeRoute(
+        SolverSpeculativeRoutePreview preview)
     {
         if (preview.Turns.Count == 0)
             throw new InvalidOperationException("动态候选路线没有可展示回合。");

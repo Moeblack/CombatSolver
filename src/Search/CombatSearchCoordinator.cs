@@ -19,8 +19,10 @@ internal static class CombatSearchCoordinator
         SolverResult? currentCompleteAdoptableResult = null;
         SolverInterimResult? currentDisplayedResult = null;
         SolverProgress? lastProgress = null;
-        int routePreviewVersion = 0;
-        SolverRoutePreview? currentRoutePreview = null;
+        int currentTurnPreviewVersion = 0;
+        int speculativeRouteVersion = 0;
+        SolverCurrentTurnPreview? currentTurnPreview = null;
+        SolverSpeculativeRoutePreview? speculativeRoutePreview = null;
         SolverRouteAdoptionSeed? currentRouteAdoptionSeed = null;
 
         bool TryPromoteDisplayedResult(SolverInterimResult candidate)
@@ -51,14 +53,16 @@ internal static class CombatSearchCoordinator
             if (!promoted && summary != currentDisplayedResult)
                 return;
             currentCompleteAdoptableResult = result;
-            SolverRoutePreview preview = SolverRoutePreview.FromResult(
+            currentTurnPreview = SolverCurrentTurnPreview.FromResult(
                 result,
-                ++routePreviewVersion);
+                ++currentTurnPreviewVersion);
+            speculativeRoutePreview = SolverSpeculativeRoutePreview.FromResult(
+                result,
+                ++speculativeRouteVersion);
             SolverRouteAdoptionSeed seed = new(
-                preview.CandidateVersion,
+                speculativeRoutePreview.CandidateVersion,
                 result.BestNode.Actions,
                 () => result);
-            currentRoutePreview = preview;
             currentRouteAdoptionSeed = seed;
             policy.Diagnostics.Info(
                 $"[CombatSolver/Test] SEARCH_INTERIM_RESULT potions={result.ProjectedBattlePotionCount} " +
@@ -68,7 +72,8 @@ internal static class CombatSearchCoordinator
                 lastProgress = lastProgress with
                 {
                     CurrentBestResult = currentDisplayedResult,
-                    RoutePreview = currentRoutePreview,
+                    CurrentTurnPreview = currentTurnPreview,
+                    SpeculativeRoutePreview = speculativeRoutePreview,
                     RouteAdoptionSeed = currentRouteAdoptionSeed,
                 };
                 progressCallback(lastProgress);
@@ -82,16 +87,26 @@ internal static class CombatSearchCoordinator
                 lastProgress = progress;
                 if (progress.CurrentBestResult is { } candidate)
                     TryPromoteDisplayedResult(candidate);
-                if (progress.RoutePreview is { } preview)
+                if (progress.CurrentTurnPreview is { } current)
                 {
-                    currentRoutePreview = preview;
+                    currentTurnPreview = current;
+                    currentTurnPreviewVersion = Math.Max(
+                        currentTurnPreviewVersion,
+                        current.CandidateVersion);
+                }
+                if (progress.SpeculativeRoutePreview is { } speculative)
+                {
+                    speculativeRoutePreview = speculative;
                     currentRouteAdoptionSeed = progress.RouteAdoptionSeed;
-                    routePreviewVersion = Math.Max(routePreviewVersion, preview.CandidateVersion);
+                    speculativeRouteVersion = Math.Max(
+                        speculativeRouteVersion,
+                        speculative.CandidateVersion);
                 }
                 progressCallback(progress with
                 {
                     CurrentBestResult = currentDisplayedResult,
-                    RoutePreview = currentRoutePreview,
+                    CurrentTurnPreview = currentTurnPreview,
+                    SpeculativeRoutePreview = speculativeRoutePreview,
                     RouteAdoptionSeed = currentRouteAdoptionSeed,
                 });
             };

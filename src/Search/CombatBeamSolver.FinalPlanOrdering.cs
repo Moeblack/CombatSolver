@@ -50,6 +50,10 @@ internal sealed partial class CombatBeamSolver
                     int explicitPotionCount = PotionUsePolicy.ExplicitUseCount(
                         potionCount,
                         candidate.Snapshot.AutomaticPotionUseCount);
+                    int? combatEndedTurn = features.AllEnemiesDead
+                        && features.BoundaryReason != SearchBoundaryReason.UnsupportedEffect
+                            ? candidate.Node.Action?.Turn
+                            : null;
                     int ambergrisCount = candidate.Node.Actions.Count(action =>
                         action.Kind == PlanActionKind.UsePotion
                         && string.Equals(action.PotionId, "AMBERGRIS", StringComparison.Ordinal));
@@ -91,6 +95,7 @@ internal sealed partial class CombatBeamSolver
                             : 0);
                     return (candidate.Node, candidate.Snapshot, Features: features,
                         FutureSold: sold, BattleSold: battleSold, PotionCount: potionCount,
+                        CombatEndedTurn: combatEndedTurn,
                         ExplicitPotionCount: explicitPotionCount, HpDeficit: hpDeficit,
                         StrategicHpDeficit: strategicHpDeficit, PolicyHpDeficit: policyHpDeficit,
                         MaxHpDeficit: maxHpDeficit, HealthResourceCost: healthResourceCost,
@@ -136,6 +141,7 @@ internal sealed partial class CombatBeamSolver
                 .ThenBy(item => item.Candidate.Features.AngerCopiesGenerated)
                 .ThenBy(item => CombatBeamSolver.PolicyBoundaryRank(item.Candidate.Features.BoundaryReason))
                 .ThenBy(item => item.Candidate.Features.EnemyHp)
+                .ThenBy(item => item.Candidate.CombatEndedTurn ?? int.MaxValue)
                 .ThenByDescending(item => item.Candidate.Score)
                 .ThenBy(item => item.Candidate.StrategicSold)
                 .ThenBy(item => item.Candidate.Features.ActionCount)
@@ -229,6 +235,7 @@ internal sealed partial class CombatBeamSolver
                 .ThenBy(candidate => candidate.OptionalPotionCount)
                 .ThenBy(candidate => candidate.StrategicSold)
                 .ThenBy(candidate => candidate.Features.EnemyHp)
+                .ThenBy(candidate => candidate.CombatEndedTurn ?? int.MaxValue)
                 .ThenByDescending(candidate => candidate.Score)
                 .ThenBy(candidate => candidate.Features.ActionCount)
                 .ToList();

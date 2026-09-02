@@ -79,7 +79,7 @@ internal static class SolverController
         => _search is { } search
                && search.Interaction.CurrentTakeoverRequest == null
                && search.Interaction.CanAcceptTakeover
-               && Volatile.Read(ref search.Interaction.Progress)?.RoutePreview != null
+               && Volatile.Read(ref search.Interaction.Progress)?.CurrentTurnPreview != null
            || PlayerTurnSetupCoordinator.CanApplyCurrentTurn;
     public static bool IsApplyingCurrentTurn
         => _search?.Interaction.IsApplyingCurrentTurn == true
@@ -514,10 +514,12 @@ internal static class SolverController
             },
             result,
             DescribeReplanAudit());
-        SolverOverlaySnapshot snapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-            result,
-            UnexpectedReplanCount > 0,
-            _combat.ReviewedWorldlinesTotal);
+        SolverOverlaySnapshot snapshot = result.ResultScope == SolverResultScope.CurrentTurnAdoption
+            ? SolverOverlaySnapshot.CaptureCurrentTurn(SolverCurrentTurnPreview.FromResult(result))
+            : SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                result,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal);
         if (result.ResultScope == SolverResultScope.RouteAdoption)
             snapshot = MarkRouteAdopted(snapshot);
         SolverOverlay.ShowResult(host, snapshot);
@@ -541,10 +543,12 @@ internal static class SolverController
     {
         AssertMainThread();
         RecordReviewedWorldlines(result);
-        SolverOverlaySnapshot snapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-            result,
-            UnexpectedReplanCount > 0,
-            _combat.ReviewedWorldlinesTotal);
+        SolverOverlaySnapshot snapshot = result.ResultScope == SolverResultScope.CurrentTurnAdoption
+            ? SolverOverlaySnapshot.CaptureCurrentTurn(SolverCurrentTurnPreview.FromResult(result))
+            : SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                result,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal);
         if (result.ResultScope == SolverResultScope.RouteAdoption)
             snapshot = MarkRouteAdopted(snapshot);
         SolverOverlay.ShowResult(host, snapshot);
@@ -1427,7 +1431,7 @@ internal static class SolverController
             return;
         }
         if (search.Interaction.CurrentTakeoverRequest != null
-            || Volatile.Read(ref search.Interaction.Progress)?.RoutePreview == null)
+            || Volatile.Read(ref search.Interaction.Progress)?.CurrentTurnPreview == null)
         {
             return;
         }
@@ -1882,10 +1886,12 @@ internal static class SolverController
         {
             return;
         }
-        SolverOverlaySnapshot? preview = progress.RoutePreview == null
-            ? null
-            : SolverOverlaySnapshot.CaptureRoutePreview(progress.RoutePreview);
-        search.Interaction.RenderedRouteAdoptionSeed = preview == null
+        SolverOverlaySnapshot? preview = progress.SpeculativeRoutePreview is { } speculative
+            ? SolverOverlaySnapshot.CaptureSpeculativeRoute(speculative)
+            : progress.CurrentTurnPreview is { } currentTurn
+                ? SolverOverlaySnapshot.CaptureCurrentTurn(currentTurn)
+                : null;
+        search.Interaction.RenderedRouteAdoptionSeed = progress.SpeculativeRoutePreview == null
             ? null
             : progress.RouteAdoptionSeed;
         SolverOverlay.ShowProgress(
@@ -2109,10 +2115,12 @@ internal static class SolverController
                     : "search_completed",
             result,
             DescribeReplanAudit());
-        SolverOverlaySnapshot completedSnapshot = SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
-            result,
-            UnexpectedReplanCount > 0,
-            _combat.ReviewedWorldlinesTotal);
+        SolverOverlaySnapshot completedSnapshot = currentTurnAdopted
+            ? SolverOverlaySnapshot.CaptureCurrentTurn(SolverCurrentTurnPreview.FromResult(result))
+            : SolverOverlaySnapshot.CaptureWithReviewedWorldlines(
+                result,
+                UnexpectedReplanCount > 0,
+                _combat.ReviewedWorldlinesTotal);
         SolverOverlay.ShowResult(
             host,
             routeAdopted ? MarkRouteAdopted(completedSnapshot) : completedSnapshot);

@@ -119,7 +119,7 @@ internal sealed partial class UnattendedTestRunner
         if (!SolverController.IsSearching)
             throw new InvalidOperationException("控制器没有建立搜索会话。");
         int progressTurn = player.PlayerCombatState!.TurnNumber;
-        SolverRoutePreview progressPreview = new(
+        SolverSpeculativeRoutePreview progressPreview = new(
             CandidateVersion: 1,
             StartTurnNumber: progressTurn,
             ProjectedBattlePotionCount: 0,
@@ -176,10 +176,10 @@ internal sealed partial class UnattendedTestRunner
                     ProjectedBattlePotionCount: 0,
                     EnemyHp: 1,
                     Score: 0d),
-                RoutePreview: progressPreview),
+                SpeculativeRoutePreview: progressPreview),
             deployWhenReady: false,
             reviewedWorldlinesBeforeSearch: 5,
-            bestSnapshot: SolverOverlaySnapshot.CaptureRoutePreview(progressPreview));
+            bestSnapshot: SolverOverlaySnapshot.CaptureSpeculativeRoute(progressPreview));
         if (SolverOverlay.SearchProgressRatioForTesting < progressRatio
             || SolverOverlay.ReviewSummaryTextForTesting?.Contains(
                 "正在搜索无药路线",
