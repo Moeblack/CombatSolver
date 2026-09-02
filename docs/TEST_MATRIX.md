@@ -15,6 +15,8 @@
 | `KNOWLEDGE-INVALID-CHOICE-BRANCH-0252-FINAL` | 通过（问题包根状态、DOP4） | 无效的知识恶魔计划选牌候选只淘汰自身，其他分支在 30 秒短搜内返回可执行路线。runId `5bbd0920aabe4a4ca69e51d4d821867e`。 | 2026-09-02 |
 | `POWER-AFFLICTION-FIRST-GENERATED-0252-FINAL` | 通过（Fork 边界与感染棱柱实包全自动） | 根卡牌在搜索物化时冻结，第一张新生成牌会正确获得生命火花/流电等状态；感染棱柱实际打出“发现”后结束战斗。runId `1a76d76419c14fa78fd60c8e46220587`、`a33c599436d74965afbada4582739aab`。 | 2026-09-02 |
 | `KNIGHTS-DAMPEN-ROOT-0252-PASS` | 通过（三骑士第 5 回合实包根、DOP4） | 根捕获导入压制施法者和原始升级记录，搜索跨过魔法骑士死亡并返回 6 个可执行动作。runId `98d1af7fd9284e6698eb7deb2f37c51e`。 | 2026-09-02 |
+| `BLESSED-ANTLER-GAMBLING-CHIP-0252` | 通过（假商人实包全自动、DOP4） | 受祝鹿角先随机插入晕眩，再计算花粉核心抽牌和筹码候选；原生手牌页搜索/选择各一次并在首回合结束战斗。runId `8a140d914a4848d096b00651ba4f438a`。 | 2026-09-02 |
+| `SLIMED-NATIVE-CHOICE-0252-BASELINE` | 通过（黏液狂战士第 2 回合实包全自动、DOP4） | 当前编译版从问题根状态执行到第 9 回合结束战斗，燃烧契约与宇宙漠然的原生选牌未再漂移。runId `4ddbe88bfcc648f9a5ecf36da6a6a67a`。 | 2026-09-02 |
 
 ## 0.25.1（已发布）
 
