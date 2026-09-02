@@ -17,6 +17,8 @@
 | `KNIGHTS-DAMPEN-ROOT-0252-PASS` | 通过（三骑士第 5 回合实包根、DOP4） | 根捕获导入压制施法者和原始升级记录，搜索跨过魔法骑士死亡并返回 6 个可执行动作。runId `98d1af7fd9284e6698eb7deb2f37c51e`。 | 2026-09-02 |
 | `BLESSED-ANTLER-GAMBLING-CHIP-0252` | 通过（假商人实包全自动、DOP4） | 受祝鹿角先随机插入晕眩，再计算花粉核心抽牌和筹码候选；原生手牌页搜索/选择各一次并在首回合结束战斗。runId `8a140d914a4848d096b00651ba4f438a`。 | 2026-09-02 |
 | `SLIMED-NATIVE-CHOICE-0252-BASELINE` | 通过（黏液狂战士第 2 回合实包全自动、DOP4） | 当前编译版从问题根状态执行到第 9 回合结束战斗，燃烧契约与宇宙漠然的原生选牌未再漂移。runId `4ddbe88bfcc648f9a5ecf36da6a6a67a`。 | 2026-09-02 |
+| `REVIVING-CREATURE-POWER-GATE-0252` | 通过（Fork 边界、DOP4） | 复活阶段统一拒绝新 Power，实验体重生时不会保留实机不存在的弱化。runId `daf83b4f2c614f008facdd5f9126ab23`。 | 2026-09-02 |
+| `QUEEN-MINION-FATAL-0252-MINIMAL` | 通过（女王随从 Fatal 最小夹具、DOP4） | 狂宴首动作击杀 1 HP 火炬头随从后最大生命保持 `80`，不触发 Fatal。runId `f80ec3725924407a8603741a1e5d78ce`。 | 2026-09-02 |
 
 ## 0.25.1（已发布）
 

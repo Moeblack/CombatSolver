@@ -31,6 +31,10 @@ internal static class CorePowerSupport
     {
         CardModel card = playedCard.Preview;
         Creature owner = playedCard.Preview.Owner.Creature;
+        bool targetDeathTriggersFatal = target == null
+            || combat.EffectivePowers()
+                .Where(power => power.Owner == target)
+                .All(power => power.ShouldOwnerDeathTriggerFatal());
         MonologuePower[] pendingMonologues = combat.CapturePendingMonologues(owner);
         combat.BeginCardPowerApplication(card);
         CardOnPlaySupport.Apply(
@@ -100,7 +104,12 @@ internal static class CorePowerSupport
                 PersistentPowerSupport.Forge(simulator, card.Owner, forge);
                 break;
             }
-            case Feed when target != null && WasFatalKill(combat, simulator, playedCard, target, historyEntryStart):
+            case Feed when target != null && WasFatalKill(
+                targetDeathTriggersFatal,
+                simulator,
+                playedCard,
+                target,
+                historyEntryStart):
             {
                 int maxHpGain = card.DynamicVars.MaxHp.IntValue;
                 SimCreatureState ownerState = simulator.State.GetCreature(owner);
@@ -108,7 +117,12 @@ internal static class CorePowerSupport
                 simulator.Heal(owner, maxHpGain);
                 break;
             }
-            case HandOfGreed when target != null && WasFatalKill(combat, simulator, playedCard, target, historyEntryStart):
+            case HandOfGreed when target != null && WasFatalKill(
+                targetDeathTriggersFatal,
+                simulator,
+                playedCard,
+                target,
+                historyEntryStart):
             {
                 int gold = card.DynamicVars["Gold"].IntValue;
                 combat.GainPlayerGold(card.Owner, gold);
@@ -123,7 +137,12 @@ internal static class CorePowerSupport
                 break;
             case TheHunt when target != null:
             {
-                if (WasFatalKill(combat, simulator, playedCard, target, historyEntryStart))
+                if (WasFatalKill(
+                        targetDeathTriggersFatal,
+                        simulator,
+                        playedCard,
+                        target,
+                        historyEntryStart))
                 {
                     combat.Apply<TheHuntPower>(owner, 1, owner);
                     combat.RecordLongTermResource(TheHuntLongTermResourceValue);
@@ -354,14 +373,12 @@ internal static class CorePowerSupport
     }
 
     private static bool WasFatalKill(
-        SimulatedCombatState combat,
+        bool targetDeathTriggersFatal,
         CombatPredictionSimulator simulator,
         PredictedCard playedCard,
         Creature target,
         int historyEntryStart)
-        => combat.EffectivePowers()
-               .Where(power => power.Owner == target)
-               .All(power => power.ShouldOwnerDeathTriggerFatal())
+        => targetDeathTriggersFatal
            && WasCardKill(simulator, playedCard, target, historyEntryStart);
 
     private static bool WasCardKill(

@@ -48,6 +48,7 @@ internal sealed partial class UnattendedTestRunner
         AssertDeploymentCardIdentitySurvivesEarlierCopyLeavingHand(card);
         AssertMissingSandpitIsACompletedFranticEscape(combat, player);
         AssertTerminalMonsterMovesStopForecasting();
+        AssertRevivingCreatureRejectsNewPowers(combat, player);
 
         using (simulator.PushActionSource(card, PredictionActionKind.CardPlay))
             AssertForkRejected(simulator, "completed actions");
@@ -150,6 +151,26 @@ internal sealed partial class UnattendedTestRunner
         AssertWhisperingEarringOnlyRunsOnFirstTurn(simulator, simulatedCombat, player);
         AssertPredictionForkContextIdentityIndex();
         AssertForkableListEnumeration();
+    }
+
+    private static void AssertRevivingCreatureRejectsNewPowers(CombatState combat, Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        _ = new CombatPredictionSimulator(simulatedCombat);
+        Creature enemy = simulatedCombat.Enemies.First();
+        FieldInfo phasesField = typeof(SimulatedCombatState).GetField(
+            "_deathPhases",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new MissingFieldException(typeof(SimulatedCombatState).FullName, "_deathPhases");
+        phasesField.SetValue(
+            simulatedCombat,
+            new ForkableDictionary<Creature, PredictedDeathPhase>
+            {
+                [enemy] = PredictedDeathPhase.Reviving,
+            });
+        simulatedCombat.Apply<WeakPower>(enemy, 1, player.Creature);
+        if (simulatedCombat.GetAmount<WeakPower>(enemy) != 0)
+            throw new InvalidOperationException("复活中的怪物错误接受了新 Power。");
     }
 
     private static void AssertMonsterAiUsesCapturedMachine(CombatState combat)
