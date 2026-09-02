@@ -112,11 +112,7 @@ internal sealed partial class SimulatedCombatState
         BranchMonsterAiState current = GetMonsterAiState(enemy);
         if (current.NeedsInitialRoll)
         {
-            MoveState initial = current.Machine.RollMove(
-                PlayerCreatures,
-                enemy,
-                simulator.Rng.MonsterAi);
-            RegisterMonsterAi(enemy, initial);
+            (_monsterAiStates ??= [])[enemy] = BranchMonsterAi.RollInitial(current, simulator, this);
             return;
         }
         if (current.Current.Id == "STUNNED" && WillSkipNextMove(enemy))

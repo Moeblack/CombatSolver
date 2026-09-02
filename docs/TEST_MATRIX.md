@@ -19,6 +19,7 @@
 | `SLIMED-NATIVE-CHOICE-0252-BASELINE` | 通过（黏液狂战士第 2 回合实包全自动、DOP4） | 当前编译版从问题根状态执行到第 9 回合结束战斗，燃烧契约与宇宙漠然的原生选牌未再漂移。runId `4ddbe88bfcc648f9a5ecf36da6a6a67a`。 | 2026-09-02 |
 | `REVIVING-CREATURE-POWER-GATE-0252` | 通过（Fork 边界、DOP4） | 复活阶段统一拒绝新 Power，实验体重生时不会保留实机不存在的弱化。runId `daf83b4f2c614f008facdd5f9126ab23`。 | 2026-09-02 |
 | `QUEEN-MINION-FATAL-0252-MINIMAL` | 通过（女王随从 Fatal 最小夹具、DOP4） | 狂宴首动作击杀 1 HP 火炬头随从后最大生命保持 `80`，不触发 Fatal。runId `f80ec3725924407a8603741a1e5d78ce`。 | 2026-09-02 |
+| `MONSTER-INITIAL-ROLL-ISOLATION-0252` | 通过（Fork 边界、DOP4） | 搜索从分支快照解析怪物初始行动，不再进入实机 `RollMove` 及外部预测补丁；Search/Prediction 结构检查无残留调用。runId `78f1a80afe664d1cbc97a80b70e131ed`。 | 2026-09-02 |
 
 ## 0.25.1（已发布）
 

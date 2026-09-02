@@ -2259,11 +2259,9 @@ internal sealed partial class SimulatedCombatState
             ?? throw new InvalidOperationException("Only monsters can be prepared through the predicted monster path.");
         if (CurrentSide == CombatSide.Player)
         {
-            MoveState initial = monster.MoveStateMachine!.RollMove(
-                PlayerCreatures,
-                creature,
-                simulator.Rng.MonsterAi);
-            RegisterMonsterAi(creature, initial);
+            RegisterPendingInitialMonsterAi(creature);
+            BranchMonsterAiState pending = GetMonsterAiState(creature);
+            (_monsterAiStates ??= [])[creature] = BranchMonsterAi.RollInitial(pending, simulator, this);
         }
         else
         {
