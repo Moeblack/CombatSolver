@@ -16,5 +16,20 @@
     ],
     "triggerAutoPrePlayAfterPlayerSetup": true,
     "autoPrePlayChoiceCardIds": ["__FIRST__"]
+  },
+  {
+    "monsterId": "FuzzyWurmCrawler",
+    "moveId": "INHALE",
+    "enemyHpBefore": 999,
+    "clearAllPowersBeforeMove": true,
+    "clearPlayerPilesBeforeMove": true,
+    "powersBeforeMove": [
+      { "powerId": "MAYHEM_POWER", "amount": 1, "target": "Player" }
+    ],
+    "cardsBeforeMove": [
+      { "cardId": "SCAVENGE", "pile": "Draw" }
+    ],
+    "triggerAutoPrePlayAfterPlayerSetup": true,
+    "autoPrePlayChoiceCardIds": ["__FIRST__"]
   }
 ]

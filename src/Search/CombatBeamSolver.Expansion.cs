@@ -1175,7 +1175,8 @@ internal sealed partial class CombatBeamSolver
                 {
                     TurnStartChoices = next,
                 };
-                SimulationSnapshot resolvedSnapshot = ReplayAction(node, resolvedAction);
+                if (!TryReplayChoiceBranch(node, resolvedAction, out SimulationSnapshot resolvedSnapshot))
+                    continue;
                 foreach ((PlanAction finalAction, SimulationSnapshot finalSnapshot) in
                          ResolveRoundChoiceBranches(
                              node,
@@ -1237,21 +1238,8 @@ internal sealed partial class CombatBeamSolver
                                 ? action.NestedChoicesBeforePrimary + 1
                                 : action.NestedChoicesBeforePrimary,
                         };
-                SimulationSnapshot resolvedSnapshot;
-                try
-                {
-                    resolvedSnapshot = ReplayAction(node, resolvedAction);
-                }
-                catch (InvalidPlannedChoiceBranchException ex)
-                {
-                    if (_detailedDiagnostics)
-                    {
-                        policy.Diagnostics.Debug(
-                            $"[CombatSolver/Test] CHOICE_REPLAY_PRUNED action={PolicyActionToken(resolvedAction)} " +
-                            $"reason={ex.Message}");
-                    }
+                if (!TryReplayChoiceBranch(node, resolvedAction, out SimulationSnapshot resolvedSnapshot))
                     continue;
-                }
                 foreach ((PlanAction finalAction, SimulationSnapshot finalSnapshot) in
                          ResolveRoundChoiceBranches(
                              node,
@@ -1269,6 +1257,29 @@ internal sealed partial class CombatBeamSolver
         }
         throw new InvalidOperationException(
             $"动作 {PolicyActionToken(action)} 产生了未登记的分支选择，不能留下等待原生结算的搜索边界。");
+    }
+
+    private bool TryReplayChoiceBranch(
+        SearchNode node,
+        PlanAction action,
+        out SimulationSnapshot snapshot)
+    {
+        try
+        {
+            snapshot = ReplayAction(node, action);
+            return true;
+        }
+        catch (InvalidPlannedChoiceBranchException ex)
+        {
+            if (_detailedDiagnostics)
+            {
+                policy.Diagnostics.Debug(
+                    $"[CombatSolver/Test] CHOICE_REPLAY_PRUNED action={PolicyActionToken(action)} " +
+                    $"reason={ex.Message}");
+            }
+            snapshot = null!;
+            return false;
+        }
     }
 
     private IReadOnlyList<(IReadOnlyList<PlanCardChoice> Choices, SimulationSnapshot Snapshot)>
