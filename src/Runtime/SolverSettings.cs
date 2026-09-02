@@ -90,6 +90,8 @@ internal sealed record SolverSettingsData
     public double? DeploymentInterActionDelaySeconds { get; init; }
     public float? OverlayPositionX { get; init; }
     public float? OverlayPositionY { get; init; }
+    public float? OverlayWidth { get; init; }
+    public float? OverlayHeight { get; init; }
     public string? ReporterContactQq { get; init; }
     public SolverOverlayTheme OverlayTheme { get; init; } = SolverOverlayTheme.Dark;
     public float OverlayOpacity { get; init; } = 1f;
@@ -114,6 +116,9 @@ internal static class SolverSettings
 {
     public const double DefaultNoGcRegionBudgetGigabytes = 16d;
     public const double MaximumNoGcRegionBudgetGigabytes = 256d;
+    public const float MinimumOverlayWidth = 400f;
+    public const float MinimumOverlayHeight = 300f;
+    public const float MaximumOverlaySize = 100_000f;
     internal const int CurrentPerformanceMigrationVersion = 243;
     private static readonly SolverPerformanceValues LowPerformance = new(
         new SolverSearchProfile(
@@ -414,6 +419,26 @@ internal static class SolverSettings
             OverlayPositionY = position.Y,
         });
 
+    public static Vector2? OverlaySize
+    {
+        get
+        {
+            SolverSettingsData data = Current;
+            return data.OverlayWidth is { } width && data.OverlayHeight is { } height
+                ? new Vector2(width, height)
+                : null;
+        }
+    }
+
+    public static void SetOverlayBounds(Vector2 position, Vector2 size)
+        => Update(Current with
+        {
+            OverlayPositionX = position.X,
+            OverlayPositionY = position.Y,
+            OverlayWidth = size.X,
+            OverlayHeight = size.Y,
+        });
+
     public static string FormatSeconds(double value)
         => value.ToString("0.###", CultureInfo.InvariantCulture);
 
@@ -495,6 +520,18 @@ internal static class SolverSettings
             throw new InvalidDataException("OverlayPositionX and OverlayPositionY must both be set or both be null.");
         ValidateRange(data.OverlayPositionX, -100_000f, 100_000f, nameof(data.OverlayPositionX));
         ValidateRange(data.OverlayPositionY, -100_000f, 100_000f, nameof(data.OverlayPositionY));
+        if (data.OverlayWidth.HasValue != data.OverlayHeight.HasValue)
+            throw new InvalidDataException("OverlayWidth and OverlayHeight must both be set or both be null.");
+        ValidateRange(
+            data.OverlayWidth,
+            MinimumOverlayWidth,
+            MaximumOverlaySize,
+            nameof(data.OverlayWidth));
+        ValidateRange(
+            data.OverlayHeight,
+            MinimumOverlayHeight,
+            MaximumOverlaySize,
+            nameof(data.OverlayHeight));
         if (!Enum.IsDefined(data.OverlayTheme))
             throw new InvalidDataException($"Unknown overlay theme {data.OverlayTheme}.");
         ValidateRange(data.OverlayOpacity, 0.25f, 1f, nameof(data.OverlayOpacity));

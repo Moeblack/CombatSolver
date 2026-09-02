@@ -166,7 +166,8 @@ internal sealed partial class UnattendedTestRunner
         {
             throw new InvalidOperationException("药水补查开始后搜索进度条倒退。");
         }
-        if (SolverOverlay.ExecuteButtonTextForTesting != "停止计算")
+        if (SolverController.IsSearching
+            && SolverOverlay.ExecuteButtonTextForTesting != "停止计算")
             throw new InvalidOperationException("搜索期间执行按钮没有切换为停止计算。");
         if (!SolverOverlay.MessageWrappingEnabledForTesting)
             throw new InvalidOperationException("求解器消息区域没有启用自动换行。");
@@ -178,6 +179,11 @@ internal sealed partial class UnattendedTestRunner
             || SolverOverlay.ActiveThemeForTesting != SolverSettings.Current.OverlayTheme)
         {
             throw new InvalidOperationException("界面主题或覆盖层透明度没有按持久化设置加载。");
+        }
+        if (!SolverOverlay.ResizeUiConfiguredForTesting
+            || !SolverOverlay.ExerciseOverlayResizePersistenceForTesting())
+        {
+            throw new InvalidOperationException("覆盖层拖拽缩放、尺寸持久化或展开恢复没有正确建立。");
         }
         if (!SolverOverlay.SettingsTabsConfiguredForTesting
             || !SolverOverlay.ExerciseSettingsTabSwitchingForTesting())

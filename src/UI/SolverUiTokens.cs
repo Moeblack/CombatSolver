@@ -88,6 +88,8 @@ internal static class SolverUiTokens
         public const float TurnColumnWidth = 88f;
         public const float OutcomeColumnWidth = 146f;
         public const float ButtonHeight = 34f;
+        public const float ResizeEdgeThickness = 8f;
+        public const int ResizeGripSize = 20;
     }
 
     public static class Palette
@@ -343,6 +345,24 @@ internal static class SolverUiTokens
             {
                 if (x >= half - 1 - y && x <= half + y)
                     image.SetPixel(x, y, color);
+            }
+        }
+        return ImageTexture.CreateFromImage(image);
+    }
+
+    public static Texture2D CreateResizeGripTexture(Color color)
+    {
+        const int size = Size.ResizeGripSize;
+        Image image = Image.CreateEmpty(size, size, false, Image.Format.Rgba8);
+        foreach (int length in new[] { 4, 8, 12 })
+        {
+            for (int index = 0; index < length; index++)
+            {
+                int x = size - 3 - index;
+                int y = size - 3 - (length - 1 - index);
+                image.SetPixel(x, y, color);
+                if (x > 0)
+                    image.SetPixel(x - 1, y, color);
             }
         }
         return ImageTexture.CreateFromImage(image);

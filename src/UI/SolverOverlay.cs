@@ -7,6 +7,13 @@ namespace CombatSolver;
 
 internal static class SolverOverlay
 {
+    private enum ResizeEdge
+    {
+        Right,
+        Bottom,
+        BottomRight,
+    }
+
     private const string LayerName = "CombatSolverOverlay";
     private static Color Background => SolverUiTokens.Palette.Background;
     private static Color Surface => SolverUiTokens.Palette.Surface;
@@ -51,6 +58,9 @@ internal static class SolverOverlay
     private static Button? _performanceHintButton;
     private static Control? _headerPotionSpacer;
     private static SolverPotionStrategyPanel? _potionStrategyPanel;
+    private static Control? _rightResizeHandle;
+    private static Control? _bottomResizeHandle;
+    private static Control? _cornerResizeHandle;
     private static PanelContainer? _feedbackBanner;
     private static Label? _feedbackBannerLabel;
     private static HBoxContainer? _theftPolicyControls;
@@ -62,6 +72,7 @@ internal static class SolverOverlay
     private static bool _deployQueued;
     private static bool _detailsVisible;
     private static bool _dragging;
+    private static bool _resizing;
     private static bool _layoutQueued;
     private static bool? _renderedFullAutoStyle;
     private static SolverButtonStyle? _renderedExecuteButtonStyle;
@@ -75,6 +86,10 @@ internal static class SolverOverlay
     private static bool _themeRefreshQueued;
     private static int _remainingLayoutPasses;
     private static Vector2 _dragOffset;
+    private static ResizeEdge _activeResizeEdge = ResizeEdge.BottomRight;
+    private static Vector2 _resizeStartMousePosition;
+    private static Vector2 _resizeStartPrimarySize;
+    private static Vector2? _customPanelSize;
     private static Vector2 _panelPosition = new(SolverUiTokens.Size.PanelMargin, SolverUiTokens.Size.PanelMargin);
 
     public static bool IsVisible
@@ -111,6 +126,12 @@ internal static class SolverOverlay
         => _settingsPanel?.NoGcControlsConfiguredForTesting == true;
     internal static bool VisualSettingsConfiguredForTesting
         => _settingsPanel?.VisualSettingsConfiguredForTesting == true;
+    internal static bool ResizeUiConfiguredForTesting
+        => _rightResizeHandle != null
+            && _bottomResizeHandle != null
+            && _cornerResizeHandle is TextureRect { Texture: not null }
+            && _body?.SizeFlagsVertical == Control.SizeFlags.ExpandFill
+            && _routeScroll?.SizeFlagsVertical == Control.SizeFlags.ExpandFill;
     internal static bool PotionStrategyUiConfiguredForTesting
         => _potionStrategyButton != null
             && _potionStrategyPanel is
@@ -185,6 +206,93 @@ internal static class SolverOverlay
         => _settingsPanel?.ExerciseSearchCompletionNotificationPolicyForTesting() == true;
     internal static bool ExerciseVisualSettingsForTesting()
         => _settingsPanel?.ExerciseVisualSettingsForTesting() == true;
+
+    internal static bool ExerciseOverlayResizePersistenceForTesting()
+    {
+        if (_panel == null || _viewport == null)
+            return false;
+        SolverSettingsData originalSettings = SolverSettings.Current;
+        Vector2 originalPosition = _panelPosition;
+        Vector2? originalCustomSize = _customPanelSize;
+        bool originalCollapsed = _collapsed;
+        bool originalSettingsVisible = _settingsVisible;
+        bool originalPotionStrategyVisible = _potionStrategyVisible;
+        try
+        {
+            Vector2 viewportSize = _viewport.GetVisibleRect().Size;
+            Vector2 testPosition = new(
+                SolverUiTokens.Size.PanelMargin,
+                SolverUiTokens.Size.PanelMargin);
+            Vector2 testSize = new(
+                SolverSettings.MinimumOverlayWidth + 80f,
+                SolverSettings.MinimumOverlayHeight + 60f);
+            if (viewportSize.X < testPosition.X + testSize.X + SolverUiTokens.Size.ResizeEdgeThickness
+                || viewportSize.Y < testPosition.Y + testSize.Y + SolverUiTokens.Size.ResizeEdgeThickness)
+            {
+                return false;
+            }
+
+            SolverSettingsData persisted = SolverSettings.RoundTripForTesting(originalSettings with
+            {
+                OverlayPositionX = testPosition.X,
+                OverlayPositionY = testPosition.Y,
+                OverlayWidth = testSize.X,
+                OverlayHeight = testSize.Y,
+            });
+            SolverSettings.ApplyForTesting(persisted);
+            _panelPosition = SolverSettings.OverlayPosition
+                ?? throw new InvalidOperationException("Round-tripped overlay position was not restored.");
+            _customPanelSize = SolverSettings.OverlaySize
+                ?? throw new InvalidOperationException("Round-tripped overlay size was not restored.");
+            _settingsVisible = false;
+            _potionStrategyVisible = false;
+            SetCollapsed(false);
+            bool expanded = IsNear(_panel.Size, testSize) && _cornerResizeHandle?.Visible == true;
+
+            SetCollapsed(true);
+            bool collapsed = Math.Abs(_panel.Size.X - testSize.X) < 0.5f
+                && Math.Abs(_panel.Size.Y - SolverUiTokens.Size.CollapsedHeight) < 0.5f
+                && _cornerResizeHandle?.Visible == false;
+
+            SetCollapsed(false);
+            bool restored = IsNear(_panel.Size, testSize);
+            Vector2 calculationLimit = testSize + new Vector2(200f, 200f);
+            bool directionsCorrect = IsNear(
+                    ResizePanelSize(ResizeEdge.Right, testSize, new Vector2(40f, 30f), calculationLimit),
+                    testSize + new Vector2(40f, 0f))
+                && IsNear(
+                    ResizePanelSize(ResizeEdge.Bottom, testSize, new Vector2(40f, 30f), calculationLimit),
+                    testSize + new Vector2(0f, 30f))
+                && IsNear(
+                    ResizePanelSize(ResizeEdge.BottomRight, testSize, new Vector2(40f, 30f), calculationLimit),
+                    testSize + new Vector2(40f, 30f));
+            _potionStrategyVisible = true;
+            ApplyContentVisibility();
+            ApplyResponsiveLayout();
+            float expectedSidebarWidth = testSize.X
+                + SolverPotionStrategyPanel.PreferredWidth
+                + SolverUiTokens.Spacing.Md;
+            bool sidebarKeptPrimaryWidth = Math.Abs(_panel.Size.X - expectedSidebarWidth) < 0.5f
+                && _customPanelSize == testSize
+                && SolverSettings.OverlaySize == testSize;
+            return expanded && collapsed && restored && directionsCorrect && sidebarKeptPrimaryWidth;
+        }
+        finally
+        {
+            SolverSettings.ApplyForTesting(originalSettings);
+            _panelPosition = originalPosition;
+            _customPanelSize = originalCustomSize;
+            _settingsVisible = originalSettingsVisible;
+            _potionStrategyVisible = originalPotionStrategyVisible;
+            SetCollapsed(originalCollapsed);
+            ApplyContentVisibility();
+            ApplyResponsiveLayout();
+        }
+    }
+
+    private static bool IsNear(Vector2 left, Vector2 right)
+        => Math.Abs(left.X - right.X) < 0.5f
+            && Math.Abs(left.Y - right.Y) < 0.5f;
 
     public static void Show(Node host, string text)
     {
@@ -705,6 +813,10 @@ internal static class SolverOverlay
         _layer = null;
         _panel = null;
         _viewport = null;
+        _rightResizeHandle = null;
+        _bottomResizeHandle = null;
+        _cornerResizeHandle = null;
+        _resizing = false;
         _layoutQueued = false;
         _remainingLayoutPasses = 0;
         _renderedFullAutoStyle = null;
@@ -783,6 +895,7 @@ internal static class SolverOverlay
         {
             Name = "Layout",
             MouseFilter = Control.MouseFilterEnum.Pass,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
         root.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
         panel.AddChild(root);
@@ -795,6 +908,7 @@ internal static class SolverOverlay
             Name = "ContentColumns",
             MouseFilter = Control.MouseFilterEnum.Pass,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
         contentColumns.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Md);
         root.AddChild(contentColumns);
@@ -804,6 +918,7 @@ internal static class SolverOverlay
             Name = "PrimaryColumn",
             MouseFilter = Control.MouseFilterEnum.Pass,
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
         primaryColumn.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
         contentColumns.AddChild(primaryColumn);
@@ -814,6 +929,7 @@ internal static class SolverOverlay
         {
             Name = "ContentAndActions",
             MouseFilter = Control.MouseFilterEnum.Pass,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
         lowerStack.AddThemeConstantOverride("separation", 0);
         primaryColumn.AddChild(lowerStack);
@@ -822,6 +938,7 @@ internal static class SolverOverlay
         _settingsPanel = new SolverSettingsPanel
         {
             Visible = false,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
         };
         _settingsPanel.ResetPositionRequested += ResetOverlayPosition;
         primaryColumn.AddChild(_settingsPanel);
@@ -833,7 +950,7 @@ internal static class SolverOverlay
         _body = new VBoxContainer
         {
             Name = "Body",
-            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
             MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _body.AddThemeConstantOverride("separation", SolverUiTokens.Spacing.Sm);
@@ -888,7 +1005,7 @@ internal static class SolverOverlay
             Name = "RouteScroll",
             CustomMinimumSize = new Vector2(0, SolverUiTokens.Size.RouteViewportHeight),
             SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
-            SizeFlagsVertical = Control.SizeFlags.ShrinkBegin,
+            SizeFlagsVertical = Control.SizeFlags.ExpandFill,
             HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
             VerticalScrollMode = ScrollContainer.ScrollMode.Auto,
             MouseFilter = Control.MouseFilterEnum.Pass,
@@ -916,6 +1033,12 @@ internal static class SolverOverlay
         lowerStack.AddChild(footerArea);
 
         layer.AddChild(panel);
+        _rightResizeHandle = CreateResizeHandle("RightResizeHandle", ResizeEdge.Right);
+        _bottomResizeHandle = CreateResizeHandle("BottomResizeHandle", ResizeEdge.Bottom);
+        _cornerResizeHandle = CreateResizeHandle("CornerResizeHandle", ResizeEdge.BottomRight);
+        layer.AddChild(_rightResizeHandle);
+        layer.AddChild(_bottomResizeHandle);
+        layer.AddChild(_cornerResizeHandle);
         host.AddChild(layer);
         _layer = layer;
         _panel = panel;
@@ -927,14 +1050,19 @@ internal static class SolverOverlay
         panel.MinimumSizeChanged += QueueResponsiveLayout;
         _panelPosition = SolverSettings.OverlayPosition
             ?? new Vector2(SolverUiTokens.Size.PanelMargin, SolverUiTokens.Size.PanelMargin);
+        _customPanelSize = SolverSettings.OverlaySize;
         Entry.Logger.Info(
             $"[CombatSolver/Test] UI_POSITION_LOADED persisted={SolverSettings.OverlayPosition.HasValue} " +
-            $"x={_panelPosition.X:F1} y={_panelPosition.Y:F1}");
+            $"x={_panelPosition.X:F1} y={_panelPosition.Y:F1} " +
+            $"size_persisted={_customPanelSize.HasValue} " +
+            $"w={_customPanelSize?.X.ToString("F1") ?? "-"} " +
+            $"h={_customPanelSize?.Y.ToString("F1") ?? "-"}");
         _dragging = false;
+        _resizing = false;
         _settingsVisible = false;
         _potionStrategyVisible = false;
         SetCollapsed(false);
-        Entry.Logger.Info("[CombatSolver/Test] UI_CREATE responsive=true content_fit_height=true minimum_size_reflow=true draggable=true drag_coordinates=viewport drag_relayout=release_only max_width=820 max_height=440 route_row_height=44 route_viewport_height=148 visible_unwrapped_route_rows=3 cached_route_rows=16 all_searched_turns=true route_scroll=true persistent_status_card=true compact_title=true compact_footer=true collapsed_action_buttons=true footer_pause_toggles=false settings_pause_toggles=true footer_top_margin=8 details_in_status_row=true battle_hp_in_route_heading=true sold_hp_summary=false three_column_routes=true semantic_action_pills=true full_target_names=true whole_pill_kill_highlight=true text_outline_px=2 wrapped_summary=true summary_bold_metric=true flat_collapse=true plain_details_button=true full_auto_positive_toggle=true no_middle_dot=true status_badge=true plain_action_buttons=true always_show_energy=true plain_route_heading=true settings_button=true settings_persisted=true settings_tabs=general+performance+feedback performance_advanced=collapsed notification_policy=three_state performance_presets=low+medium+high+very_high+custom kill_pill=green_with_target_names status_badge=content_width deployment_speed_settings=true search_status=fixed_columns_seconds only_death_marker=true relic_action_labels=true position_persisted=true theft_policy_buttons=contextual stop_search_button=true");
+        Entry.Logger.Info("[CombatSolver/Test] UI_CREATE responsive=true content_fit_height=true minimum_size_reflow=true draggable=true drag_coordinates=viewport drag_relayout=release_only resizable=right+bottom+corner resize_grip=three_diagonal_lines size_persisted=true route_scroll_expand=true max_width=viewport max_height=viewport route_row_height=44 route_viewport_height=148 visible_unwrapped_route_rows=3 cached_route_rows=16 all_searched_turns=true route_scroll=true persistent_status_card=true compact_title=true compact_footer=true collapsed_action_buttons=true footer_pause_toggles=false settings_pause_toggles=true footer_top_margin=8 details_in_status_row=true battle_hp_in_route_heading=true sold_hp_summary=false three_column_routes=true semantic_action_pills=true full_target_names=true whole_pill_kill_highlight=true text_outline_px=2 wrapped_summary=true summary_bold_metric=true flat_collapse=true plain_details_button=true full_auto_positive_toggle=true no_middle_dot=true status_badge=true plain_action_buttons=true always_show_energy=true plain_route_heading=true settings_button=true settings_persisted=true settings_tabs=general+performance+feedback performance_advanced=collapsed notification_policy=three_state performance_presets=low+medium+high+very_high+custom kill_pill=green_with_target_names status_badge=content_width deployment_speed_settings=true search_status=fixed_columns_seconds only_death_marker=true relic_action_labels=true position_persisted=true theft_policy_buttons=contextual stop_search_button=true");
         Entry.Logger.Info("[CombatSolver/Test] UI_FEEDBACK_BANNER position=full_width manual_improvement=green unexpected_replan=red export_prompt=full_bug_report");
     }
 
@@ -1024,6 +1152,29 @@ internal static class SolverOverlay
         };
         header.AddChild(_headerPotionSpacer);
         return header;
+    }
+
+    private static Control CreateResizeHandle(string name, ResizeEdge edge)
+    {
+        Control handle = edge == ResizeEdge.BottomRight
+            ? new TextureRect
+            {
+                Texture = SolverUiTokens.CreateResizeGripTexture(
+                    new Color(SolverUiTokens.Palette.TextMuted, 0.88f)),
+                StretchMode = TextureRect.StretchModeEnum.KeepCentered,
+            }
+            : new Control();
+        handle.Name = name;
+        handle.MouseFilter = Control.MouseFilterEnum.Stop;
+        handle.ZIndex = 1;
+        handle.MouseDefaultCursorShape = edge switch
+        {
+            ResizeEdge.Right => Control.CursorShape.Hsize,
+            ResizeEdge.Bottom => Control.CursorShape.Vsize,
+            _ => Control.CursorShape.Fdiagsize,
+        };
+        handle.GuiInput += inputEvent => OnResizeHandleGuiInput(inputEvent, edge);
+        return handle;
     }
 
     private static Control CreateFeedbackBanner()
@@ -1562,25 +1713,37 @@ internal static class SolverOverlay
         }
 
         Vector2 viewportSize = _viewport.GetVisibleRect().Size;
-        float availableWidth = Math.Max(360f, viewportSize.X - SolverUiTokens.Size.PanelMargin * 2f);
-        float availableHeight = Math.Max(SolverUiTokens.Size.CollapsedHeight, viewportSize.Y - SolverUiTokens.Size.PanelMargin * 2f);
-        float primaryWidth = Math.Min(
+        float edge = SolverUiTokens.Size.ResizeEdgeThickness;
+        float availableWidth = Math.Max(0f, viewportSize.X - edge * 2f);
+        float availableHeight = Math.Max(0f, viewportSize.Y - edge * 2f);
+        float potionSidebarWidth = CurrentPotionSidebarWidth();
+        float defaultPrimaryWidth = Math.Min(
             SolverUiTokens.Size.ExpandedMaxWidth,
             Math.Max(SolverUiTokens.Size.ExpandedMinWidth, viewportSize.X * 0.58f));
-        float potionSidebarWidth = _potionStrategyVisible
-            ? SolverPotionStrategyPanel.PreferredWidth + SolverUiTokens.Spacing.Md
-            : 0f;
+        float primaryWidth = _customPanelSize?.X ?? defaultPrimaryWidth;
         float width = _collapsed
-            ? Math.Min(SolverUiTokens.Size.CollapsedWidth, availableWidth)
+            ? _customPanelSize?.X ?? SolverUiTokens.Size.CollapsedWidth
             : primaryWidth + potionSidebarWidth;
         width = Math.Min(width, availableWidth);
-        float desiredHeight = _collapsed
-            ? SolverUiTokens.Size.CollapsedHeight
-            : _panel.GetCombinedMinimumSize().Y;
-        float maximumHeight = _settingsVisible || _potionStrategyVisible
-            ? 540f
-            : SolverUiTokens.Size.ExpandedMaxHeight;
-        float height = Math.Min(desiredHeight, Math.Min(maximumHeight, availableHeight));
+
+        float height;
+        if (_collapsed)
+        {
+            height = Math.Min(SolverUiTokens.Size.CollapsedHeight, availableHeight);
+        }
+        else if (_customPanelSize is { } customSize)
+        {
+            height = Math.Min(customSize.Y, availableHeight);
+        }
+        else
+        {
+            float maximumHeight = _settingsVisible || _potionStrategyVisible
+                ? 540f
+                : SolverUiTokens.Size.ExpandedMaxHeight;
+            height = Math.Min(
+                _panel.GetCombinedMinimumSize().Y,
+                Math.Min(maximumHeight, availableHeight));
+        }
 
         ApplyPanelBounds(viewportSize, width, height);
     }
@@ -1589,7 +1752,9 @@ internal static class SolverOverlay
     {
         if (_panel == null)
             return;
-        const float edge = 8f;
+        float edge = SolverUiTokens.Size.ResizeEdgeThickness;
+        width = Math.Min(width, Math.Max(0f, viewportSize.X - edge * 2f));
+        height = Math.Min(height, Math.Max(0f, viewportSize.Y - edge * 2f));
         float maxX = Math.Max(edge, viewportSize.X - width - edge);
         float maxY = Math.Max(edge, viewportSize.Y - height - edge);
         _panelPosition = new Vector2(
@@ -1599,6 +1764,58 @@ internal static class SolverOverlay
         _panel.OffsetTop = _panelPosition.Y;
         _panel.OffsetRight = _panelPosition.X + width;
         _panel.OffsetBottom = _panelPosition.Y + height;
+        ApplyResizeHandleBounds(width, height);
+    }
+
+    private static float CurrentPotionSidebarWidth()
+        => !_collapsed && !_settingsVisible && _potionStrategyVisible
+            ? SolverPotionStrategyPanel.PreferredWidth + SolverUiTokens.Spacing.Md
+            : 0f;
+
+    private static void ApplyResizeHandleBounds(float panelWidth, float panelHeight)
+    {
+        bool visible = !_collapsed;
+        float edge = SolverUiTokens.Size.ResizeEdgeThickness;
+        float grip = SolverUiTokens.Size.ResizeGripSize;
+        float cornerSize = Math.Min(grip, Math.Min(panelWidth, panelHeight));
+        SetResizeHandleBounds(
+            _rightResizeHandle,
+            _panelPosition.X + panelWidth - edge,
+            _panelPosition.Y,
+            edge,
+            Math.Max(0f, panelHeight - grip),
+            visible);
+        SetResizeHandleBounds(
+            _bottomResizeHandle,
+            _panelPosition.X,
+            _panelPosition.Y + panelHeight - edge,
+            Math.Max(0f, panelWidth - grip),
+            edge,
+            visible);
+        SetResizeHandleBounds(
+            _cornerResizeHandle,
+            _panelPosition.X + panelWidth - cornerSize,
+            _panelPosition.Y + panelHeight - cornerSize,
+            cornerSize,
+            cornerSize,
+            visible);
+    }
+
+    private static void SetResizeHandleBounds(
+        Control? handle,
+        float x,
+        float y,
+        float width,
+        float height,
+        bool visible)
+    {
+        if (handle == null)
+            return;
+        handle.Visible = visible;
+        handle.OffsetLeft = x;
+        handle.OffsetTop = y;
+        handle.OffsetRight = x + width;
+        handle.OffsetBottom = y + height;
     }
 
     private static void OnHeaderGuiInput(InputEvent inputEvent)
@@ -1628,9 +1845,80 @@ internal static class SolverOverlay
         ApplyPanelBounds(_viewport.GetVisibleRect().Size, _panel.Size.X, _panel.Size.Y);
     }
 
+    private static void OnResizeHandleGuiInput(InputEvent inputEvent, ResizeEdge edge)
+    {
+        if (_panel == null || _viewport == null || _collapsed)
+            return;
+        if (inputEvent is InputEventMouseButton { ButtonIndex: MouseButton.Left } button)
+        {
+            if (button.Pressed)
+            {
+                _resizing = true;
+                _dragging = false;
+                _activeResizeEdge = edge;
+                _resizeStartMousePosition = _viewport.GetMousePosition();
+                _resizeStartPrimarySize = new Vector2(
+                    Math.Max(
+                        SolverSettings.MinimumOverlayWidth,
+                        _panel.Size.X - CurrentPotionSidebarWidth()),
+                    Math.Max(SolverSettings.MinimumOverlayHeight, _panel.Size.Y));
+                _customPanelSize = _resizeStartPrimarySize;
+            }
+            else if (_resizing)
+            {
+                _resizing = false;
+                ApplyResponsiveLayout();
+                Vector2 customSize = _customPanelSize
+                    ?? throw new InvalidOperationException("Resize completed without a custom panel size.");
+                SolverSettings.SetOverlayBounds(_panelPosition, customSize);
+                Entry.Logger.Info(
+                    $"[CombatSolver/Test] UI_SIZE_SAVED x={_panelPosition.X:F1} y={_panelPosition.Y:F1} " +
+                    $"w={customSize.X:F1} h={customSize.Y:F1}");
+            }
+            return;
+        }
+        if (!_resizing || inputEvent is not InputEventMouseMotion)
+            return;
+
+        Vector2 delta = _viewport.GetMousePosition() - _resizeStartMousePosition;
+        Vector2 viewportSize = _viewport.GetVisibleRect().Size;
+        float edgeMargin = SolverUiTokens.Size.ResizeEdgeThickness;
+        float maximumWidth = Math.Max(
+            SolverSettings.MinimumOverlayWidth,
+            viewportSize.X - _panelPosition.X - edgeMargin - CurrentPotionSidebarWidth());
+        float maximumHeight = Math.Max(
+            SolverSettings.MinimumOverlayHeight,
+            viewportSize.Y - _panelPosition.Y - edgeMargin);
+        _customPanelSize = ResizePanelSize(
+            _activeResizeEdge,
+            _resizeStartPrimarySize,
+            delta,
+            new Vector2(maximumWidth, maximumHeight));
+        ApplyResponsiveLayout();
+    }
+
+    private static Vector2 ResizePanelSize(
+        ResizeEdge edge,
+        Vector2 startSize,
+        Vector2 delta,
+        Vector2 maximumSize)
+    {
+        float width = edge is ResizeEdge.Right or ResizeEdge.BottomRight
+            ? startSize.X + delta.X
+            : startSize.X;
+        float height = edge is ResizeEdge.Bottom or ResizeEdge.BottomRight
+            ? startSize.Y + delta.Y
+            : startSize.Y;
+        return new Vector2(
+            Math.Clamp(width, SolverSettings.MinimumOverlayWidth, maximumSize.X),
+            Math.Clamp(height, SolverSettings.MinimumOverlayHeight, maximumSize.Y));
+    }
+
     private static void ResetOverlayPosition()
     {
         _panelPosition = new Vector2(SolverUiTokens.Size.PanelMargin, SolverUiTokens.Size.PanelMargin);
+        _customPanelSize = null;
+        _resizing = false;
         ApplyResponsiveLayout();
     }
 
