@@ -2261,7 +2261,13 @@ internal sealed partial class SimulatedCombatState
         {
             RegisterPendingInitialMonsterAi(creature);
             BranchMonsterAiState pending = GetMonsterAiState(creature);
-            (_monsterAiStates ??= [])[creature] = BranchMonsterAi.RollInitial(pending, simulator, this);
+            if (pending.NeedsInitialRoll)
+            {
+                (_monsterAiStates ??= [])[creature] = BranchMonsterAi.RollInitial(
+                    pending,
+                    simulator,
+                    this);
+            }
         }
         else
         {

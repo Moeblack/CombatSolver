@@ -95,11 +95,8 @@ internal sealed partial class SimulatedCombatState
         CombatPredictionSimulator simulator,
         IReadOnlyDictionary<Creature, MoveState> performedMoves)
     {
-        foreach (Creature enemy in Enemies)
-        {
-            performedMoves.TryGetValue(enemy, out MoveState? performedMove);
+        foreach ((Creature enemy, MoveState performedMove) in performedMoves)
             PrepareMonsterMoveForNextRound(simulator, enemy, performedMove);
-        }
     }
 
     public void PrepareMonsterMoveForNextRound(
@@ -150,7 +147,8 @@ internal sealed partial class SimulatedCombatState
         MonsterMoveStateMachine machine = monster.MoveStateMachine
             ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有行动状态机。");
         List<string> log = machine.StateLog.Select(state => state.Id).ToList();
-        MoveState initial = machine.StateLog.LastOrDefault() as MoveState
+        MoveState? rolledInitial = machine.StateLog.LastOrDefault() as MoveState;
+        MoveState initial = rolledInitial
             ?? machine.States.Values.OfType<MoveState>().FirstOrDefault()
             ?? throw new InvalidOperationException($"怪物 {monster.Id.Entry} 没有可用行动状态。");
         (_monsterAiStates ??= [])[creature] = new BranchMonsterAiState(
@@ -160,7 +158,7 @@ internal sealed partial class SimulatedCombatState
             log,
             0,
             BranchMonsterStaticSnapshot.Capture(monster),
-            NeedsInitialRoll: true);
+            NeedsInitialRoll: rolledInitial == null);
     }
 
     private BranchMonsterAiState GetMonsterAiState(Creature creature)

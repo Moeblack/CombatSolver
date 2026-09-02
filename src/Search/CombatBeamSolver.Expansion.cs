@@ -1958,6 +1958,7 @@ internal sealed partial class CombatBeamSolver
         {
             simulatedCombat.SetActionChoiceTiming(PlanChoiceTiming.EnemyTurn);
             using SearchMeasurementScope _ = _run.Performance.Measure(SearchMetricPhase.RoundEnemyTurn);
+            Creature[] actingEnemies = simulatedCombat.Enemies.ToArray();
             {
                 using SearchMeasurementScope enemyStart = _run.Performance.Measure(SearchMetricPhase.RoundEnemyStart);
                 simulatedCombat.CurrentSide = CombatSide.Enemy;
@@ -2006,7 +2007,6 @@ internal sealed partial class CombatBeamSolver
             Dictionary<Creature, MoveState> performedMoves;
             {
                 using SearchMeasurementScope enemyMoves = _run.Performance.Measure(SearchMetricPhase.RoundEnemyMoves);
-                Creature[] actingEnemies = simulatedCombat.Enemies.ToArray();
                 performedMoves = new Dictionary<Creature, MoveState>(actingEnemies.Length);
                 foreach (Creature actingEnemy in actingEnemies)
                 {
