@@ -1,4 +1,5 @@
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Orbs;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
 using CombatSolver.Engine.Common;
@@ -10,6 +11,16 @@ namespace CombatSolver.Engine.InCombat.Simulation;
 internal sealed partial class CombatPredictionSimulator
 {
     private const int MaxSimulatedChanneledOrbs = 1000;
+
+    public void AddOrbSlots(Player player, int amount)
+    {
+        if (amount < 0)
+            throw new ArgumentOutOfRangeException(nameof(amount));
+        SimOrbQueue queue = State.GetPlayerCombatState(player).OrbQueue;
+        int added = Math.Min(OrbQueue.maxCapacity - queue.Capacity, amount);
+        if (added > 0)
+            queue.AddCapacity(added);
+    }
 
     // Mirrors OrbModel.TriggerPassive without VFX/SFX, waits, or real model-stack updates.
     internal void TriggerOrbPassive(OrbModel orb, Creature? target)

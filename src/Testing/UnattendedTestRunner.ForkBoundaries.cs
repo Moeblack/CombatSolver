@@ -1,6 +1,7 @@
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Creatures;
+using MegaCrit.Sts2.Core.Entities.Orbs;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Extensions;
 using MegaCrit.Sts2.Core.Localization.DynamicVars;
@@ -148,9 +149,28 @@ internal sealed partial class UnattendedTestRunner
         AssertPendingSpawnCanEnterIllusionRevive(combat);
         AssertPendingRandomBranchSpawnRollsAtTurnBoundary(combat);
         AssertDefeatedEnemyRejectsLatePowerApplication(combat, player);
+        AssertOrbSlotAdditionCapsAtVanillaMaximum(combat, player);
         AssertWhisperingEarringOnlyRunsOnFirstTurn(simulator, simulatedCombat, player);
         AssertPredictionForkContextIdentityIndex();
         AssertForkableListEnumeration();
+    }
+
+    private static void AssertOrbSlotAdditionCapsAtVanillaMaximum(CombatState combat, Player player)
+    {
+        SimulatedCombatState simulatedCombat = new(combat);
+        CombatPredictionSimulator simulator = new(simulatedCombat);
+        SimOrbQueue queue = simulatedCombat.GetPlayerCombatState(player).OrbQueue;
+        if (queue.Capacity >= OrbQueue.maxCapacity)
+            throw new InvalidOperationException("轨道上限测试要求初始容量低于原版上限。");
+
+        queue.AddCapacity(OrbQueue.maxCapacity - queue.Capacity - 1);
+        simulator.AddOrbSlots(player, 2);
+        if (queue.Capacity != OrbQueue.maxCapacity)
+            throw new InvalidOperationException("增加轨道槽位没有遵守原版容量上限。");
+
+        simulator.AddOrbSlots(player, 1);
+        if (queue.Capacity != OrbQueue.maxCapacity)
+            throw new InvalidOperationException("已满的轨道仍然增加了容量。");
     }
 
     private static void AssertRevivingCreatureRejectsNewPowers(CombatState combat, Player player)

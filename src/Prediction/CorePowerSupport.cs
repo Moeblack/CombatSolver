@@ -189,8 +189,7 @@ internal static class CorePowerSupport
                 combat.Apply<ThornsPower>(owner, card.DynamicVars["ThornsPower"].IntValue, owner);
                 break;
             case Capacitor:
-                simulator.State.GetPlayerCombatState(card.Owner).OrbQueue.AddCapacity(
-                    card.DynamicVars.Repeat.IntValue);
+                simulator.AddOrbSlots(card.Owner, card.DynamicVars.Repeat.IntValue);
                 break;
             case Corruption:
                 combat.Apply<CorruptionPower>(owner, card.DynamicVars["Power"].IntValue, owner);

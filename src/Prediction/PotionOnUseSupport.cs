@@ -255,7 +255,7 @@ internal static class PotionOnUseSupport
                 }
                 break;
             case PotionOfCapacity value:
-                simulator.State.GetPlayerCombatState(PlayerTarget()).OrbQueue.AddCapacity(value.DynamicVars.Repeat.IntValue);
+                simulator.AddOrbSlots(PlayerTarget(), value.DynamicVars.Repeat.IntValue);
                 break;
             case PotionOfDoom value when target != null:
                 combat.Apply<DoomPower>(target, value.DynamicVars.Doom.IntValue, owner);

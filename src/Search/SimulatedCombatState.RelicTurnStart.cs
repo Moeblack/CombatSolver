@@ -334,8 +334,7 @@ internal sealed partial class SimulatedCombatState
                         relic.DynamicVars["StartOfTurn"].IntValue);
                     break;
                 case RunicCapacitor when turn <= 1:
-                    simulator.State.GetPlayerCombatState(relic.Owner)
-                        .OrbQueue.AddCapacity(relic.DynamicVars.Repeat.IntValue);
+                    simulator.AddOrbSlots(relic.Owner, relic.DynamicVars.Repeat.IntValue);
                     break;
                 case Sai:
                     simulator.GainBlock(
