@@ -91,11 +91,15 @@ internal sealed partial class CombatBeamSolver
         SolverInterimResult? currentTurnCandidateResult = null;
         SearchNode? currentTurnCandidateNode = null;
         SearchNode? currentTurnPreviewNode = null;
-        SolverRoutePreview? routePreview = null;
+        SolverCurrentTurnPreview? currentTurnPreview = null;
+        IReadOnlyList<PlanAction>? publishedCurrentTurnActions = null;
+        int currentTurnPreviewVersion = 0;
+        SolverSpeculativeRoutePreview? speculativeRoutePreview = null;
         SolverRouteAdoptionSeed? routeAdoptionSeed = null;
         SolverRouteAdoptionSeed? requestedRouteAdoptionSeed = null;
         IReadOnlyList<SearchNode>? interruptedActive = null;
         int routePreviewVersion = 0;
+        long lastRoutePreviewAt = System.Environment.TickCount64 - 100;
         bool adoptionReached = false;
         bool currentTurnAdoptionReached = false;
         int initialHp = root.InitialPlayerHp;
@@ -124,7 +128,8 @@ internal sealed partial class CombatBeamSolver
                 Score: node.Score);
         }
 
-        // 候选节点保留完整动作父链；每个已完成回合的边界节点各自携带 Outcome。
+
+
         IReadOnlyList<SolverFrontierTurn>? BuildFrontierTurns(SearchNode candidate)
         {
             if (candidate.ActionCount == 0)
@@ -155,6 +160,27 @@ internal sealed partial class CombatBeamSolver
             return turns.Count == 0 ? null : turns;
         }
 
+        static bool FrontierTurnsEqual(
+            IReadOnlyList<SolverFrontierTurn>? current,
+            IReadOnlyList<SolverFrontierTurn>? next)
+        {
+            if (ReferenceEquals(current, next))
+                return true;
+            if (current == null || next == null || current.Count != next.Count)
+                return false;
+            for (int i = 0; i < current.Count; i++)
+            {
+                SolverFrontierTurn a = current[i];
+                SolverFrontierTurn b = next[i];
+                if (a.Turn != b.Turn || a.HpLost != b.HpLost || a.EnemyHpLost != b.EnemyHpLost
+                    || a.EnergyLeft != b.EnergyLeft || a.CombatEnded != b.CombatEnded
+                    || !a.Actions.SequenceEqual(b.Actions))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         SearchNode? FindCurrentTurnBoundary(SearchNode node)
         {
@@ -233,6 +259,45 @@ internal sealed partial class CombatBeamSolver
             currentTurnCandidateNode = boundary;
             currentTurnPreviewNode = node;
         }
+        void RefreshCurrentTurnPreview()
+        {
+            SearchNode? candidate = currentBestNode
+                ?? currentTurnPreviewNode
+                ?? currentTurnCandidateNode;
+            SearchNode? boundary = candidate == null
+                ? null
+                : FindCurrentTurnBoundary(candidate);
+            if (candidate == null || boundary?.Outcome is not { } outcome)
+                return;
+            PlanAction[] actions = candidate.Actions
+                .Where(action => action.Turn == _startTurnNumber)
+                .ToArray();
+            bool combatEnded = boundary.Snapshot.AllEnemiesDead;
+            IReadOnlyList<SolverFrontierTurn>? frontierTurns = BuildFrontierTurns(candidate);
+            if (publishedCurrentTurnActions != null
+                && publishedCurrentTurnActions.SequenceEqual(actions)
+                && currentTurnPreview is { } published
+                && published.HpLost == outcome.HpLost
+                && published.EnemyHpLost == outcome.EnemyHpLost
+                && published.EnergyLeft == outcome.EnergyLeft
+                && published.CombatEnded == combatEnded
+                && FrontierTurnsEqual(published.FrontierTurns, frontierTurns))
+            {
+                return;
+            }
+
+            publishedCurrentTurnActions = actions;
+            currentTurnPreview = new SolverCurrentTurnPreview(
+                ++currentTurnPreviewVersion,
+                _startTurnNumber,
+                actions.Select(WithDisplayNames).ToArray(),
+                outcome.HpLost,
+                outcome.EnemyHpLost,
+                outcome.EnergyLeft,
+                combatEnded,
+                frontierTurns);
+        }
+
 
 
         SolverResult MaterializeSelectedRoute(
@@ -511,51 +576,134 @@ internal sealed partial class CombatBeamSolver
             return result;
         }
 
-        void PublishRoutePreview()
+        SolverSpeculativeRoutePreview BuildRoutePreview(
+            FinalPlanSelection selection,
+            bool onlyDeathRoutesFound,
+            int candidateVersion)
+        {
+            FinalPlanCandidate selected = selection.Candidate;
+            RouteAnnotations annotations = BuildRouteAnnotations(selected.Node);
+            List<SearchNode> path = [];
+            for (SearchNode? node = selected.Node; node?.Parent != null; node = node.Parent)
+                path.Add(node);
+            path.Reverse();
+
+            SolverFrontierTurn[] turns = path
+                .GroupBy(node => node.Action!.Turn)
+                .OrderBy(group => group.Key)
+                .Select(group =>
+                {
+                    SearchNode[] nodes = group.ToArray();
+                    SearchNode first = nodes[0];
+                    SearchNode last = nodes[^1];
+                    int hpLost = annotations.HpLostByTurn.TryGetValue(
+                        group.Key,
+                        out int annotatedHpLost)
+                            ? annotatedHpLost
+                            : Math.Max(
+                                0,
+                                last.Snapshot.CumulativePlayerHpLost
+                                - first.Parent!.Snapshot.CumulativePlayerHpLost);
+                    int enemyHpLost = annotations.EnemyHpLostByTurn.TryGetValue(
+                        group.Key,
+                        out int annotatedEnemyHpLost)
+                            ? annotatedEnemyHpLost
+                            : Math.Max(0, first.Parent!.Snapshot.EnemyHp - last.Snapshot.EnemyHp);
+                    int energyLeft = annotations.EnergyLeftByTurn.TryGetValue(
+                        group.Key,
+                        out int annotatedEnergyLeft)
+                            ? annotatedEnergyLeft
+                            : last.Snapshot.Energy;
+                    return new SolverFrontierTurn(
+                        group.Key,
+                        nodes.Select(node => WithDisplayNames(node.Action!)).ToArray(),
+                        hpLost,
+                        enemyHpLost,
+                        energyLeft,
+                        annotations.CombatEndedTurn == group.Key);
+                })
+                .ToArray();
+            return new SolverSpeculativeRoutePreview(
+                candidateVersion,
+                _startTurnNumber,
+                battleDamage.PotionsUsedSoFar + selected.Node.PotionCount,
+                battleDamage.HpLostSoFar + selected.Snapshot.CumulativePlayerHpLost,
+                onlyDeathRoutesFound,
+                selected.Snapshot.HasRisk,
+                turns);
+        }
+
+        void PublishRoutePreview(
+            IReadOnlyList<SearchNode> retained,
+            IReadOnlyList<SearchNode>? additional = null,
+            bool force = false)
         {
             if (progressCallback == null)
                 return;
-            SearchNode? candidate = currentBestNode
-                ?? currentTurnPreviewNode
-                ?? currentTurnCandidateNode;
-            if (candidate == null || BuildFrontierTurns(candidate) is not { Count: > 0 } turns)
+            long now = System.Environment.TickCount64;
+            if (!force && now - lastRoutePreviewAt < 100)
                 return;
-
+            IEnumerable<SearchNode> pool = additional == null
+                ? retained
+                : retained.Concat(additional);
+            List<SearchNode> viable = pool
+                .Where(node => node.ActionCount > 0 && node.Snapshot.HasSimulator)
+                .DistinctBy(node => node.Snapshot)
+                .ToList();
+            if (viable.Count == 0)
+                return;
+            (SearchNode Node, int RetentionRank)[] savedRanks = viable
+                .Select(node => (node, node.RetentionRank))
+                .ToArray();
+            List<SearchNode> candidates;
+            try
+            {
+                candidates = Retention.RankBest(
+                    viable,
+                    _profile.BeamWidth * 4);
+            }
+            finally
+            {
+                foreach ((SearchNode node, int retentionRank) in savedRanks)
+                    node.RetentionRank = retentionRank;
+            }
+            List<(SearchNode Node, SimulationSnapshot Snapshot)> evaluated = candidates
+                .Select(node => (Node: node, Snapshot: node.Snapshot))
+                .ToList();
+            FinalPlanSelection ordering;
+            try
+            {
+                ordering = FinalOrdering.Select(
+                    evaluated,
+                    root.InitialPlayerHp,
+                    emitDiagnostics: false);
+            }
+            catch (PotionPolicyUnsatisfiedException)
+            {
+                return;
+            }
+            bool onlyDeathRoutesFound = evaluated.All(candidate =>
+                candidate.Snapshot.PlayerDead || candidate.Snapshot.ProjectedPlayerHp <= 0);
             int candidateVersion = ++routePreviewVersion;
-            bool onlyDeathRoutesFound = candidate.Snapshot.PlayerDead
-                || candidate.Snapshot.ProjectedPlayerHp <= 0;
-            routePreview = new SolverRoutePreview(
-                candidateVersion,
-                _startTurnNumber,
-                battleDamage.PotionsUsedSoFar + candidate.PotionCount,
-                battleDamage.HpLostSoFar + candidate.Snapshot.CumulativePlayerHpLost,
+            speculativeRoutePreview = BuildRoutePreview(
+                ordering,
                 onlyDeathRoutesFound,
-                candidate.Snapshot.HasRisk,
-                turns);
+                candidateVersion);
             int candidateSearchedTurnLayers = searchedTurnLayers;
-            PlanAction[] adoptionActions = turns
+            PlanAction[] adoptionActions = speculativeRoutePreview.Turns
                 .SelectMany(turn => turn.Actions)
                 .ToArray();
             routeAdoptionSeed = new SolverRouteAdoptionSeed(
                 candidateVersion,
                 adoptionActions,
-                () =>
-                {
-                    SearchNode materialized = candidate.Snapshot.HasSimulator
-                        ? candidate
-                        : RefreshReleasedFallback(candidate);
-                    FinalPlanSelection selection = FinalOrdering.Select(
-                        [(materialized, materialized.Snapshot)],
-                        initialHp,
-                        emitDiagnostics: false);
-                    return MaterializeSelectedRoute(
-                        selection,
-                        onlyDeathRoutesFound,
-                        SolverResultScope.RouteAdoption,
-                        candidateSearchedTurnLayers,
-                        candidateTimeBudgetReached: false,
-                        routeAdoptionActions: adoptionActions);
-                });
+                () => MaterializeSelectedRoute(
+                    ordering,
+                    onlyDeathRoutesFound,
+                    SolverResultScope.RouteAdoption,
+                    candidateSearchedTurnLayers,
+                    candidateTimeBudgetReached: false,
+                    routeAdoptionActions: adoptionActions));
+            lastRoutePreviewAt = System.Environment.TickCount64;
         }
 
         void PublishProgress(
@@ -587,7 +735,8 @@ internal sealed partial class CombatBeamSolver
                 _progressPhaseOverride
                 ?? $"{(checkpointPhase || _profile.Phase == SolverSearchPhase.Short ? "快速搜索" : "深化搜索")}·{phase}",
                 currentBestResult,
-                routePreview,
+                currentTurnPreview,
+                speculativeRoutePreview,
                 routeAdoptionSeed));
         }
 
@@ -1121,6 +1270,7 @@ internal sealed partial class CombatBeamSolver
                 List<SearchNode> prunedPlays = Prune(nextPlays);
                 ReleaseDroppedSnapshots(nextPlays, prunedPlays);
                 active = prunedPlays;
+                PublishRoutePreview(completed, active);
                 if (_detailedDiagnostics && searchedTurnLayers == 0)
                 {
                     policy.Diagnostics.Info(
@@ -1165,7 +1315,8 @@ internal sealed partial class CombatBeamSolver
                 ConsiderCompleteVictory(candidate);
                 ConsiderCurrentTurnCandidate(candidate);
             }
-            PublishRoutePreview();
+            RefreshCurrentTurnPreview();
+            PublishRoutePreview(retainedAfterRound, force: true);
             searchedTurnLayers++;
             if (_detailedDiagnostics)
             {

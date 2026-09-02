@@ -149,9 +149,49 @@ internal sealed record SolverFrontierTurn(
     int HpLost,
     int EnemyHpLost,
     int EnergyLeft,
-    bool CombatEnded);
+    bool CombatEnded)
+{
+    public static IReadOnlyList<SolverFrontierTurn> FromResult(SolverResult result)
+        => result.BestNode.Actions
+            .GroupBy(action => action.Turn)
+            .OrderBy(group => group.Key)
+            .Select(group => new SolverFrontierTurn(
+                group.Key,
+                group.ToArray(),
+                result.HpLostByTurn.GetValueOrDefault(group.Key),
+                result.EnemyHpLostByTurn.GetValueOrDefault(group.Key),
+                result.EnergyLeftByTurn.GetValueOrDefault(group.Key),
+                result.CombatEndedTurn == group.Key))
+            .ToArray();
+}
 
-internal sealed record SolverRoutePreview(
+internal sealed record SolverCurrentTurnPreview(
+    int CandidateVersion,
+    int Turn,
+    IReadOnlyList<PlanAction> Actions,
+    int HpLost,
+    int EnemyHpLost,
+    int EnergyLeft,
+    bool CombatEnded,
+    IReadOnlyList<SolverFrontierTurn>? FrontierTurns = null)
+{
+    public static SolverCurrentTurnPreview FromResult(
+        SolverResult result,
+        int candidateVersion = 0)
+        => new(
+            candidateVersion,
+            result.StartTurnNumber,
+            result.BestNode.Actions
+                .Where(action => action.Turn == result.StartTurnNumber)
+                .ToArray(),
+            result.HpLostByTurn.GetValueOrDefault(result.StartTurnNumber),
+            result.EnemyHpLostByTurn.GetValueOrDefault(result.StartTurnNumber),
+            result.EnergyLeftByTurn.GetValueOrDefault(result.StartTurnNumber),
+            result.CombatEndedTurn == result.StartTurnNumber,
+            SolverFrontierTurn.FromResult(result));
+}
+
+internal sealed record SolverSpeculativeRoutePreview(
     int CandidateVersion,
     int StartTurnNumber,
     int ProjectedBattlePotionCount,
@@ -160,7 +200,9 @@ internal sealed record SolverRoutePreview(
     bool HasRisk,
     IReadOnlyList<SolverFrontierTurn> Turns)
 {
-    public static SolverRoutePreview FromResult(SolverResult result, int candidateVersion = 0)
+    public static SolverSpeculativeRoutePreview FromResult(
+        SolverResult result,
+        int candidateVersion = 0)
         => new(
             candidateVersion,
             result.StartTurnNumber,
@@ -168,17 +210,7 @@ internal sealed record SolverRoutePreview(
             result.ProjectedBattleHpLost,
             result.OnlyDeathRoutesFound,
             result.Snapshot.HasRisk,
-            result.BestNode.Actions
-                .GroupBy(action => action.Turn)
-                .OrderBy(group => group.Key)
-                .Select(group => new SolverFrontierTurn(
-                    group.Key,
-                    group.ToArray(),
-                    result.HpLostByTurn.GetValueOrDefault(group.Key),
-                    result.EnemyHpLostByTurn.GetValueOrDefault(group.Key),
-                    result.EnergyLeftByTurn.GetValueOrDefault(group.Key),
-                    result.CombatEndedTurn == group.Key))
-                .ToArray());
+            SolverFrontierTurn.FromResult(result));
 }
 
 internal sealed record SolverProgress(
@@ -194,5 +226,6 @@ internal sealed record SolverProgress(
     long ElapsedMilliseconds,
     string Phase,
     SolverInterimResult? CurrentBestResult = null,
-    SolverRoutePreview? RoutePreview = null,
+    SolverCurrentTurnPreview? CurrentTurnPreview = null,
+    SolverSpeculativeRoutePreview? SpeculativeRoutePreview = null,
     SolverRouteAdoptionSeed? RouteAdoptionSeed = null);

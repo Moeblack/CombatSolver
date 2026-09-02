@@ -203,10 +203,12 @@ internal static class PlayerTurnSetupCoordinator
         {
             return;
         }
-        SolverOverlaySnapshot? preview = progress.RoutePreview == null
-            ? null
-            : SolverOverlaySnapshot.CaptureRoutePreview(progress.RoutePreview);
-        active.Interaction.RenderedRouteAdoptionSeed = preview == null
+        SolverOverlaySnapshot? preview = progress.SpeculativeRoutePreview is { } speculative
+            ? SolverOverlaySnapshot.CaptureSpeculativeRoute(speculative)
+            : progress.CurrentTurnPreview is { } currentTurn
+                ? SolverOverlaySnapshot.CaptureCurrentTurn(currentTurn)
+                : null;
+        active.Interaction.RenderedRouteAdoptionSeed = progress.SpeculativeRoutePreview == null
             ? null
             : progress.RouteAdoptionSeed;
         SolverOverlay.ShowProgress(
@@ -316,7 +318,7 @@ internal static class PlayerTurnSetupCoordinator
            && active.Interaction.CurrentTakeoverRequest == null
            && active.Interaction.CanAcceptTakeover
            && (active.SearchState == 1 || active.ManualSearchState == 1)
-           && Volatile.Read(ref active.Interaction.Progress)?.RoutePreview != null;
+           && Volatile.Read(ref active.Interaction.Progress)?.CurrentTurnPreview != null;
 
     public static bool IsApplyingCurrentTurn
         => _active?.Interaction.IsApplyingCurrentTurn == true;
