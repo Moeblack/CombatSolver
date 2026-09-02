@@ -110,7 +110,7 @@ internal sealed partial class SimulatedCombatState
 
     public int CountEtherealCardsInHand(CombatPredictionSimulator simulator, Player player)
         => simulator.State.GetPlayerCombatState(player).Hand.Cards.Count(card =>
-            card.Preview.Keywords.Contains(CardKeyword.Ethereal));
+            card.HasKeyword(simulator.State, CardKeyword.Ethereal));
 
     public void NormalizePowerCardState(CombatPredictionSimulator simulator)
     {
