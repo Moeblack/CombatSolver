@@ -658,6 +658,17 @@ internal static class SolverController
     {
         AssertMainThread();
         SolverDispatcher.Ensure(host);
+        int? searchTurn = LocalContext.GetMe(state)?.PlayerCombatState?.TurnNumber;
+        if (_combat.DeployAfterTurnSetupTurn == searchTurn)
+        {
+            deployWhenReady = true;
+            _combat.DeployAfterTurnSetupTurn = null;
+            Entry.Logger.Info("[CombatSolver/Test] DEPLOY_RESUME reason=turn_setup_completed");
+        }
+        else if (_combat.DeployAfterTurnSetupTurn != null)
+        {
+            _combat.DeployAfterTurnSetupTurn = null;
+        }
         Task rootCaptureBarrier = SearchGcPolicy.CaptureRootSnapshotBarrier();
         if (!rootCaptureBarrier.IsCompleted)
         {
@@ -1041,6 +1052,14 @@ internal static class SolverController
                 deployAfterSetup: true))
         {
             Entry.Logger.Info("[CombatSolver/Test] DEPLOY_WAIT reason=turn_setup_choice");
+            return;
+        }
+        Player? turnStartPlayer = LocalContext.GetMe(state);
+        if (state.CurrentSide == CombatSide.Player
+            && turnStartPlayer?.PlayerCombatState?.Phase == PlayerTurnPhase.Start)
+        {
+            _combat.DeployAfterTurnSetupTurn = turnStartPlayer.PlayerCombatState.TurnNumber;
+            Entry.Logger.Info("[CombatSolver/Test] DEPLOY_WAIT reason=turn_setup_pending");
             return;
         }
         if (!CanSolve(state, out string rejection))

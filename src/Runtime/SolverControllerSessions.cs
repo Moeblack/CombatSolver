@@ -36,6 +36,7 @@ internal sealed class SolverCombatSession
     public bool ManualRouteImprovementDetected { get; set; }
     public bool AutomaticSearchPaused { get; set; }
     public bool ManualSearchAfterTurnSetupRequested { get; set; }
+    public int? DeployAfterTurnSetupTurn { get; set; }
     public CombatState? TurnSetupResumeState { get; set; }
     public Dictionary<ReplanCause, int> ReplanCounts { get; } = [];
     public HashSet<SolverResult> ReviewedWorldlineResults { get; } = [];

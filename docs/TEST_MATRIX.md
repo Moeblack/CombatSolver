@@ -21,6 +21,7 @@
 | `QUEEN-MINION-FATAL-0252-MINIMAL` | 通过（女王随从 Fatal 最小夹具、DOP4） | 狂宴首动作击杀 1 HP 火炬头随从后最大生命保持 `80`，不触发 Fatal。runId `f80ec3725924407a8603741a1e5d78ce`。 | 2026-09-02 |
 | `MONSTER-INITIAL-ROLL-ISOLATION-0252` | 通过（Fork 边界、DOP4） | 搜索从分支快照解析怪物初始行动，不再进入实机 `RollMove` 及外部预测补丁；Search/Prediction 结构检查无残留调用。runId `78f1a80afe664d1cbc97a80b70e131ed`。 | 2026-09-02 |
 | `FORCED-POTION-INTERIM-ADOPTION-0252` | 通过（控制器生命周期、DOP4） | 强制用药时，中间展示与采用路线必须已使用指定槽位的指定药水；零药完整胜利线不能提前收束搜索。runId `ce7406b333034a61b75c75ee4a5dac75`。 | 2026-09-02 |
+| `AEONGLASS-TURN-START-DEPLOY-QUEUE-0252` | 结构验证（Release 编译） | 回合准备 `Start` 阶段的执行请求按战斗回合排队，进入 `Play` 后由同回合搜索消费，不再进入普通部署拒绝路径；问题包依赖真人点击时机，未声称自动复现。 | 2026-09-02 |
 
 ## 0.25.1（已发布）
 
